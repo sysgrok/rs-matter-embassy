@@ -28,12 +28,9 @@ use log::info;
 
 use rs_matter_embassy::epoch::epoch;
 use rs_matter_embassy::eth::{EmbassyEthMatterStack, EmbassyEthernet, PreexistingEthDriver};
-use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
 use rs_matter_embassy::matter::dm::clusters::on_off::{self, ClusterHandler as _};
-use rs_matter_embassy::matter::dm::devices::test::{
-    TEST_DEV_ATT, TEST_DEV_COMM, TEST_PID, TEST_VID,
-};
+use rs_matter_embassy::matter::dm::devices::test::{TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET};
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, EpClMatcher, Node};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
@@ -87,20 +84,7 @@ async fn main(_s: Spawner) {
     }
 
     let stack = Box::leak(Box::new_uninit()).init_with(EmbassyEthMatterStack::<()>::init(
-        &BasicInfoConfig {
-            vid: TEST_VID,
-            pid: TEST_PID,
-            hw_ver: 2,
-            hw_ver_str: "2",
-            sw_ver: 1,
-            sw_ver_str: "1",
-            serial_no: "aabbccdd",
-            device_name: "MyLight",
-            product_name: "ACME Light",
-            vendor_name: "ACME",
-            sai: None,
-            sii: None,
-        },
+        &TEST_DEV_DET,
         TEST_DEV_COMM,
         &TEST_DEV_ATT,
         epoch,

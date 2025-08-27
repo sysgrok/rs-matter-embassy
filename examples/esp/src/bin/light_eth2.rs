@@ -207,7 +207,7 @@ async fn main(_s: Spawner) {
 /// Basic info about our device
 /// Both the matter stack as well as our mDNS-to-SRP bridge need this, hence extracted out
 const TEST_BASIC_INFO: BasicInfoConfig = BasicInfoConfig {
-    sai: Some(1000),
+    sai: Some(500),
     ..TEST_DEV_DET
 };
 
