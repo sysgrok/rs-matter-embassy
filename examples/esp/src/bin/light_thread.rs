@@ -2,7 +2,8 @@
 //!
 //! As the name suggests, this Matter stack assembly uses Thread as the main transport,
 //! and thus BLE for commissioning, in non-concurrent commissioning mode
-//! (the IEEE802154 radio and BLE cannot not run at the same time yet with `esp-hal`).
+//! (the IEEE802154 radio and BLE cannot not run at the same time yet with `esp-hal`,
+//! but that would be possible in the next `esp-hal` version).
 //!
 //! If you want to use Ethernet, utilize `EmbassyEthMatterStack` instead.
 //!
@@ -44,6 +45,8 @@ use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
 use tinyrlibc as _;
 
 extern crate alloc;
+
+const BUMP_SIZE: usize = 15500;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -95,16 +98,17 @@ async fn main(_s: Spawner) {
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = &*Box::leak(Box::new_uninit()).init_with(EmbassyThreadMatterStack::<()>::init(
-        &TEST_BASIC_INFO,
-        BasicCommData {
-            password: TEST_DEV_COMM.password,
-            discriminator,
-        },
-        &TEST_DEV_ATT,
-        epoch,
-        esp_rand,
-    ));
+    let stack =
+        &*Box::leak(Box::new_uninit()).init_with(EmbassyThreadMatterStack::<BUMP_SIZE, ()>::init(
+            &TEST_BASIC_INFO,
+            BasicCommData {
+                password: TEST_DEV_COMM.password,
+                discriminator,
+            },
+            &TEST_DEV_ATT,
+            epoch,
+            esp_rand,
+        ));
 
     // == Step 4: ==
     // Our "light" on-off cluster.
@@ -191,7 +195,7 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 const NODE: Node = Node {
     id: 0,
     endpoints: &[
-        EmbassyThreadMatterStack::<()>::root_endpoint(),
+        EmbassyThreadMatterStack::<0, ()>::root_endpoint(),
         Endpoint {
             id: LIGHT_ENDPOINT_ID,
             device_types: devices!(DEV_TYPE_ON_OFF_LIGHT),
@@ -230,9 +234,9 @@ fn init_heap() {
         // The esp32 has two disjoint memory regions for heap
         // Also, it has 64KB reserved for the BT stack in the first region, so we can't use that
 
-        static mut HEAP1: MaybeUninit<[u8; 94 * 1024]> = MaybeUninit::uninit();
+        static mut HEAP1: MaybeUninit<[u8; 40 * 1024]> = MaybeUninit::uninit();
         #[link_section = ".dram2_uninit"]
-        static mut HEAP2: MaybeUninit<[u8; 67 * 1024]> = MaybeUninit::uninit();
+        static mut HEAP2: MaybeUninit<[u8; 96 * 1024]> = MaybeUninit::uninit();
 
         add_region(unsafe { &mut HEAP1 });
         add_region(unsafe { &mut HEAP2 });

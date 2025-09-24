@@ -25,8 +25,8 @@ use super::{BleDriver, BleDriverTask, BleDriverTaskImpl, EmbassyWirelessMatterSt
 ///
 /// The difference between this and the `ThreadMatterStack` is that all resources necessary for the
 /// operation of `openthread` as well as the BLE controller and pre-allocated inside the stack.
-pub type EmbassyThreadMatterStack<'a, E = ()> =
-    EmbassyWirelessMatterStack<'a, Thread, OtNetContext, E>;
+pub type EmbassyThreadMatterStack<'a, const B: usize, E = ()> =
+    EmbassyWirelessMatterStack<'a, B, Thread, OtNetContext, E>;
 
 /// A trait representing a task that needs access to the Thread radio to perform its work
 pub trait ThreadDriverTask {
@@ -175,11 +175,11 @@ where
     S: KvBlobStore,
 {
     /// Create a new instance of the `EmbassyThread` type.
-    pub fn new<E>(
+    pub fn new<const B: usize, E>(
         driver: T,
         ieee_eui64: [u8; 8],
         store: &'a SharedKvBlobStore<'a, S>,
-        stack: &'a EmbassyThreadMatterStack<'a, E>,
+        stack: &'a EmbassyThreadMatterStack<'a, B, E>,
     ) -> Self
     where
         E: Embedding + 'static,

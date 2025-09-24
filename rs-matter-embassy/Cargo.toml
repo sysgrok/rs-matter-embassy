@@ -7,7 +7,7 @@ resolver = "2"
 categories = ["embedded", "hardware-support"]
 keywords = ["matter", "embedded", "embassy"]
 description = "Run rs-matter with embassy"
-repository = "https://github.com/ivmarkov/rs-matter-embassy"
+repository = "https://github.com/sysgrok/rs-matter-embassy"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 rust-version = "1.84"
@@ -15,8 +15,8 @@ rust-version = "1.84"
 [lib]
 harness = false
 
-#[patch.'https://github.com/ivmarkov/rs-matter-stack']
-#rs-matter-stack = { git = "https://github.com/ivmarkov//rs-matter-stack.git" }
+#[patch.'https://github.com/sysgrok/rs-matter-stack']
+#rs-matter-stack = { git = "https://github.com/ivmarkov/rs-matter-stack.git", branch = "next" }
 #rs-matter-stack = { path = "../../rs-matter-stack" }
 #[patch.'https://github.com/esp-rs/openthread']
 #openthread = { git = "https://github.com/esp-rs//openthread.git", branch = "next" }
@@ -24,11 +24,11 @@ harness = false
 
 [patch.crates-io]
 rs-matter = { git = "https://github.com/project-chip/rs-matter" }
-#rs-matter = { git = "https://github.com/ivmarkov/rs-matter", branch = "next" }
+#rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
 #rs-matter = { path = "../../rs-matter/rs-matter" }
-#edge-nal = { git = "https://github.com/ivmarkov/edge-net" }
-#edge-nal-embassy = { git = "https://github.com/ivmarkov/edge-net" }
-#edge-mdns = { git = "https://github.com/ivmarkov/edge-net" }
+#edge-nal = { git = "https://github.com/sysgrok/edge-net" }
+#edge-nal-embassy = { git = "https://github.com/sysgrok/edge-net" }
+#edge-mdns = { git = "https://github.com/sysgrok/edge-net" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "b15c91008f085c8c1f21fdbfc176a60dee4ab9fa" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "b15c91008f085c8c1f21fdbfc176a60dee4ab9fa" }
 #trouble-host = { version = "0.2", git = "https://github.com/embassy-rs/trouble" }
@@ -60,7 +60,7 @@ embassy-sync = "0.7"
 embassy-time = "0.4"
 embedded-io = "0.6"
 scopeguard = { version = "1", default-features = false }
-rs-matter-stack = { git = "https://github.com/ivmarkov/rs-matter-stack", default-features = false, features = ["rustcrypto"] }
+rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack", default-features = false, features = ["rustcrypto"] }
 static_cell = "2"
 
 embedded-storage-async = "0.4.1"

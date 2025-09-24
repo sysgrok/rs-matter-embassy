@@ -42,6 +42,8 @@ use rs_matter_embassy::stack::utils::futures::IntoFaillble;
 
 extern crate alloc;
 
+const BUMP_SIZE: usize = 15500;
+
 const WIFI_SSID: &str = env!("WIFI_SSID");
 const WIFI_PASS: &str = env!("WIFI_PASS");
 
@@ -83,13 +85,14 @@ async fn main(_s: Spawner) {
         esp_hal_embassy::init(timg0.timer1);
     }
 
-    let stack = Box::leak(Box::new_uninit()).init_with(EmbassyEthMatterStack::<()>::init(
-        &TEST_DEV_DET,
-        TEST_DEV_COMM,
-        &TEST_DEV_ATT,
-        epoch,
-        esp_rand,
-    ));
+    let stack =
+        Box::leak(Box::new_uninit()).init_with(EmbassyEthMatterStack::<BUMP_SIZE, ()>::init(
+            &TEST_DEV_DET,
+            TEST_DEV_COMM,
+            &TEST_DEV_ATT,
+            epoch,
+            esp_rand,
+        ));
 
     // Configure and start the Wifi first
     let wifi = peripherals.WIFI;
@@ -203,7 +206,7 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 const NODE: Node = Node {
     id: 0,
     endpoints: &[
-        EmbassyEthMatterStack::<()>::root_endpoint(),
+        EmbassyEthMatterStack::<0, ()>::root_endpoint(),
         Endpoint {
             id: LIGHT_ENDPOINT_ID,
             device_types: devices!(DEV_TYPE_ON_OFF_LIGHT),
@@ -229,7 +232,7 @@ fn init_heap() {
         // The esp32 has two disjoint memory regions for heap
         // Also, it has 64KB reserved for the BT stack in the first region, so we can't use that
 
-        static mut HEAP1: MaybeUninit<[u8; 30 * 1024]> = MaybeUninit::uninit();
+        static mut HEAP1: MaybeUninit<[u8; 40 * 1024]> = MaybeUninit::uninit();
         #[link_section = ".dram2_uninit"]
         static mut HEAP2: MaybeUninit<[u8; 96 * 1024]> = MaybeUninit::uninit();
 

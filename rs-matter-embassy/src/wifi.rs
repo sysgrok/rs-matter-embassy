@@ -127,8 +127,6 @@ pub mod esp {
                 info!("Wifi stopped");
             }
 
-            self.1.lock(|connected| connected.set(false));
-
             ctl.set_configuration(&Configuration::Client(ClientConfiguration {
                 ssid: unwrap!(ssid.try_into()),
                 password: unwrap!(pass.try_into()),
@@ -141,7 +139,11 @@ pub mod esp {
             info!("Wifi started");
 
             ctl.connect_async().await.map_err(to_ctl_err)?;
-            self.1.lock(|connected| connected.set(true));
+
+            self.1.lock(|connected| {
+                info!("Wifi state updated: {} -> {}", connected.get(), true);
+                connected.set(true);
+            });
 
             info!("Wifi connected");
 
@@ -154,10 +156,28 @@ pub mod esp {
         M: RawMutex,
     {
         async fn wait_changed(&self) {
-            {
+            let fetch_connected = || async {
                 let ctl = self.0.lock().await;
-                self.1
-                    .lock(|connected| connected.set(ctl.is_connected().unwrap_or(false)));
+
+                let new_connected = ctl.is_connected().unwrap_or(false);
+                self.1.lock(|connected| {
+                    if connected.get() != new_connected {
+                        warn!(
+                            "Wifi state changed: {} -> {}",
+                            connected.get(),
+                            new_connected
+                        );
+
+                        connected.set(new_connected);
+                        true
+                    } else {
+                        false
+                    }
+                })
+            };
+
+            if fetch_connected().await {
+                return;
             }
 
             embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
@@ -171,12 +191,6 @@ pub mod esp {
             //     let mut ctl = self.0.lock().await;
             //     ctl.wait_for_all_events(enumset::EnumSet::all(), true).await;
             // }
-
-            {
-                let ctl = self.0.lock().await;
-                self.1
-                    .lock(|connected| connected.set(ctl.is_connected().unwrap_or(false)));
-            }
         }
     }
 

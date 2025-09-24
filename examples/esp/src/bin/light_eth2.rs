@@ -47,6 +47,8 @@ use tinyrlibc as _;
 
 extern crate alloc;
 
+const BUMP_SIZE: usize = 15500;
+
 const THREAD_DATASET: &str = env!("THREAD_DATASET");
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -94,7 +96,7 @@ async fn main(_s: Spawner) {
 
     // == Step 2: ==
     // Allocate the Matter stack.
-    let stack = Box::leak(Box::new_uninit()).init_with(EthMatterStack::<()>::init(
+    let stack = Box::leak(Box::new_uninit()).init_with(EthMatterStack::<BUMP_SIZE, ()>::init(
         &TEST_BASIC_INFO,
         BasicCommData {
             password: TEST_DEV_COMM.password,
@@ -219,7 +221,7 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 const NODE: Node = Node {
     id: 0,
     endpoints: &[
-        EthMatterStack::<()>::root_endpoint(),
+        EthMatterStack::<0, ()>::root_endpoint(),
         Endpoint {
             id: LIGHT_ENDPOINT_ID,
             device_types: devices!(DEV_TYPE_ON_OFF_LIGHT),
@@ -245,7 +247,7 @@ fn init_heap() {
         // The esp32 has two disjoint memory regions for heap
         // Also, it has 64KB reserved for the BT stack in the first region, so we can't use that
 
-        static mut HEAP1: MaybeUninit<[u8; 30 * 1024]> = MaybeUninit::uninit();
+        static mut HEAP1: MaybeUninit<[u8; 40 * 1024]> = MaybeUninit::uninit();
         #[link_section = ".dram2_uninit"]
         static mut HEAP2: MaybeUninit<[u8; 96 * 1024]> = MaybeUninit::uninit();
 

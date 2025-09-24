@@ -24,7 +24,7 @@ use crate::stack::MatterStack;
 ///
 /// The difference between this and `EthMatterStack` is that all resources necessary for the
 /// operation of `embassy-net` are pre-allocated inside the stack.
-pub type EmbassyEthMatterStack<'a, E = ()> = MatterStack<'a, EmbassyEth<E>>;
+pub type EmbassyEthMatterStack<'a, const B: usize, E = ()> = MatterStack<'a, B, EmbassyEth<E>>;
 
 /// A type alias for an Embassy implementation of the `Network` trait for a Matter stack running over
 /// Ethernet.
@@ -156,7 +156,7 @@ where
     T: EthernetDriver,
 {
     /// Create a new instance of the `EmbassyEthernet` type.
-    pub fn new<E>(driver: T, stack: &'a EmbassyEthMatterStack<'a, E>) -> Self
+    pub fn new<const B: usize, E>(driver: T, stack: &'a EmbassyEthMatterStack<'a, B, E>) -> Self
     where
         E: Embedding + 'static,
     {

@@ -25,8 +25,8 @@ use super::{BleDriver, BleDriverTask, BleDriverTaskImpl, EmbassyWirelessMatterSt
 ///
 /// The difference between this and the `WifiMatterStack` is that all resources necessary for the
 /// operation of `embassy-net` as well as the BLE controller and pre-allocated inside the stack.
-pub type EmbassyWifiMatterStack<'a, E = ()> =
-    EmbassyWirelessMatterStack<'a, Wifi, EmbassyNetContext, E>;
+pub type EmbassyWifiMatterStack<'a, const B: usize, E = ()> =
+    EmbassyWirelessMatterStack<'a, B, Wifi, EmbassyNetContext, E>;
 
 /// A trait representing a task that needs access to the Wifi driver and controller to perform its work
 pub trait WifiDriverTask {
@@ -177,7 +177,7 @@ pub struct EmbassyWifi<'a, T> {
 
 impl<'a, T> EmbassyWifi<'a, T> {
     /// Create a new instance of the `EmbassyWifi` type.
-    pub fn new<E>(driver: T, stack: &'a EmbassyWifiMatterStack<'a, E>) -> Self
+    pub fn new<const B: usize, E>(driver: T, stack: &'a EmbassyWifiMatterStack<'a, B, E>) -> Self
     where
         E: Embedding + 'static,
     {

@@ -4,7 +4,9 @@
 //! and thus BLE for commissioning.
 //!
 //! If you want to use Ethernet, utilize `EmbassyEthMatterStack` instead.
-//! If you want to use concurrent commissioning, call `run_coex` instead of `run`.
+//! If you want to use non-concurrent commissioning, call `run` instead of `run_coex`
+//! and provision a higher `BUMP_SIZE` because the non-concurrent commissioning currently has a much-higher
+//! memory requirements on the futures' sizes.
 //! (Note: Alexa does not work (yet) with non-concurrent commissioning.)
 //!
 //! The example implements a fictitious Light device (an On-Off Matter cluster).
@@ -42,11 +44,13 @@ use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiMatterStack};
 
 extern crate alloc;
 
+const BUMP_SIZE: usize = 15500;
+
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_hal_embassy::main]
 async fn main(_s: Spawner) {
-    esp_println::logger::init_logger(log::LevelFilter::Info);
+    esp_println::logger::init_logger_from_env();
 
     info!("Starting...");
 
@@ -84,13 +88,14 @@ async fn main(_s: Spawner) {
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = &*Box::leak(Box::new_uninit()).init_with(EmbassyWifiMatterStack::<()>::init(
-        &TEST_DEV_DET,
-        TEST_DEV_COMM,
-        &TEST_DEV_ATT,
-        epoch,
-        esp_rand,
-    ));
+    let stack =
+        &*Box::leak(Box::new_uninit()).init_with(EmbassyWifiMatterStack::<BUMP_SIZE, ()>::init(
+            &TEST_DEV_DET,
+            TEST_DEV_COMM,
+            &TEST_DEV_ATT,
+            epoch,
+            esp_rand,
+        ));
 
     // == Step 3: ==
     // Our "light" on-off cluster.
@@ -121,7 +126,7 @@ async fn main(_s: Spawner) {
     //
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
     let store = stack.create_shared_store(DummyKvBlobStore);
-    let mut matter = pin!(stack.run(
+    let mut matter = pin!(stack.run_coex(
         // The Matter stack needs to instantiate an `embassy-net` `Driver` and `Controller`
         EmbassyWifi::new(
             EspWifiDriver::new(&init, peripherals.WIFI, peripherals.BT),
@@ -168,7 +173,7 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 const NODE: Node = Node {
     id: 0,
     endpoints: &[
-        EmbassyWifiMatterStack::<()>::root_endpoint(),
+        EmbassyWifiMatterStack::<0, ()>::root_endpoint(),
         Endpoint {
             id: LIGHT_ENDPOINT_ID,
             device_types: devices!(DEV_TYPE_ON_OFF_LIGHT),
@@ -194,7 +199,7 @@ fn init_heap() {
         // The esp32 has two disjoint memory regions for heap
         // Also, it has 64KB reserved for the BT stack in the first region, so we can't use that
 
-        static mut HEAP1: MaybeUninit<[u8; 30 * 1024]> = MaybeUninit::uninit();
+        static mut HEAP1: MaybeUninit<[u8; 40 * 1024]> = MaybeUninit::uninit();
         #[link_section = ".dram2_uninit"]
         static mut HEAP2: MaybeUninit<[u8; 96 * 1024]> = MaybeUninit::uninit();
 
