@@ -32,7 +32,6 @@ Everything necessary to run [`rs-matter`](https://github.com/project-chip/rs-mat
 #![no_main]
 #![recursion_limit = "256"]
 
-use core::mem::MaybeUninit;
 use core::pin::pin;
 
 use alloc::boxed::Box;
@@ -41,6 +40,7 @@ use embassy_executor::Spawner;
 use embassy_futures::select::select;
 use embassy_time::{Duration, Timer};
 
+use esp_alloc::heap_allocator;
 use esp_backtrace as _;
 use esp_hal::timer::timg::TimerGroup;
 
@@ -64,55 +64,67 @@ extern crate alloc;
 
 const BUMP_SIZE: usize = 15500;
 
+#[cfg(feature = "esp32")]
+const HEAP_SIZE: usize = 40 * 1024; // 45KB for ESP32, which has a disjoint heap
+#[cfg(any(feature = "esp32c3", feature = "esp32h2"))]
+const HEAP_SIZE: usize = 160 * 1024;
+#[cfg(not(any(feature = "esp32", feature = "esp32c3", feature = "esp32h2")))]
+const HEAP_SIZE: usize = 186 * 1024;
+
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_hal_embassy::main]
 async fn main(_s: Spawner) {
-    esp_println::logger::init_logger_from_env();
+    esp_println::logger::init_logger(log::LevelFilter::Info);
 
     info!("Starting...");
 
     // Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
     // However since `esp32` specifically has a disjoint heap which causes bss size troubles, it is easier
     // to allocate the statics once from heap as well
-    init_heap();
+    heap_allocator!(size: HEAP_SIZE);
+    #[cfg(feature = "esp32")]
+    heap_allocator!(#[link_section = ".dram2_uninit"] size: 96 * 1024);
 
     // == Step 1: ==
     // Necessary `esp-hal` and `esp-wifi` initialization boilerplate
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
-    let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let rng = esp_hal::rng::Rng::new(peripherals.RNG);
-
     // To erase generics, `Matter` takes a rand `fn` rather than a trait or a closure,
     // so we need to initialize the global `rand` fn once
-    esp_init_rand(rng);
+    esp_init_rand(esp_hal::rng::Rng::new());
 
-    let init = esp_wifi::init(timg0.timer0, rng).unwrap();
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+
+    #[cfg(not(any(feature = "esp32", feature = "esp32s3")))]
+    esp_preempt::start(
+        timg0.timer0,
+        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT)
+            .software_interrupt0,
+    );
+    #[cfg(any(feature = "esp32", feature = "esp32s3"))]
+    esp_preempt::start(timg0.timer0);
+
+    let init = esp_radio::init().unwrap();
 
     #[cfg(not(feature = "esp32"))]
-    {
-        esp_hal_embassy::init(
-            esp_hal::timer::systimer::SystemTimer::new(peripherals.SYSTIMER).alarm0,
-        );
-    }
+    esp_hal_embassy::init(esp_hal::timer::systimer::SystemTimer::new(peripherals.SYSTIMER).alarm0);
     #[cfg(feature = "esp32")]
-    {
-        esp_hal_embassy::init(timg0.timer1);
-    }
+    esp_hal_embassy::init(timg0.timer1);
 
     // == Step 2: ==
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = &*Box::leak(Box::new_uninit()).init_with(EmbassyWifiMatterStack::<BUMP_SIZE, ()>::init(
-        &TEST_DEV_DET,
-        TEST_DEV_COMM,
-        &TEST_DEV_ATT,
-        epoch,
-        esp_rand,
-    ));
+    let stack =
+        &*Box::leak(Box::new_uninit()).init_with(EmbassyWifiMatterStack::<BUMP_SIZE, ()>::init(
+            &TEST_DEV_DET,
+            TEST_DEV_COMM,
+            &TEST_DEV_ATT,
+            epoch,
+            esp_rand,
+        ));
 
     // == Step 3: ==
     // Our "light" on-off cluster.
@@ -198,45 +210,6 @@ const NODE: Node = Node {
         },
     ],
 };
-
-#[allow(static_mut_refs)]
-fn init_heap() {
-    fn add_region<const N: usize>(region: &'static mut MaybeUninit<[u8; N]>) {
-        unsafe {
-            esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
-                region.as_mut_ptr() as *mut u8,
-                N,
-                esp_alloc::MemoryCapability::Internal.into(),
-            ));
-        }
-    }
-
-    #[cfg(feature = "esp32")]
-    {
-        // The esp32 has two disjoint memory regions for heap
-        // Also, it has 64KB reserved for the BT stack in the first region, so we can't use that
-
-        static mut HEAP1: MaybeUninit<[u8; 40 * 1024]> = MaybeUninit::uninit();
-        #[link_section = ".dram2_uninit"]
-        static mut HEAP2: MaybeUninit<[u8; 96 * 1024]> = MaybeUninit::uninit();
-
-        add_region(unsafe { &mut HEAP1 });
-        add_region(unsafe { &mut HEAP2 });
-    }
-
-    #[cfg(not(feature = "esp32"))]
-    {
-        #[cfg(any(feature = "esp32c3", feature = "esp32h2"))]
-        const HEAP_SIZE: usize = 160 * 1024; // 160KB for ESP32-C3 and ESP32-H2
-
-        #[cfg(not(any(feature = "esp32c3", feature = "esp32h2")))]
-        const HEAP_SIZE: usize = 186 * 1024; // More for the other chips that have more SRAM
-
-        static mut HEAP: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
-
-        add_region(unsafe { &mut HEAP });
-    }
-}
 ```
 
 ## Future

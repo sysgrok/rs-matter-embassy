@@ -8,6 +8,7 @@
 #![no_std]
 #![no_main]
 #![recursion_limit = "256"]
+#![allow(clippy::type_complexity)]
 
 use core::mem::MaybeUninit;
 use core::pin::pin;
@@ -180,7 +181,6 @@ async fn main(spawner: Spawner) {
     unwrap!(select(&mut matter, &mut device).coalesce().await);
 }
 
-#[allow(clippy::type_complexity)]
 #[embassy_executor::task]
 async fn ethernet_task(
     runner: Runner<

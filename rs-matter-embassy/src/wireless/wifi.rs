@@ -272,7 +272,7 @@ pub mod esp_wifi {
 
     use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 
-    use esp_wifi::ble::controller::BleConnector;
+    use esp_radio::ble::controller::BleConnector;
 
     use crate::matter::error::Error;
     use crate::wifi::esp::EspWifiController;
@@ -280,7 +280,7 @@ pub mod esp_wifi {
 
     /// A `WifiDriver` implementation for the ESP32 family of chips.
     pub struct EspWifiDriver<'a, 'd> {
-        controller: &'a esp_wifi::EspWifiController<'d>,
+        controller: &'a esp_radio::Controller<'d>,
         wifi_peripheral: esp_hal::peripherals::WIFI<'d>,
         bt_peripheral: esp_hal::peripherals::BT<'d>,
     }
@@ -289,10 +289,10 @@ pub mod esp_wifi {
         /// Create a new instance of the `Esp32WifiDriver` type.
         ///
         /// # Arguments
-        /// - `controller` - The `esp-wifi` Wifi controller instance.
+        /// - `controller` - The `esp-radio` controller instance.
         /// - `peripheral` - The Wifi peripheral instance.
         pub fn new(
-            controller: &'a esp_wifi::EspWifiController<'d>,
+            controller: &'a esp_radio::Controller<'d>,
             wifi_peripheral: esp_hal::peripherals::WIFI<'d>,
             bt_peripheral: esp_hal::peripherals::BT<'d>,
         ) -> Self {
@@ -309,13 +309,14 @@ pub mod esp_wifi {
         where
             A: super::WifiDriverTask,
         {
-            let (mut controller, wifi_interface) = unwrap!(esp_wifi::wifi::new(
+            let (mut controller, wifi_interface) = unwrap!(esp_radio::wifi::new(
                 self.controller,
                 self.wifi_peripheral.reborrow(),
+                esp_radio::wifi::WifiConfig::default(),
             ));
 
             // esp32c6-specific - need to boost the power to get a good signal
-            unwrap!(controller.set_power_saving(esp_wifi::config::PowerSaveMode::None));
+            unwrap!(controller.set_power_saving(esp_radio::wifi::PowerSaveMode::None));
 
             task.run(
                 wifi_interface.sta,
@@ -330,18 +331,19 @@ pub mod esp_wifi {
         where
             A: super::WifiCoexDriverTask,
         {
-            let (mut controller, wifi_interface) = unwrap!(esp_wifi::wifi::new(
-                self.controller,
-                self.wifi_peripheral.reborrow(),
-            ));
-
-            // esp32c6-specific - need to boost the power to get a good signal
-            unwrap!(controller.set_power_saving(esp_wifi::config::PowerSaveMode::None));
-
             let ble_ctl = ExternalController::<_, SLOTS>::new(BleConnector::new(
                 self.controller,
                 self.bt_peripheral.reborrow(),
             ));
+
+            let (mut controller, wifi_interface) = unwrap!(esp_radio::wifi::new(
+                self.controller,
+                self.wifi_peripheral.reborrow(),
+                esp_radio::wifi::WifiConfig::default(),
+            ));
+
+            // esp32c6-specific - need to boost the power to get a good signal
+            unwrap!(controller.set_power_saving(esp_radio::wifi::PowerSaveMode::None));
 
             task.run(
                 wifi_interface.sta,
