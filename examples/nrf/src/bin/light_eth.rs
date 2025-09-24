@@ -80,6 +80,8 @@ unsafe fn EGU1_SWI1() {
 
 static RADIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
+const BUMP_SIZE: usize = 15500;
+
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();
 
@@ -128,7 +130,7 @@ async fn main(_s: Spawner) {
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = mk_static!(EthMatterStack).init_with(EthMatterStack::init(
+    let stack = mk_static!(EthMatterStack<BUMP_SIZE, ()>).init_with(EthMatterStack::init(
         &TEST_BASIC_INFO,
         BasicCommData {
             password: TEST_DEV_COMM.password,
@@ -269,7 +271,7 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 const NODE: Node = Node {
     id: 0,
     endpoints: &[
-        EthMatterStack::<()>::root_endpoint(),
+        EthMatterStack::<0, ()>::root_endpoint(),
         Endpoint {
             id: LIGHT_ENDPOINT_ID,
             device_types: devices!(DEV_TYPE_ON_OFF_LIGHT),
