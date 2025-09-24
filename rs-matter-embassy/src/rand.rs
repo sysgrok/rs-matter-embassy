@@ -43,17 +43,17 @@ pub mod rp {
 pub mod nrf {
     use core::cell::RefCell;
 
+    use embassy_nrf::mode::Blocking;
     use embassy_nrf::rng::Rng;
-    use embassy_nrf::{mode::Blocking, peripherals::RNG};
 
     use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
 
-    static RAND: Mutex<CriticalSectionRawMutex, RefCell<Option<Rng<'_, RNG, Blocking>>>> =
+    static RAND: Mutex<CriticalSectionRawMutex, RefCell<Option<Rng<'_, Blocking>>>> =
         Mutex::new(RefCell::new(None));
 
     /// Initialize the nrf-specific `rand` implementation
     /// Need to do this only once
-    pub fn nrf_init_rand(rng: Rng<'static, RNG, Blocking>) {
+    pub fn nrf_init_rand(rng: Rng<'static, Blocking>) {
         RAND.lock(|r| *r.borrow_mut() = Some(rng));
     }
 
