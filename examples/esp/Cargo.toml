@@ -24,22 +24,30 @@ name = "light_thread"
 required-features = ["thread"]
 harness = false
 
-#[patch.'https://github.com/sysgrok/rs-matter-stack']
-#rs-matter-stack = { git = "https://github.com/ivmarkov/rs-matter-stack.git", branch = "next" }
+[patch.'https://github.com/sysgrok/rs-matter-stack']
+rs-matter-stack = { git = "https://github.com/ivmarkov/rs-matter-stack.git", branch = "next" }
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
-#[patch.'https://github.com/esp-rs/openthread']
-#openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
+[patch.'https://github.com/esp-rs/openthread']
+openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "esp-rs-main" }
 #openthread = { version = "0.1", path = "../../../openthread/openthread" }
 
 [patch.crates-io]
-rs-matter = { git = "https://github.com/project-chip/rs-matter" }
-#rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
+#rs-matter = { git = "https://github.com/project-chip/rs-matter" }
+rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
 #rs-matter = { path = "../../../rs-matter/rs-matter" }
 #edge-nal = { git = "https://github.com/sysgrok/edge-net" }
 #edge-nal-embassy = { git = "https://github.com/sysgrok/edge-net" }
 #edge-mdns = { git = "https://github.com/sysgrok/edge-net" }
-#trouble-host = { version = "0.2", git = "https://github.com/embassy-rs/trouble" }
-#trouble-host = { version = "0.2", path = "../../../trouble/host" }
+#trouble-host = { version = "0.3", git = "https://github.com/embassy-rs/trouble" }
+#trouble-host = { version = "0.3", path = "../../../trouble/host" }
+esp-backtrace = { git = "https://github.com/esp-rs/esp-hal" }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal" }
+esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal" }
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal" }
+esp-println = { git = "https://github.com/esp-rs/esp-hal" }
+esp-radio = { git = "https://github.com/esp-rs/esp-hal" }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal" }
+esp-preempt = { git = "https://github.com/esp-rs/esp-hal" }
 
 [profile.dev]
 # Rust debug is too slow.
@@ -55,32 +63,32 @@ overflow-checks = false
 
 [features]
 default = ["esp32c6"]
-esp32 = ["esp-hal/esp32", "esp-backtrace/esp32", "esp-hal-embassy/esp32", "esp-println/esp32", "esp-wifi/esp32", "esp-bootloader-esp-idf/esp32", "portable-atomic/critical-section", "wifi"]
-esp32c2 = ["esp-hal/esp32c2", "esp-backtrace/esp32c2", "esp-hal-embassy/esp32c2", "esp-println/esp32c2", "esp-wifi/esp32c2", "esp-bootloader-esp-idf/esp32c2", "portable-atomic/critical-section", "wifi"]
-esp32c3 = ["esp-hal/esp32c3", "esp-backtrace/esp32c3", "esp-hal-embassy/esp32c3", "esp-println/esp32c3", "esp-wifi/esp32c3", "esp-bootloader-esp-idf/esp32c3", "portable-atomic/unsafe-assume-single-core", "wifi"]
-esp32c6 = ["esp-ieee802154/esp32c6", "esp-hal/esp32c6", "esp-backtrace/esp32c6", "esp-hal-embassy/esp32c6", "esp-println/esp32c6", "esp-wifi/esp32c6", "esp-bootloader-esp-idf/esp32c6", "portable-atomic/critical-section", "wifi", "thread"]
-esp32s3 = ["esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-hal-embassy/esp32s3", "esp-println/esp32s3", "esp-wifi/esp32s3", "esp-bootloader-esp-idf/esp32s3", "portable-atomic/critical-section", "wifi"]
-esp32h2 = ["esp-ieee802154/esp32h2", "esp-hal/esp32h2", "esp-backtrace/esp32h2", "esp-hal-embassy/esp32h2", "esp-println/esp32h2", "esp-wifi/esp32h2", "esp-bootloader-esp-idf/esp32h2", "portable-atomic/critical-section", "thread"]
+esp32 = ["esp-preempt/esp32", "esp-hal/esp32", "esp-backtrace/esp32", "esp-hal-embassy/esp32", "esp-println/esp32", "esp-radio/esp32", "esp-bootloader-esp-idf/esp32", "portable-atomic/critical-section", "wifi"]
+esp32c2 = ["esp-preempt/esp32c2", "esp-hal/esp32c2", "esp-backtrace/esp32c2", "esp-hal-embassy/esp32c2", "esp-println/esp32c2", "esp-radio/esp32c2", "esp-bootloader-esp-idf/esp32c2", "portable-atomic/critical-section", "wifi"]
+esp32c3 = ["esp-preempt/esp32c3", "esp-hal/esp32c3", "esp-backtrace/esp32c3", "esp-hal-embassy/esp32c3", "esp-println/esp32c3", "esp-radio/esp32c3", "esp-bootloader-esp-idf/esp32c3", "portable-atomic/unsafe-assume-single-core", "wifi"]
+esp32c6 = ["esp-preempt/esp32c6", "esp-hal/esp32c6", "esp-backtrace/esp32c6", "esp-hal-embassy/esp32c6", "esp-println/esp32c6", "esp-radio/esp32c6", "esp-bootloader-esp-idf/esp32c6", "portable-atomic/critical-section"]
+esp32s3 = ["esp-preempt/esp32s3", "esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-hal-embassy/esp32s3", "esp-println/esp32s3", "esp-radio/esp32s3", "esp-bootloader-esp-idf/esp32s3", "portable-atomic/critical-section", "wifi"]
+esp32h2 = ["esp-preempt/esp32h2", "esp-hal/esp32h2", "esp-backtrace/esp32h2", "esp-hal-embassy/esp32h2", "esp-println/esp32h2", "esp-radio/esp32h2", "esp-bootloader-esp-idf/esp32h2", "portable-atomic/critical-section", "thread"]
 wifi = ["rs-matter-embassy/embassy-net"]
 thread = ["rs-matter-embassy/openthread"]
 
 [dependencies]
 log = "0.4"
-embassy-executor = { version = "0.7", features = ["task-arena-size-8192"] }
-esp-backtrace = { version = "0.17", features = ["exception-handler", "panic-handler", "println"] }
-esp-hal = { version = "=1.0.0-rc.0", features = ["log-04", "unstable"] }
+embassy-executor = "0.9"
+esp-backtrace = { version = "0.17", features = ["panic-handler", "println"] }
+esp-hal = { version = "=1.0.0-rc.0", features = ["log-04", "unstable", "exception-handler"] }
 esp-hal-embassy = "0.9"
-esp-alloc = "0.8"
+esp-alloc = { version = "0.8" }
 esp-println = { version = "0.15", features = ["log-04"] }
-esp-wifi = { version = "0.15", features = ["ble", "log-04"] }
-esp-ieee802154 = { version = "0.8", optional = true }
+esp-radio = { version = "0.15", features = ["ble", "log-04", "unstable"] }
 esp-bootloader-esp-idf = { version = "0.2", features = ["log-04"] }
-bt-hci = { version = "0.3.2" }
+esp-preempt = "0.0.1"
+bt-hci = "0.5"
 heapless = "0.8"
 rs-matter-embassy = { path = "../../rs-matter-embassy", features = ["esp", "log"] }
 tinyrlibc = { version = "0.5", default-features = false, features = ["utoa", "strtoul"] }
 embassy-sync = "0.7"
 embassy-futures = "0.1"
-embassy-time = "0.4"
+embassy-time = "0.5"
 static_cell = "2"
 portable-atomic = "1"
