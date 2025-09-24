@@ -32,6 +32,7 @@ rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", bran
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
 openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
 #openthread = { version = "0.1", path = "../../../openthread/openthread" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 
 [features]
 skip-cyw43-firmware = []
