@@ -58,6 +58,8 @@ macro_rules! mk_static {
     }};
 }
 
+const BUMP_SIZE: usize = 15500;
+
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();
 
@@ -109,13 +111,9 @@ async fn main(spawner: Spawner) {
     // Statically allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = mk_static!(EmbassyEthMatterStack).init_with(EmbassyEthMatterStack::init(
-        &TEST_DEV_DET,
-        TEST_DEV_COMM,
-        &TEST_DEV_ATT,
-        epoch,
-        rp_rand,
-    ));
+    let stack = mk_static!(EmbassyEthMatterStack<BUMP_SIZE, ()>).init_with(
+        EmbassyEthMatterStack::init(&TEST_DEV_DET, TEST_DEV_COMM, &TEST_DEV_ATT, epoch, rp_rand),
+    );
 
     // == Step 3: ==
     // Our "light" on-off cluster.
@@ -204,7 +202,7 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 const NODE: Node = Node {
     id: 0,
     endpoints: &[
-        EmbassyEthMatterStack::<()>::root_endpoint(),
+        EmbassyEthMatterStack::<0, ()>::root_endpoint(),
         Endpoint {
             id: LIGHT_ENDPOINT_ID,
             device_types: devices!(DEV_TYPE_ON_OFF_LIGHT),

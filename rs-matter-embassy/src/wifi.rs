@@ -176,11 +176,13 @@ pub mod esp {
                 })
             };
 
-            if fetch_connected().await {
-                return;
-            }
+            loop {
+                if fetch_connected().await {
+                    return;
+                }
 
-            embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
+                embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
+            }
 
             // Code below is commented out because it is a bit complex to wait on events in the first place and at the
             // same time - allow `connect` and `scan` to be called in parallel
@@ -380,7 +382,11 @@ pub mod rp {
             ctl.join(ssid, JoinOptions::new(pass)) // TODO: Try with something else besides Wpa2Wpa3
                 .await
                 .map_err(to_ctl_err)?;
-            self.1.lock(|connected| connected.set(true));
+
+            self.1.lock(|connected| {
+                info!("Wifi state updated: {} -> {}", connected.get(), true);
+                connected.set(true)
+            });
 
             info!("Wifi connected");
 
@@ -395,9 +401,37 @@ pub mod rp {
         M: RawMutex,
     {
         async fn wait_changed(&self) {
-            // Cyw43 does not have any means to wait on a state change - nor it has any means to detect disconnection -
-            // so here we just wait for 2 seconds
-            embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
+            let fetch_connected = || async {
+                let _ctl = self.0.lock().await;
+
+                // TODO: Cyw43 Control does not have a way to check if we are connected or not
+                // Need to upstream a way to check that or else we cannot detect Wifi disconnection events
+                let new_connected = self.1.lock(|connected| connected.get());
+                self.1.lock(|connected| {
+                    if connected.get() != new_connected {
+                        warn!(
+                            "Wifi state changed: {} -> {}",
+                            connected.get(),
+                            new_connected
+                        );
+
+                        connected.set(new_connected);
+                        true
+                    } else {
+                        false
+                    }
+                })
+            };
+
+            loop {
+                if fetch_connected().await {
+                    return;
+                }
+
+                // Cyw43 does not have any means to wait on a state change - nor it has any means to detect disconnection -
+                // so here we just wait for 2 seconds
+                embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
+            }
         }
     }
 
