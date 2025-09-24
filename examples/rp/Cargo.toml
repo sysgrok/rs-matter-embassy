@@ -45,7 +45,7 @@ rs-matter = { git = "https://github.com/project-chip/rs-matter" }
 skip-cyw43-firmware = []
 
 [dependencies]
-embassy-executor = { version = "0.7", default-features = false, features = ["task-arena-size-65536", "arch-cortex-m", "executor-thread", "defmt"] }
+embassy-executor = { version = "0.7", default-features = false, features = ["task-arena-size-8192", "arch-cortex-m", "executor-thread", "defmt"] }
 embassy-time = { version = "0.4", default-features = false, features = ["defmt", "defmt-timestamp-uptime-ms"] }
 embassy-rp = { version = "0.6", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
 embassy-futures = "0.1.1"

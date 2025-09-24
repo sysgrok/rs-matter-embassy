@@ -80,7 +80,7 @@ unsafe fn EGU1_SWI1() {
 
 static RADIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
-const BUMP_SIZE: usize = 15500;
+const BUMP_SIZE: usize = 20500;
 
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();

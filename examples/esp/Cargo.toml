@@ -66,7 +66,7 @@ thread = ["rs-matter-embassy/openthread"]
 
 [dependencies]
 log = "0.4"
-embassy-executor = { version = "0.7", features = ["task-arena-size-32768"] }
+embassy-executor = { version = "0.7", features = ["task-arena-size-8192"] }
 esp-backtrace = { version = "0.17", features = ["exception-handler", "panic-handler", "println"] }
 esp-hal = { version = "=1.0.0-rc.0", features = ["log-04", "unstable"] }
 esp-hal-embassy = "0.9"

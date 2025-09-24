@@ -44,7 +44,7 @@ nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "b15c91008f0
 #trouble-host = { version = "0.2", path = "../../../trouble/host" }
 
 [dependencies]
-embassy-executor = { version = "0.7", default-features = false, features = ["task-arena-size-65536", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
+embassy-executor = { version = "0.7", default-features = false, features = ["task-arena-size-8192", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
 embassy-time = { version = "0.4", default-features = false, features = ["defmt", "defmt-timestamp-uptime-ms"] }
 embassy-nrf = { version = "0.5", features = ["defmt", "time-driver-rtc1", "time", "nrf52840"], default-features = false }
 embassy-futures = "0.1.1"
