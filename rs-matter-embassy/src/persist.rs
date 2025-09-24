@@ -1,6 +1,5 @@
 //! Persistence: `EmbassyPersist` - an implementation of the `Persist` trait that uses the `sequential_storage::map` API
 
-use core::cell::RefCell;
 use core::ops::Range;
 
 use embedded_storage_async::nor_flash::MultiwriteNorFlash;
@@ -9,50 +8,11 @@ use rs_matter_stack::matter::error::Error;
 use rs_matter_stack::persist::{KvBlobStore, MatterPersist};
 
 use sequential_storage::cache::NoCache;
-use sequential_storage::map::{SerializationError, Value};
 
 use crate::error::to_persist_error;
 use crate::fmt::Bytes;
 
 pub type EmbassyPersist<'a, S, N> = MatterPersist<'a, EmbassyKvBlobStore<S>, N>;
-
-/// We expect closures, but `sequential_storage::map` operates on `Value` instances
-/// (which is less flexible).
-///
-/// Therefore, cheat and implement a `Value` that stores our closure.
-/// Only used during serialization.
-///
-/// (For deserialization, we take advantage of zero-copy, and pass `&[u8]` as `Value`.)
-struct StoreValue<F>(u16, RefCell<Option<F>>);
-
-impl<'d, F> Value<'d> for StoreValue<F>
-where
-    F: FnOnce(&mut [u8]) -> Result<usize, Error>,
-{
-    fn serialize_into(&self, buffer: &mut [u8]) -> Result<usize, SerializationError> {
-        let f = unwrap!(self.1.borrow_mut().take());
-
-        let len = f(buffer).map_err(|_| SerializationError::InvalidData)?; // TODO
-
-        debug!("Blob {}: stored {} bytes", self.0, len);
-        trace!(
-            "Blob {} store details: stored {} bytes, data: {:?}",
-            self.0,
-            len,
-            &buffer[..len]
-        );
-
-        Ok(len)
-    }
-
-    fn deserialize_from(_buffer: &'d [u8]) -> Result<Self, SerializationError>
-    where
-        Self: Sized,
-    {
-        // This value is never used for deserialization
-        unreachable!()
-    }
-}
 
 /// A `KvBlobStore`` implementation that uses the `sequential_storage::map` API
 /// on top of NOR Flash.
@@ -110,18 +70,30 @@ where
     where
         F: FnOnce(&mut [u8]) -> Result<usize, Error>,
     {
-        let value = StoreValue(key, RefCell::new(Some(cb)));
+        // Not ideal, but both `rs-matter-stack` and `sequential-storage` need a buffer.
+        let (matter_buf, seqs_buf) = buf.split_at_mut(buf.len() / 2);
+
+        let len = cb(matter_buf)?;
+        let data = &matter_buf[..len];
 
         sequential_storage::map::store_item(
             &mut self.flash,
             self.flash_range.clone(),
             &mut self.cache,
-            buf,
+            seqs_buf,
             &key,
-            &value,
+            &data,
         )
         .await
         .map_err(to_persist_error)?;
+
+        debug!("Blob {}: stored {} bytes", key, len);
+        trace!(
+            "Blob {} store details: stored {} bytes, data: {:?}",
+            key,
+            len,
+            data
+        );
 
         Ok(())
     }
