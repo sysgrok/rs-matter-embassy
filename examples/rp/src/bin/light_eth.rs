@@ -8,6 +8,7 @@
 #![no_std]
 #![no_main]
 #![recursion_limit = "256"]
+#![allow(clippy::type_complexity)]
 
 use core::mem::MaybeUninit;
 use core::pin::pin;
@@ -54,7 +55,7 @@ macro_rules! mk_static {
     ($t:ty,$val:expr) => {{
         static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
         #[deny(unused_attributes)]
-        let x = STATIC_CELL.uninit().write(($val));
+        let x = STATIC_CELL.uninit().write($val);
         x
     }};
 }
@@ -185,7 +186,6 @@ async fn main(spawner: Spawner) {
     unwrap!(select(&mut matter, &mut device).coalesce().await);
 }
 
-#[allow(clippy::type_complexity)]
 #[embassy_executor::task]
 async fn ethernet_task(
     runner: Runner<
