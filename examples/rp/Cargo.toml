@@ -44,6 +44,7 @@ embassy-net-driver-channel = { git = "https://github.com/embassy-rs/embassy" }
 embassy-time = { git = "https://github.com/embassy-rs/embassy" }
 #trouble-host = { version = "0.4", git = "https://github.com/embassy-rs/trouble" }
 #trouble-host = { version = "0.4", path = "../../../trouble/host" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 
 [features]
 skip-cyw43-firmware = []
