@@ -29,8 +29,8 @@ rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
 #edge-nal = { git = "https://github.com/sysgrok/edge-net" }
 #edge-nal-embassy = { git = "https://github.com/sysgrok/edge-net" }
 #edge-mdns = { git = "https://github.com/sysgrok/edge-net" }
-nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "61be6361062cbb4dee7239b5ae207270ba562298" }
-nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "61be6361062cbb4dee7239b5ae207270ba562298" }
+nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
+nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
 #trouble-host = { version = "0.3", git = "https://github.com/embassy-rs/trouble" }
 #trouble-host = { version = "0.3", path = "../../../trouble/host" }
 esp-radio = { git = "https://github.com/esp-rs/esp-hal" }
@@ -188,8 +188,8 @@ sequential-storage = "3"
 embassy-net = { version = "0.7", optional = true }
 edge-nal-embassy = { version = "0.6", optional = true, features = ["proto-ipv4", "proto-ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
 
-trouble-host = { version = "0.3", features = ["gatt"] }
-bt-hci = "0.5"
+trouble-host = { version = "0.4", features = ["gatt"] }
+bt-hci = "0.6"
 
 openthread = { version = "0.1", git = "https://github.com/esp-rs/openthread", optional = true, features = ["udp", "srp", "edge-nal"] }
 
@@ -204,7 +204,7 @@ embassy-rp = { version = "0.8", optional = true, features = ["unstable-pac", "rp
 rand_core = { version = "0.9", optional = true }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for Nordic silicon
-embassy-nrf = { version = "0.7", optional = true, features = ["time-driver-rtc1", "time", "nrf52840"], default-features = false }
+embassy-nrf = { version = "0.8", optional = true, features = ["time-driver-rtc1", "time", "nrf52840"], default-features = false }
 nrf-sdc = { version = "0.4", default-features = false, optional = true, features = ["peripheral", "nrf52840"] }
 nrf-mpsl = { version = "0.3", default-features = false, optional = true, features = ["nrf52840", "critical-section-impl"] }
 portable-atomic = { version = "1", optional = true }

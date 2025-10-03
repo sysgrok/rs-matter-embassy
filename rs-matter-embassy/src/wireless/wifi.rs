@@ -334,6 +334,7 @@ pub mod esp_wifi {
             let ble_ctl = ExternalController::<_, SLOTS>::new(BleConnector::new(
                 self.controller,
                 self.bt_peripheral.reborrow(),
+                Default::default(),
             ));
 
             let (mut controller, wifi_interface) = unwrap!(esp_radio::wifi::new(
@@ -362,6 +363,7 @@ pub mod esp_wifi {
             let ble_controller = ExternalController::<_, SLOTS>::new(BleConnector::new(
                 self.controller,
                 self.bt_peripheral.reborrow(),
+                Default::default(),
             ));
 
             task.run(ble_controller).await

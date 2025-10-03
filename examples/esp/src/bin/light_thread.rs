@@ -50,7 +50,7 @@ use tinyrlibc as _;
 
 extern crate alloc;
 
-const BUMP_SIZE: usize = 15500;
+const BUMP_SIZE: usize = 25000;
 
 #[cfg(feature = "esp32")]
 const HEAP_SIZE: usize = 40 * 1024; // 45KB for ESP32, which has a disjoint heap
@@ -61,7 +61,7 @@ const HEAP_SIZE: usize = 186 * 1024;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-#[esp_hal_embassy::main]
+#[esp_rtos::main]
 async fn main(_s: Spawner) {
     esp_println::logger::init_logger(log::LevelFilter::Debug);
 
@@ -94,22 +94,14 @@ async fn main(_s: Spawner) {
     esp_init_rand(rng);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-
-    #[cfg(not(any(feature = "esp32", feature = "esp32s3")))]
-    esp_preempt::start(
+    esp_rtos::start(
         timg0.timer0,
+        #[cfg(target_arch = "riscv32")]
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT)
             .software_interrupt0,
     );
-    #[cfg(any(feature = "esp32", feature = "esp32s3"))]
-    esp_preempt::start(timg0.timer0);
 
     let init = esp_radio::init().unwrap();
-
-    #[cfg(not(feature = "esp32"))]
-    esp_hal_embassy::init(esp_hal::timer::systimer::SystemTimer::new(peripherals.SYSTIMER).alarm0);
-    #[cfg(feature = "esp32")]
-    esp_hal_embassy::init(timg0.timer1);
 
     // == Step 2: ==
     // Allocate the Matter stack.
@@ -156,7 +148,7 @@ async fn main(_s: Spawner) {
     //
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
     let store = stack.create_shared_store(DummyKvBlobStore);
-    let mut matter = pin!(stack.run_coex(
+    let mut matter = pin!(stack.run(
         // The Matter stack needs to instantiate an `openthread` Radio
         EmbassyThread::new(
             EspThreadDriver::new(&init, peripherals.IEEE802154, peripherals.BT),

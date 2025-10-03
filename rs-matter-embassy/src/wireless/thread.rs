@@ -368,6 +368,7 @@ pub mod esp_thread {
             let ble_controller = ExternalController::<_, SLOTS>::new(BleConnector::new(
                 self.controller,
                 self.bt_peripheral.reborrow(),
+                Default::default(),
             ));
 
             let radio = EspRadio::new(openthread::esp::Ieee802154::new(
@@ -386,6 +387,7 @@ pub mod esp_thread {
             let ble_controller = ExternalController::<_, SLOTS>::new(BleConnector::new(
                 self.controller,
                 self.bt_peripheral.reborrow(),
+                Default::default(),
             ));
 
             task.run(ble_controller).await

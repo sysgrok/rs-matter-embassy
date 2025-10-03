@@ -55,7 +55,7 @@ const HEAP_SIZE: usize = 186 * 1024;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-#[esp_hal_embassy::main]
+#[esp_rtos::main]
 async fn main(_s: Spawner) {
     esp_println::logger::init_logger(log::LevelFilter::Info);
 
@@ -78,22 +78,14 @@ async fn main(_s: Spawner) {
     esp_init_rand(esp_hal::rng::Rng::new());
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-
-    #[cfg(not(any(feature = "esp32", feature = "esp32s3")))]
-    esp_preempt::start(
+    esp_rtos::start(
         timg0.timer0,
+        #[cfg(target_arch = "riscv32")]
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT)
             .software_interrupt0,
     );
-    #[cfg(any(feature = "esp32", feature = "esp32s3"))]
-    esp_preempt::start(timg0.timer0);
 
     let init = esp_radio::init().unwrap();
-
-    #[cfg(not(feature = "esp32"))]
-    esp_hal_embassy::init(esp_hal::timer::systimer::SystemTimer::new(peripherals.SYSTIMER).alarm0);
-    #[cfg(feature = "esp32")]
-    esp_hal_embassy::init(timg0.timer1);
 
     // == Step 2: ==
     // Allocate the Matter stack.
