@@ -6,8 +6,8 @@ pub mod esp {
     use embassy_sync::blocking_mutex::raw::RawMutex;
     use embassy_sync::mutex::Mutex;
 
-    use esp_wifi::wifi::{
-        AuthMethod, ClientConfiguration, Configuration, ScanConfig, WifiController, WifiError,
+    use esp_radio::wifi::{
+        AuthMethod, ClientConfig, Config, ScanConfig, WifiController, WifiError,
     };
 
     use crate::matter::dm::clusters::net_comm::{
@@ -68,9 +68,7 @@ pub mod esp {
 
             let mut scan_config = ScanConfig::default();
             if let Some(network) = network {
-                scan_config.ssid = Some(unwrap!(core::str::from_utf8(network)
-                    .unwrap_or("???")
-                    .try_into()));
+                scan_config = scan_config.with_ssid(core::str::from_utf8(network).unwrap_or("???"));
             }
 
             let aps = ctl
@@ -89,16 +87,16 @@ pub mod esp {
                     band: WiFiBandEnum::V2G4, // TODO: Once c5 is out we can no longer hard-code this
                     security: match ap.auth_method {
                         Some(AuthMethod::None) => WiFiSecurityBitmap::UNENCRYPTED,
-                        Some(AuthMethod::WEP) => WiFiSecurityBitmap::WEP,
-                        Some(AuthMethod::WPA) => WiFiSecurityBitmap::WPA_PERSONAL,
-                        Some(AuthMethod::WPA2Personal) => WiFiSecurityBitmap::WPA_2_PERSONAL,
-                        Some(AuthMethod::WPAWPA2Personal) => {
+                        Some(AuthMethod::Wep) => WiFiSecurityBitmap::WEP,
+                        Some(AuthMethod::Wpa) => WiFiSecurityBitmap::WPA_PERSONAL,
+                        Some(AuthMethod::Wpa2Personal) => WiFiSecurityBitmap::WPA_2_PERSONAL,
+                        Some(AuthMethod::WpaWpa2Personal) => {
                             WiFiSecurityBitmap::WPA_PERSONAL | WiFiSecurityBitmap::WPA_2_PERSONAL
                         }
-                        Some(AuthMethod::WPA2WPA3Personal) => {
+                        Some(AuthMethod::Wpa2Wpa3Personal) => {
                             WiFiSecurityBitmap::WPA_2_PERSONAL | WiFiSecurityBitmap::WPA_3_PERSONAL
                         }
-                        Some(AuthMethod::WPA2Enterprise) => WiFiSecurityBitmap::WPA_2_PERSONAL,
+                        Some(AuthMethod::Wpa2Enterprise) => WiFiSecurityBitmap::WPA_2_PERSONAL,
                         _ => WiFiSecurityBitmap::WPA_2_PERSONAL, // Best guess
                     },
                 })?;
@@ -127,11 +125,11 @@ pub mod esp {
                 info!("Wifi stopped");
             }
 
-            ctl.set_configuration(&Configuration::Client(ClientConfiguration {
-                ssid: unwrap!(ssid.try_into()),
-                password: unwrap!(pass.try_into()),
-                ..Default::default() // TODO: Try something else besides WPA2-Personal
-            }))
+            ctl.set_config(&Config::Client(
+                ClientConfig::default()
+                    .with_ssid(unwrap!(ssid.try_into()))
+                    .with_password(unwrap!(pass.try_into())),
+            ))
             .map_err(to_ctl_err)?;
             info!("Wifi configuration updated");
 
