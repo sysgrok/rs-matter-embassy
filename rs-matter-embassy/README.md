@@ -48,7 +48,8 @@ use log::info;
 
 use rs_matter_embassy::epoch::epoch;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
-use rs_matter_embassy::matter::dm::clusters::on_off::{self, ClusterHandler as _};
+use rs_matter_embassy::matter::dm::clusters::on_off::test::TestOnOffDeviceLogic;
+use rs_matter_embassy::matter::dm::clusters::on_off::{self, OnOffHooks};
 use rs_matter_embassy::matter::dm::devices::test::{TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET};
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, EpClMatcher, Node};
@@ -68,7 +69,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_hal_embassy::main]
 async fn main(_s: Spawner) {
-    esp_println::logger::init_logger_from_env();
+    esp_println::logger::init_logger(log::LevelFilter::Info);
 
     info!("Starting...");
 
@@ -106,18 +107,23 @@ async fn main(_s: Spawner) {
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = &*Box::leak(Box::new_uninit()).init_with(EmbassyWifiMatterStack::<BUMP_SIZE, ()>::init(
-        &TEST_DEV_DET,
-        TEST_DEV_COMM,
-        &TEST_DEV_ATT,
-        epoch,
-        esp_rand,
-    ));
+    let stack =
+        &*Box::leak(Box::new_uninit()).init_with(EmbassyWifiMatterStack::<BUMP_SIZE, ()>::init(
+            &TEST_DEV_DET,
+            TEST_DEV_COMM,
+            &TEST_DEV_ATT,
+            epoch,
+            esp_rand,
+        ));
 
     // == Step 3: ==
     // Our "light" on-off cluster.
-    // Can be anything implementing `rs_matter::data_model::AsyncHandler`
-    let on_off = on_off::OnOffHandler::new(Dataver::new_rand(stack.matter().rand()));
+    // Can be anything implementing `rs_matter::dm::AsyncHandler`
+    let on_off = on_off::OnOffHandler::new_standalone(
+        Dataver::new_rand(stack.matter().rand()),
+        1,
+        TestOnOffDeviceLogic::new(),
+    );
 
     // Chain our endpoint clusters
     let handler = EmptyHandler
@@ -125,9 +131,9 @@ async fn main(_s: Spawner) {
         .chain(
             EpClMatcher::new(
                 Some(LIGHT_ENDPOINT_ID),
-                Some(on_off::OnOffHandler::CLUSTER.id),
+                Some(TestOnOffDeviceLogic::CLUSTER.id),
             ),
-            Async(on_off::HandlerAdaptor(&on_off)),
+            on_off::HandlerAsyncAdaptor(&on_off),
         )
         // Each Endpoint needs a Descriptor cluster too
         // Just use the one that `rs-matter` provides out of the box
@@ -168,11 +174,11 @@ async fn main(_s: Spawner) {
             Timer::after(Duration::from_secs(5)).await;
 
             // Toggle
-            on_off.set(!on_off.get());
+            on_off.set_on_off(!on_off.on_off());
 
             // Let the Matter stack know that we have changed
             // the state of our Light device
-            stack.notify_changed();
+            stack.notify_cluster_changed(1, TestOnOffDeviceLogic::CLUSTER.id);
 
             info!("Light toggled");
         }
@@ -194,7 +200,7 @@ const NODE: Node = Node {
         Endpoint {
             id: LIGHT_ENDPOINT_ID,
             device_types: devices!(DEV_TYPE_ON_OFF_LIGHT),
-            clusters: clusters!(desc::DescHandler::CLUSTER, on_off::OnOffHandler::CLUSTER),
+            clusters: clusters!(desc::DescHandler::CLUSTER, TestOnOffDeviceLogic::CLUSTER),
         },
     ],
 };
@@ -216,7 +222,7 @@ fn init_heap() {
         // The esp32 has two disjoint memory regions for heap
         // Also, it has 64KB reserved for the BT stack in the first region, so we can't use that
 
-        static mut HEAP1: MaybeUninit<[u8; 40 * 1024]> = MaybeUninit::uninit();
+        static mut HEAP1: MaybeUninit<[u8; 70 * 1024]> = MaybeUninit::uninit();
         #[link_section = ".dram2_uninit"]
         static mut HEAP2: MaybeUninit<[u8; 96 * 1024]> = MaybeUninit::uninit();
 

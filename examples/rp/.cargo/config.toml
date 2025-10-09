@@ -5,7 +5,7 @@ target = "thumbv6m-none-eabi"
 runner = "probe-rs run --chip RP2040 --always-print-stacktrace --catch-reset --catch-hardfault"
 
 [unstable]
-build-std-features = ["panic_immediate_abort"]
+#build-std-features = ["panic_immediate_abort"]
 
 # For host builds and STD targets
 build-std = ["core", "alloc"]
