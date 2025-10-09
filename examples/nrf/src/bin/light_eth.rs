@@ -286,9 +286,6 @@ const NODE: Node = Node {
 };
 
 #[embassy_executor::task]
-async fn run_radio(
-    mut runner: PhyRadioRunner<'static>,
-    radio: NrfRadio<'static, embassy_nrf::peripherals::RADIO>,
-) -> ! {
+async fn run_radio(mut runner: PhyRadioRunner<'static>, radio: NrfRadio<'static>) -> ! {
     runner.run(radio, EmbassyTimeTimer).await
 }
