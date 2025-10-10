@@ -18,19 +18,22 @@ harness = false
 [patch.'https://github.com/sysgrok/rs-matter-stack']
 rs-matter-stack = { git = "https://github.com/ivmarkov/rs-matter-stack.git", branch = "next" }
 #rs-matter-stack = { path = "../../rs-matter-stack" }
-[patch.'https://github.com/esp-rs/openthread']
-openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "esp-rs-main" }
-#openthread = { version = "0.1", path = "../../../esp-openthread/openthread" }
 
 [patch.crates-io]
 #rs-matter = { git = "https://github.com/project-chip/rs-matter" }
 rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
 #rs-matter = { path = "../../rs-matter/rs-matter" }
+openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "esp-rs-main" }
+#openthread = { version = "0.1", path = "../../../esp-openthread/openthread" }
 #edge-nal = { git = "https://github.com/sysgrok/edge-net" }
 #edge-nal-embassy = { git = "https://github.com/sysgrok/edge-net" }
 #edge-mdns = { git = "https://github.com/sysgrok/edge-net" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
+nrf-sdc-sys = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
+nrf-mpsl-sys = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
+nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154" }
 #trouble-host = { version = "0.4", git = "https://github.com/embassy-rs/trouble" }
 #trouble-host = { version = "0.4", path = "../../../trouble/host" }
 esp-radio = { git = "https://github.com/esp-rs/esp-hal" }
@@ -165,9 +168,9 @@ max-exchanges-per-session-3 = ["rs-matter-stack/max-exchanges-per-session-3"]
 embassy-net = ["dep:embassy-net", "edge-nal-embassy", "openthread?/embassy-net-driver-channel", "esp-radio?/wifi"]
 esp = ["esp-radio", "esp-hal", "openthread?/esp-radio"]
 rp = ["cyw43", "cyw43-pio", "embassy-rp", "rand_core"]
-nrf = ["embassy-nrf", "rand_core", "nrf-sdc", "nrf-mpsl", "portable-atomic", "openthread?/embassy-nrf"]
-log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host/log", "cyw43?/log"]
-defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host/defmt", "cyw43?/defmt", "cyw43-pio?/defmt"]
+nrf = ["embassy-nrf", "rand_core", "nrf-sdc", "nrf-mpsl", "nrf-802154", "portable-atomic", "openthread?/embassy-nrf"]
+log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host/log", "cyw43?/log", "nrf-802154?/log"]
+defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host/defmt", "cyw43?/defmt", "cyw43-pio?/defmt", "nrf-802154?/defmt"]
 
 [dependencies]
 log = { version = "0.4", default-features = false, optional = true }
@@ -191,7 +194,7 @@ edge-nal-embassy = { version = "0.6", optional = true, features = ["proto-ipv4",
 trouble-host = { version = "0.4", features = ["gatt"] }
 bt-hci = "0.6"
 
-openthread = { version = "0.1", git = "https://github.com/esp-rs/openthread", optional = true, features = ["udp", "srp", "edge-nal"] }
+openthread = { version = "0.1", optional = true, features = ["udp", "srp", "edge-nal"] }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the `esp32*` chips family
 esp-radio = { version = "0.15", optional = true, features = ["ble"], git = "https://github.com/esp-rs/esp-hal" }
@@ -207,4 +210,5 @@ rand_core = { version = "0.9", optional = true }
 embassy-nrf = { version = "0.8", optional = true, features = ["time-driver-rtc1", "time", "nrf52840"], default-features = false }
 nrf-sdc = { version = "0.4", default-features = false, optional = true, features = ["peripheral", "nrf52840"] }
 nrf-mpsl = { version = "0.3", default-features = false, optional = true, features = ["nrf52840", "critical-section-impl"] }
+nrf-802154 = { version = "0.1", default-features = false, optional = true, features = ["nrf52840", "openthread"] }
 portable-atomic = { version = "1", optional = true }

@@ -9,6 +9,10 @@ name = "light_thread"
 harness = false
 
 [[bin]]
+name = "light_thread_coex"
+harness = false
+
+[[bin]]
 name = "light_eth"
 harness = false
 
@@ -27,19 +31,20 @@ overflow-checks = false
 [patch.'https://github.com/sysgrok/rs-matter-stack']
 rs-matter-stack = { git = "https://github.com/ivmarkov/rs-matter-stack.git", branch = "next" }
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
-[patch.'https://github.com/esp-rs/openthread']
-openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "esp-rs-main" }
-#openthread = { version = "0.1", path = "../../../openthread/openthread" }
 
 [patch.crates-io]
 #rs-matter = { git = "https://github.com/project-chip/rs-matter" }
 rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
 #rs-matter = { path = "../../../rs-matter/rs-matter" }
+openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "esp-rs-main" }
+#openthread = { version = "0.1", path = "../../../esp-openthread/openthread" }
 #edge-nal = { git = "https://github.com/sysgrok/edge-net" }
 #edge-nal-embassy = { git = "https://github.com/sysgrok/edge-net" }
 #edge-mdns = { git = "https://github.com/sysgrok/edge-net" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
+#nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
+nrf-802154 = { path = "../../../nrf-802154/nrf-802154" }
 #trouble-host = { version = "0.4", git = "https://github.com/embassy-rs/trouble" }
 #trouble-host = { version = "0.4", path = "../../../trouble/host" }
 
