@@ -148,8 +148,7 @@ async fn main(_s: Spawner) {
 
     // == Step 5: ==
     // Run the Matter stack with our handler
-    // Using `pin!` is completely optional, but saves some memory due to `rustc`
-    // not being very intelligent w.r.t. stack usage in async functions
+    // Using `pin!` is completely optional, but reduces the size of the final future
     //
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
     let store = stack.create_shared_store(DummyKvBlobStore);

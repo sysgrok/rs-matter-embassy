@@ -170,8 +170,7 @@ async fn main(_s: Spawner) {
         );
 
     // Run the Matter stack with our handler
-    // Using `pin!` is completely optional, but saves some memory due to `rustc`
-    // not being very intelligent w.r.t. stack usage in async functions
+    // Using `pin!` is completely optional, but reduces the size of the final future
     let store = stack.create_shared_store(DummyKvBlobStore);
     let mut matter = pin!(stack.run_preex(
         // The Matter stack needs to open two UDP sockets
