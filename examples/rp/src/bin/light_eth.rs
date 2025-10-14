@@ -60,7 +60,7 @@ macro_rules! mk_static {
     }};
 }
 
-const BUMP_SIZE: usize = 15500;
+const BUMP_SIZE: usize = 16500;
 
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();

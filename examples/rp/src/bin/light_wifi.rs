@@ -4,7 +4,9 @@
 //! and thus BLE for commissioning.
 //!
 //! If you want to use Ethernet, utilize `EmbassyEthMatterStack` instead.
-//! If you want to use non-concurrent commissioning, utilize `EmbassyWifiNCMatterStack` instead
+//! If you want to use non-concurrent commissioning, call `run` instead of `run_coex`
+//! and provision a higher `BUMP_SIZE` because the non-concurrent commissioning has slightly higher
+//! memory requirements on the futures' sizes.
 //! (Note: Alexa does not work (yet) with non-concurrent commissioning.)
 //!
 //! The example implements a fictitious Light device (an On-Off Matter cluster).
@@ -63,7 +65,7 @@ bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
 });
 
-const BUMP_SIZE: usize = 15500;
+const BUMP_SIZE: usize = 16500;
 
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();
@@ -144,8 +146,8 @@ async fn main(_spawner: Spawner) {
     //
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
     let store = stack.create_shared_store(DummyKvBlobStore);
-    let mut matter = pin!(stack.run(
-        // The Matter stack needs Wifi
+    let mut matter = pin!(stack.run_coex(
+        // The Matter stack needs Wifi and BLE
         EmbassyWifi::new(
             RpWifiDriver::new(
                 p.PIN_23, p.PIN_25, p.PIN_24, p.PIN_29, p.DMA_CH0, p.PIO0, Irqs, fw, clm, btfw,
