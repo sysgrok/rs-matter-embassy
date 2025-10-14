@@ -64,7 +64,7 @@ cargo install espup
 espup update
 
 cd esp
-cargo +esp build --target xtensa-esp32-none-elf --no-default-features --features esp32
+cargo +esp build --target xtensa-esp32-none-elf --no-default-features --features esp32,wifi
 
 # Replace `light_wifi` with `light_eth` below to flash the "Ethernet" example
 # Replace `light_wifi` with `light_thread` below to flash the Ethernet example (you'll need an esp32c6 or esp32h2)
@@ -84,7 +84,7 @@ cargo install espup
 espup update
 
 cd esp
-cargo +esp build --target xtensa-esp32s3-none-elf --no-default-features --features esp32s3
+cargo +esp build --target xtensa-esp32s3-none-elf --no-default-features --features esp32s3,wifi
 
 # Replace `light_wifi` with `light_eth` below to flash the "Ethernet" example
 espflash flash target/xtensa-esp32s3-none-elf/debug/light_wifi --baud 1500000
@@ -100,7 +100,7 @@ export WIFI_SSID=foo
 export WIFI_PASS=bar
 
 cd esp
-cargo +nightly build --target riscv32imc-unknown-none-elf --no-default-features --features esp32c3
+cargo +nightly build --target riscv32imc-unknown-none-elf --no-default-features --features esp32c3,wifi
 
 # Replace `light_wifi` with `light_eth` below to flash the "Ethernet" example
 espflash flash target/riscv32imc-unknown-none-elf/debug/light_wifi --baud 1500000
@@ -116,7 +116,7 @@ export WIFI_SSID=foo
 export WIFI_PASS=bar
 
 cd esp
-cargo +nightly build --target riscv32imac-unknown-none-elf --no-default-features --features esp32c6
+cargo +nightly build --target riscv32imac-unknown-none-elf --no-default-features --features esp32c6,wifi
 
 # Replace `light_wifi` with `light_eth` below to flash the "Ethernet" example
 # Replace `light_wifi` with `light_thread` below to flash the Ethernet example (you'll need an esp32c6 or esp32h2)

@@ -16,8 +16,7 @@ use core::pin::pin;
 use alloc::boxed::Box;
 
 use embassy_executor::Spawner;
-use embassy_futures::select::select3;
-use embassy_time::{Duration, Timer};
+use embassy_futures::select::select;
 
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
@@ -104,11 +103,11 @@ async fn main(_s: Spawner) {
         esp_radio::wifi::new(&init, wifi, esp_radio::wifi::Config::default()).unwrap();
 
     // Our "light" on-off cluster.
-    // Can be anything implementing `rs_matter::dm::AsyncHandler`
+    // It will toggle the light state every 5 seconds
     let on_off = on_off::OnOffHandler::new_standalone(
         Dataver::new_rand(stack.matter().rand()),
         LIGHT_ENDPOINT_ID,
-        TestOnOffDeviceLogic::new(),
+        TestOnOffDeviceLogic::new(true),
     );
 
     // Chain our endpoint clusters
@@ -142,36 +141,11 @@ async fn main(_s: Spawner) {
         (),
     ));
 
-    // Just for demoing purposes:
-    //
-    // Run a sample loop that simulates state changes triggered by the HAL
-    // Changes will be properly communicated to the Matter controllers
-    // (i.e. Google Home, Alexa) and other Matter devices thanks to subscriptions
-    let mut device = pin!(async {
-        loop {
-            // Simulate user toggling the light with a physical switch every 5 seconds
-            Timer::after(Duration::from_secs(5)).await;
-
-            // Toggle
-            on_off.set_on_off(!on_off.on_off());
-
-            // Let the Matter stack know that we have changed
-            // the state of our Light device
-            stack.notify_cluster_changed(1, TestOnOffDeviceLogic::CLUSTER.id);
-
-            info!("Light toggled");
-        }
-    });
-
-    // Schedule the Matter run & the device loop together
-    select3(
-        &mut matter,
-        &mut device,
-        connection(controller).into_fallible(),
-    )
-    .coalesce()
-    .await
-    .unwrap();
+    // Schedule the Matter run & the Wifi connection monitoring together
+    select(&mut matter, connection(controller).into_fallible())
+        .coalesce()
+        .await
+        .unwrap();
 }
 
 async fn connection(mut controller: WifiController<'_>) {
@@ -181,7 +155,7 @@ async fn connection(mut controller: WifiController<'_>) {
         if esp_radio::wifi::sta_state() == WifiStaState::Connected {
             // wait until we're no longer connected
             controller.wait_for_event(WifiEvent::StaDisconnected).await;
-            Timer::after(Duration::from_millis(5000)).await
+            embassy_time::Timer::after(embassy_time::Duration::from_millis(5000)).await
         }
         if !matches!(controller.is_started(), Ok(true)) {
             let client_config = ModeConfig::Client(
@@ -200,7 +174,7 @@ async fn connection(mut controller: WifiController<'_>) {
             Ok(_) => info!("Wifi connected!"),
             Err(e) => {
                 info!("Failed to connect to wifi: {e:?}");
-                Timer::after(Duration::from_millis(5000)).await
+                embassy_time::Timer::after(embassy_time::Duration::from_millis(5000)).await
             }
         }
     }

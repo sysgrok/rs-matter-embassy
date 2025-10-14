@@ -16,8 +16,7 @@ use core::pin::pin;
 use alloc::boxed::Box;
 
 use embassy_executor::Spawner;
-use embassy_futures::select::select3;
-use embassy_time::{Duration, Timer};
+use embassy_futures::select::select;
 
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
@@ -145,11 +144,11 @@ async fn main(_s: Spawner) {
 
     // == Step 4: ==
     // Our "light" on-off cluster.
-    // Can be anything implementing `rs_matter::dm::AsyncHandler`
+    // It will toggle the light state every 5 seconds
     let on_off = on_off::OnOffHandler::new_standalone(
         Dataver::new_rand(stack.matter().rand()),
         LIGHT_ENDPOINT_ID,
-        TestOnOffDeviceLogic::new(),
+        TestOnOffDeviceLogic::new(true),
     );
 
     // Chain our endpoint clusters
@@ -189,29 +188,8 @@ async fn main(_s: Spawner) {
         (),
     ));
 
-    // Just for demoing purposes:
-    //
-    // Run a sample loop that simulates state changes triggered by the HAL
-    // Changes will be properly communicated to the Matter controllers
-    // (i.e. Google Home, Alexa) and other Matter devices thanks to subscriptions
-    let mut device = pin!(async {
-        loop {
-            // Simulate user toggling the light with a physical switch every 5 seconds
-            Timer::after(Duration::from_secs(5)).await;
-
-            // Toggle
-            on_off.set_on_off(!on_off.on_off());
-
-            // Let the Matter stack know that we have changed
-            // the state of our Light device
-            stack.notify_cluster_changed(1, TestOnOffDeviceLogic::CLUSTER.id);
-
-            info!("Light toggled");
-        }
-    });
-
-    // Schedule the Matter run & the device loop together
-    select3(&mut matter, &mut device, &mut ot_runner)
+    // Schedule the Matter run & OpenThread run together
+    select(&mut matter, &mut ot_runner)
         .coalesce()
         .await
         .unwrap();

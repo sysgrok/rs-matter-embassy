@@ -247,7 +247,7 @@ impl NetCtl for OtNetCtl<'_> {
                     };
 
                     info!(
-                        "Found Thread network: {:x?}",
+                        "Found Thread network: {:?}",
                         Bytes(&scan_result.extended_pan_id.to_be_bytes())
                     );
 
