@@ -66,7 +66,7 @@ extern crate alloc;
 const BUMP_SIZE: usize = 16500;
 
 #[cfg(feature = "esp32")]
-const HEAP_SIZE: usize = 40 * 1024; // 45KB for ESP32, which has a disjoint heap
+const HEAP_SIZE: usize = 40 * 1024; // 40KB for ESP32, which has a disjoint heap
 #[cfg(any(feature = "esp32c3", feature = "esp32h2"))]
 const HEAP_SIZE: usize = 160 * 1024;
 #[cfg(not(any(feature = "esp32", feature = "esp32c3", feature = "esp32h2")))]
@@ -124,7 +124,7 @@ async fn main(_s: Spawner) {
     // Can be anything implementing `rs_matter::dm::AsyncHandler`
     let on_off = on_off::OnOffHandler::new_standalone(
         Dataver::new_rand(stack.matter().rand()),
-        1,
+        LIGHT_ENDPOINT_ID,
         TestOnOffDeviceLogic::new(),
     );
 
