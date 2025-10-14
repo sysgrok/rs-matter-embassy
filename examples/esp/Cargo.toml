@@ -30,13 +30,20 @@ rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
 #rs-matter = { path = "../../../rs-matter/rs-matter" }
 rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", branch = "next" }
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
-openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "esp-rs-main" }
+openthread = { git = "https://github.com/sysgrok/openthread.git" }
 #openthread = { version = "0.1", path = "../../../openthread/openthread" }
 #edge-nal = { git = "https://github.com/sysgrok/edge-net" }
 #edge-nal-embassy = { git = "https://github.com/sysgrok/edge-net" }
 #edge-mdns = { git = "https://github.com/sysgrok/edge-net" }
 #trouble-host = { version = "0.4", git = "https://github.com/embassy-rs/trouble" }
 #trouble-host = { version = "0.4", path = "../../../trouble/host" }
+esp-backtrace = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
+esp-hal = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
+esp-rtos = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
+esp-alloc = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
+esp-println = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
+esp-radio = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
+esp-bootloader-esp-idf = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
 
 [profile.dev]
 # Rust debug is too slow.
