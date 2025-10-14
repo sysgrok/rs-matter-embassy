@@ -246,7 +246,10 @@ impl NetCtl for OtNetCtl<'_> {
                         lqi: scan_result.lqi,
                     };
 
-                    info!("Found Thread network: {:x?}", Bytes(&scan_result.extended_pan_id.to_be_bytes()));
+                    info!(
+                        "Found Thread network: {:x?}",
+                        Bytes(&scan_result.extended_pan_id.to_be_bytes())
+                    );
 
                     let _ = f(&info);
                 }
