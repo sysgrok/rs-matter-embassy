@@ -37,13 +37,13 @@ openthread = { git = "https://github.com/sysgrok/openthread.git" }
 #edge-mdns = { git = "https://github.com/sysgrok/edge-net" }
 #trouble-host = { version = "0.4", git = "https://github.com/embassy-rs/trouble" }
 #trouble-host = { version = "0.4", path = "../../../trouble/host" }
-esp-backtrace = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
-esp-hal = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
-esp-rtos = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
-esp-alloc = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
-esp-println = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
-esp-radio = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
-esp-bootloader-esp-idf = { git = "https://github.com/bugadani/esp-hal", branch = "task-delete" }
+esp-backtrace = { git = "https://github.com/esp-rs/esp-hal" }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal" }
+esp-rtos = { git = "https://github.com/esp-rs/esp-hal" }
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal" }
+esp-println = { git = "https://github.com/esp-rs/esp-hal" }
+esp-radio = { git = "https://github.com/esp-rs/esp-hal" }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal" }
 
 [profile.dev]
 # Rust debug is too slow.
