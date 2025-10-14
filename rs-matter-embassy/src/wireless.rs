@@ -34,6 +34,12 @@ pub mod esp {
     pub use super::wifi::esp_wifi::*;
 }
 
+#[cfg(feature = "rp")]
+pub mod rp {
+    #[cfg(feature = "embassy-net")]
+    pub use super::wifi::rp_wifi::*;
+}
+
 /// A type alias for an Embassy Matter stack running over a wireless network (Wifi or Thread) and BLE.
 ///
 /// The difference between this and `WirelessMatterStack` is that all resources necessary for the

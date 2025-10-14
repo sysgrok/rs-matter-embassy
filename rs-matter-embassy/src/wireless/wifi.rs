@@ -23,6 +23,8 @@ use super::{BleDriver, BleDriverTask, BleDriverTaskImpl, EmbassyWirelessMatterSt
 
 #[cfg(feature = "esp")]
 pub mod esp_wifi;
+#[cfg(feature = "rp")]
+pub mod rp_wifi;
 
 /// A type alias for an Embassy Matter stack running over Wifi (and BLE, during commissioning).
 ///

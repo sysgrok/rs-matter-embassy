@@ -16,17 +16,11 @@ use core::mem::MaybeUninit;
 use core::pin::pin;
 use core::ptr::addr_of_mut;
 
-use bt_hci::controller::ExternalController;
-
-use cyw43_pio::PioSpi;
-
 use embassy_executor::Spawner;
 use embassy_futures::select::select;
 use embassy_rp::bind_interrupts;
-use embassy_rp::gpio::{Level, Output};
-use embassy_rp::peripherals::{DMA_CH0, PIO0};
-use embassy_rp::pio::{InterruptHandler, Pio};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_rp::peripherals::PIO0;
+use embassy_rp::pio::InterruptHandler;
 use embassy_time::{Duration, Timer};
 
 use embedded_alloc::LlffHeap;
@@ -35,11 +29,6 @@ use panic_rtt_target as _;
 
 use defmt::{info, unwrap};
 
-use rs_matter_embassy::enet::net::driver::{Driver as _, HardwareAddress as DriverHardwareAddress};
-use rs_matter_embassy::enet::{
-    create_link_local_ipv6, multicast_mac_for_link_local_ipv6, MDNS_MULTICAST_MAC_IPV4,
-    MDNS_MULTICAST_MAC_IPV6,
-};
 use rs_matter_embassy::epoch::epoch;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
 use rs_matter_embassy::matter::dm::clusters::on_off::test::TestOnOffDeviceLogic;
@@ -52,8 +41,8 @@ use rs_matter_embassy::matter::utils::select::Coalesce;
 use rs_matter_embassy::matter::{clusters, devices};
 use rs_matter_embassy::rand::rp::rp_rand;
 use rs_matter_embassy::stack::persist::DummyKvBlobStore;
-use rs_matter_embassy::wifi::rp::Cyw43WifiController;
-use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiMatterStack, PreexistingWifiDriver};
+use rs_matter_embassy::wireless::rp::RpWifiDriver;
+use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiMatterStack};
 
 macro_rules! mk_static {
     ($t:ty) => {{
@@ -83,7 +72,7 @@ static HEAP: LlffHeap = LlffHeap::empty();
 const LOG_RINGBUF_SIZE: usize = 2048;
 
 #[embassy_executor::main]
-async fn main(spawner: Spawner) {
+async fn main(_spawner: Spawner) {
     // `rs-matter` uses the `x509` crate which (still) needs a few kilos of heap space
     {
         const HEAP_SIZE: usize = 8192;
@@ -102,63 +91,18 @@ async fn main(spawner: Spawner) {
     info!("Starting...");
 
     #[cfg(feature = "skip-cyw43-firmware")]
-    let (fw, clm, btfw) = (&[], &[], &[]);
+    let (fw, clm, btfw) = (
+        Option::<&[u8]>::None,
+        Option::<&[u8]>::None,
+        Option::<&[u8]>::None,
+    );
 
     #[cfg(not(feature = "skip-cyw43-firmware"))]
-    let (fw, clm, btfw) = {
-        let fw = include_bytes!("../../cyw43-firmware/43439A0.bin");
-        let clm = include_bytes!("../../cyw43-firmware/43439A0_clm.bin");
-        let btfw = include_bytes!("../../cyw43-firmware/43439A0_btfw.bin");
-        (fw, clm, btfw)
-    };
-
-    let pwr = Output::new(p.PIN_23, Level::Low);
-    let cs = Output::new(p.PIN_25, Level::High);
-    let mut pio = Pio::new(p.PIO0, Irqs);
-    let spi = PioSpi::new(
-        &mut pio.common,
-        pio.sm0,
-        // NOTE: There is a BLE packet corruption bug with yet-unknown reason.
-        // Lowering the pio-SPI clock by 8x seems to fix it or at least makes it
-        // rare enough so that it does not happen during the BLE commissioning.
-        cyw43_pio::DEFAULT_CLOCK_DIVIDER * 8,
-        pio.irq0,
-        cs,
-        p.PIN_24,
-        p.PIN_29,
-        p.DMA_CH0,
+    let (fw, clm, btfw) = (
+        Option::<&[u8]>::Some(include_bytes!("../../cyw43-firmware/43439A0.bin")),
+        Option::<&[u8]>::Some(include_bytes!("../../cyw43-firmware/43439A0_clm.bin")),
+        Option::<&[u8]>::Some(include_bytes!("../../cyw43-firmware/43439A0_btfw.bin")),
     );
-
-    let state = mk_static!(cyw43::State, cyw43::State::new());
-    let (net_device, bt_device, mut control, runner) =
-        cyw43::new_with_bluetooth(state, pwr, spi, fw, btfw).await;
-    unwrap!(spawner.spawn(cyw43_task(runner)));
-    control.init(clm).await; // We should have the Wifi MAC address now
-
-    // cyw43 is a bit special in that it needs to have allowlisted all multicast MAC addresses
-    // it should listen on. Therefore, add the mDNS ipv4 and ipv6 multicast MACs to the list,
-    // as well as the ipv6 neightbour solicitation requests' MAC.
-    let DriverHardwareAddress::Ethernet(mac) = net_device.hardware_address() else {
-        unreachable!()
-    };
-    unwrap!(
-        control.add_multicast_address(MDNS_MULTICAST_MAC_IPV4).await,
-        "Adding multicast addr failed",
-    );
-    unwrap!(
-        control.add_multicast_address(MDNS_MULTICAST_MAC_IPV6).await,
-        "Adding multicast addr failed",
-    );
-    unwrap!(
-        control
-            .add_multicast_address(multicast_mac_for_link_local_ipv6(&create_link_local_ipv6(
-                &mac,
-            )))
-            .await,
-        "Adding multicast addr failed",
-    );
-
-    let controller: ExternalController<_, 20> = ExternalController::new(bt_device);
 
     // == Step 2: ==
     // Statically allocate the Matter stack.
@@ -203,10 +147,8 @@ async fn main(spawner: Spawner) {
     let mut matter = pin!(stack.run(
         // The Matter stack needs Wifi
         EmbassyWifi::new(
-            PreexistingWifiDriver::new(
-                net_device,
-                Cyw43WifiController::<NoopRawMutex>::new(control),
-                controller
+            RpWifiDriver::new(
+                p.PIN_23, p.PIN_25, p.PIN_24, p.PIN_29, p.DMA_CH0, p.PIO0, Irqs, fw, clm, btfw,
             ),
             stack
         ),
@@ -243,13 +185,6 @@ async fn main(spawner: Spawner) {
 
     // Schedule the Matter run & the device loop together
     unwrap!(select(&mut matter, &mut device).coalesce().await);
-}
-
-#[embassy_executor::task]
-async fn cyw43_task(
-    runner: cyw43::Runner<'static, Output<'static>, PioSpi<'static, PIO0, 0, DMA_CH0>>,
-) -> ! {
-    runner.run().await
 }
 
 /// Endpoint 0 (the root endpoint) always runs
