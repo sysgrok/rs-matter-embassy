@@ -218,11 +218,16 @@ impl NetCtl for OtNetCtl<'_> {
     where
         F: FnMut(&NetworkScanInfo) -> Result<(), Error>,
     {
-        const SCAN_DURATION_MILLIS: u16 = 2000;
+        const SCAN_DURATION_MILLIS: u16 = 500;
+
+        info!("Thread scan request");
+
+        //let _ = self.0.enable_thread(true);
 
         self.0
             .scan(Channels::all(), SCAN_DURATION_MILLIS, |scan_result| {
                 let Some(scan_result) = scan_result else {
+                    debug!("Thread scan reported as complete");
                     return;
                 };
 
@@ -230,7 +235,7 @@ impl NetCtl for OtNetCtl<'_> {
                     .map(|id| id == scan_result.extended_pan_id.to_be_bytes())
                     .unwrap_or(true)
                 {
-                    let _ = f(&NetworkScanInfo::Thread {
+                    let info = NetworkScanInfo::Thread {
                         pan_id: scan_result.pan_id,
                         ext_pan_id: scan_result.extended_pan_id,
                         network_name: scan_result.network_name,
@@ -239,11 +244,19 @@ impl NetCtl for OtNetCtl<'_> {
                         ext_addr: &scan_result.ext_address.to_be_bytes(),
                         rssi: scan_result.rssi,
                         lqi: scan_result.lqi,
-                    });
+                    };
+
+                    info!("Found Thread network: {:x?}", Bytes(&scan_result.extended_pan_id.to_be_bytes()));
+
+                    let _ = f(&info);
                 }
             })
             .await
-            .map_err(to_net_matter_err)
+            .map_err(to_net_matter_err)?;
+
+        info!("Thread scan complete");
+
+        Ok(())
     }
 
     async fn connect(&self, creds: &WirelessCreds<'_>) -> Result<(), NetCtlError> {

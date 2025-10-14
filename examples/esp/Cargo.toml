@@ -24,13 +24,18 @@ name = "light_thread"
 required-features = ["thread"]
 harness = false
 
+[[bin]]
+name = "light_thread_coex"
+required-features = ["thread"]
+harness = false
+
 [patch.crates-io]
 #rs-matter = { git = "https://github.com/project-chip/rs-matter" }
 rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
 #rs-matter = { path = "../../../rs-matter/rs-matter" }
 rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", branch = "next" }
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
-openthread = { git = "https://github.com/sysgrok/openthread.git" }
+openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
 #openthread = { version = "0.1", path = "../../../openthread/openthread" }
 #edge-nal = { git = "https://github.com/sysgrok/edge-net" }
 #edge-nal-embassy = { git = "https://github.com/sysgrok/edge-net" }

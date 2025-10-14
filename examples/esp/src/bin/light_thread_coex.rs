@@ -1,7 +1,8 @@
 //! An example utilizing the `EmbassyThreadMatterStack` struct.
+//! TODO: WORK IN PROGRESS
 //!
 //! As the name suggests, this Matter stack assembly uses Thread as the main transport,
-//! and thus BLE for commissioning, in non-concurrent commissioning mode.
+//! and thus BLE for commissioning, in concurrent commissioning mode.
 //!
 //! If you want to use Ethernet, utilize `EmbassyEthMatterStack` instead.
 //!
@@ -45,7 +46,7 @@ use tinyrlibc as _;
 
 extern crate alloc;
 
-const BUMP_SIZE: usize = 25000;
+const BUMP_SIZE: usize = 18500;
 
 #[cfg(feature = "esp32")]
 const HEAP_SIZE: usize = 40 * 1024; // 40KB for ESP32, which has a disjoint heap
@@ -146,7 +147,7 @@ async fn main(_s: Spawner) {
     //
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
     let store = stack.create_shared_store(DummyKvBlobStore);
-    let mut matter = pin!(stack.run(
+    let mut matter = pin!(stack.run_coex(
         // The Matter stack needs to instantiate an `openthread` Radio
         EmbassyThread::new(
             EspThreadDriver::new(&init, peripherals.IEEE802154, peripherals.BT),
