@@ -168,9 +168,16 @@ async fn main(_s: Spawner) {
             Async(desc::DescHandler::new(Dataver::new_rand(stack.matter().rand())).adapt()),
         );
 
+    // Create the persister & load any previously saved state
+    // `EmbassyPersist`+`EmbassyKvBlobStore` saves to a user-supplied NOR Flash region
+    // However, for this demo and for simplicity, we use a dummy persister that does nothing
+    let persist = stack
+        .create_persist_with_comm_window(DummyKvBlobStore)
+        .await
+        .unwrap();
+
     // Run the Matter stack with our handler
     // Using `pin!` is completely optional, but reduces the size of the final future
-    let store = stack.create_shared_store(DummyKvBlobStore);
     let mut matter = pin!(stack.run_preex(
         // The Matter stack needs to open two UDP sockets
         OtNetStack::new(ot.clone()),
@@ -179,9 +186,7 @@ async fn main(_s: Spawner) {
         // The Matter stack needs an mDNS instance to run
         OtMdns::new(ot.clone()),
         // The Matter stack needs a persister to store its state
-        // `EmbassyPersist`+`EmbassyKvBlobStore` saves to a user-supplied NOR Flash region
-        // However, for this demo and for simplicity, we use a dummy persister that does nothing
-        &store,
+        &persist,
         // Our `AsyncHandler` + `AsyncMetadata` impl
         (NODE, handler),
         // No user future to run

@@ -138,12 +138,16 @@ async fn main(_spawner: Spawner) {
             Async(desc::DescHandler::new(Dataver::new_rand(stack.matter().rand())).adapt()),
         );
 
+    let persist = stack
+        .create_persist_with_comm_window(DummyKvBlobStore)
+        .await
+        .unwrap();
+
     // == Step 4: ==
     // Run the Matter stack with our handler
     // Using `pin!` is completely optional, but reduces the size of the final future
     //
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
-    let store = stack.create_shared_store(DummyKvBlobStore);
     let matter = pin!(stack.run_coex(
         // The Matter stack needs Wifi and BLE
         EmbassyWifi::new(
@@ -155,7 +159,7 @@ async fn main(_spawner: Spawner) {
         // The Matter stack needs a persister to store its state
         // `EmbassyPersist`+`EmbassyKvBlobStore` saves to a user-supplied NOR Flash region
         // However, for this demo and for simplicity, we use a dummy persister that does nothing
-        &store,
+        &persist,
         // Our `AsyncHandler` + `AsyncMetadata` impl
         (NODE, handler),
         // No user future to run
