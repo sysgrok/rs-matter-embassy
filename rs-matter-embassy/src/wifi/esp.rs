@@ -115,7 +115,7 @@ where
         let ssid = core::str::from_utf8(ssid).unwrap_or("???");
         let pass = core::str::from_utf8(pass).unwrap_or("???");
 
-        info!("Wifi connect request for SSID {ssid}");
+        info!("Wifi connect request for SSID {}", ssid);
 
         if ctl.is_started().map_err(to_ctl_err)? {
             ctl.stop_async().await.map_err(to_ctl_err)?;
