@@ -13,13 +13,12 @@
 use core::env;
 use core::pin::pin;
 
-use alloc::boxed::Box;
-
 use embassy_executor::Spawner;
 use embassy_futures::select::select;
 
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
+use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 use esp_radio::wifi::{ClientConfig, ModeConfig, WifiController, WifiEvent, WifiStaState};
 
@@ -42,14 +41,25 @@ use rs_matter_embassy::stack::utils::futures::IntoFaillble;
 
 extern crate alloc;
 
+macro_rules! mk_static {
+    ($t:ty) => {{
+        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+        #[deny(unused_attributes)]
+        let x = STATIC_CELL.uninit();
+        x
+    }};
+    ($t:ty,$val:expr) => {{
+        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+        #[deny(unused_attributes)]
+        let x = STATIC_CELL.uninit().write($val);
+        x
+    }};
+}
+
 const BUMP_SIZE: usize = 16500;
 
-#[cfg(feature = "esp32")]
-const HEAP_SIZE: usize = 40 * 1024; // 40KB for ESP32, which has a disjoint heap
-#[cfg(any(feature = "esp32c3", feature = "esp32h2"))]
-const HEAP_SIZE: usize = 160 * 1024;
-#[cfg(not(any(feature = "esp32", feature = "esp32c3", feature = "esp32h2")))]
-const HEAP_SIZE: usize = 186 * 1024;
+/// Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
+const HEAP_SIZE: usize = 100 * 1024;
 
 const WIFI_SSID: &str = env!("WIFI_SSID");
 const WIFI_PASS: &str = env!("WIFI_PASS");
@@ -62,12 +72,8 @@ async fn main(_s: Spawner) {
 
     info!("Starting...");
 
-    // Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
-    // However since `esp32` specifically has a disjoint heap which causes bss size troubles, it is easier
-    // to allocate the statics once from heap as well
-    heap_allocator!(size: HEAP_SIZE);
-    #[cfg(feature = "esp32")]
-    heap_allocator!(#[link_section = ".dram2_uninit"] size: 96 * 1024);
+    heap_allocator!(size: HEAP_SIZE - RECLAIMED_RAM);
+    heap_allocator!(#[ram(reclaimed)] size: RECLAIMED_RAM);
 
     // == Step 1: ==
     // Necessary `esp-hal` and `esp-wifi` initialization boilerplate
@@ -88,14 +94,9 @@ async fn main(_s: Spawner) {
 
     let init = esp_radio::init().unwrap();
 
-    let stack =
-        Box::leak(Box::new_uninit()).init_with(EmbassyEthMatterStack::<BUMP_SIZE, ()>::init(
-            &TEST_DEV_DET,
-            TEST_DEV_COMM,
-            &TEST_DEV_ATT,
-            epoch,
-            esp_rand,
-        ));
+    let stack = mk_static!(EmbassyEthMatterStack::<BUMP_SIZE, ()>).init_with(
+        EmbassyEthMatterStack::init(&TEST_DEV_DET, TEST_DEV_COMM, &TEST_DEV_ATT, epoch, esp_rand),
+    );
 
     // Configure and start the Wifi first
     let wifi = peripherals.WIFI;
@@ -203,3 +204,16 @@ const NODE: Node = Node {
         },
     ],
 };
+
+#[cfg(feature = "esp32")]
+const RECLAIMED_RAM: usize = 98767;
+#[cfg(feature = "esp32c2")]
+const RECLAIMED_RAM: usize = 66416;
+#[cfg(feature = "esp32c3")]
+const RECLAIMED_RAM: usize = 66320;
+#[cfg(feature = "esp32c6")]
+const RECLAIMED_RAM: usize = 65536;
+#[cfg(feature = "esp32h2")]
+const RECLAIMED_RAM: usize = 69392;
+#[cfg(feature = "esp32s3")]
+const RECLAIMED_RAM: usize = 73744;
