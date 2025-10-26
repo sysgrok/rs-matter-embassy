@@ -42,7 +42,8 @@ use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiMatterStack};
 
 extern crate alloc;
 
-const BUMP_SIZE: usize = 16500;
+const BUMP_SIZE: usize = 30000;
+//const BUMP_SIZE: usize = 16500;
 
 #[cfg(feature = "esp32")]
 const HEAP_SIZE: usize = 40 * 1024; // 40KB for ESP32, which has a disjoint heap
