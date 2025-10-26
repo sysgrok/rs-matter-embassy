@@ -116,35 +116,35 @@ jobs:
       - name: Prepare bloat report from the previous builds
         run: |
             python .github/scripts/memory/gh_sizes.py \
-              esp:light_eth infologs-optz-ltofat riscv32imac-unknown-none-elf \
+              esp_light_eth infologs-optz-ltofat riscv32imac-unknown-none-elf \
               examples/esp/target/riscv32imac-unknown-none-elf/release/light_eth \
               /tmp/bloat_reports/
             python .github/scripts/memory/gh_sizes.py \
-              esp:light_eth2 infologs-optz-ltofat riscv32imac-unknown-none-elf \
+              esp_light_eth2 infologs-optz-ltofat riscv32imac-unknown-none-elf \
               examples/esp/target/riscv32imac-unknown-none-elf/release/light_eth2 \
               /tmp/bloat_reports/
             python .github/scripts/memory/gh_sizes.py \
-              esp:light_thread infologs-optz-ltofat riscv32imac-unknown-none-elf \
+              esp_light_thread infologs-optz-ltofat riscv32imac-unknown-none-elf \
               examples/esp/target/riscv32imac-unknown-none-elf/release/light_thread \
               /tmp/bloat_reports/
             python .github/scripts/memory/gh_sizes.py \
-              esp:light_wifi infologs-optz-ltofat riscv32imac-unknown-none-elf \
+              esp_light_wifi infologs-optz-ltofat riscv32imac-unknown-none-elf \
               examples/esp/target/riscv32imac-unknown-none-elf/release/light_wifi \
               /tmp/bloat_reports/
             python .github/scripts/memory/gh_sizes.py \
-              nrf52:light_eth defmtlogs-optz-ltofat thumbv7em-none-eabi \
+              nrf52_light_eth defmtlogs-optz-ltofat thumbv7em-none-eabi \
               examples/nrf/target/thumbv7em-none-eabi/release/light_eth \
               /tmp/bloat_reports/
             python .github/scripts/memory/gh_sizes.py \
-              nrf52:light_thread defmtlogs-optz-ltofat thumbv7em-none-eabi \
+              nrf52_light_thread defmtlogs-optz-ltofat thumbv7em-none-eabi \
               examples/nrf/target/thumbv7em-none-eabi/release/light_thread \
               /tmp/bloat_reports/
             python .github/scripts/memory/gh_sizes.py \
-              rpz:light_eth defmtlogs-optz-ltofat thumbv6m-none-eabi \
+              rpz_light_eth defmtlogs-optz-ltofat thumbv6m-none-eabi \
               examples/rp/target/thumbv6m-none-eabi/release/light_eth \
               /tmp/bloat_reports/
             python .github/scripts/memory/gh_sizes.py \
-              rpz:light_wifi defmtlogs-optz-ltofat thumbv6m-none-eabi \
+              rpz_light_wifi defmtlogs-optz-ltofat thumbv6m-none-eabi \
               examples/rp/target/thumbv6m-none-eabi/release/light_wifi \
               /tmp/bloat_reports/
 
