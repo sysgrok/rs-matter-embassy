@@ -57,19 +57,33 @@ jobs:
       - name: Examples-ESP-Build | Fmt Check
         run: cd examples/esp; cargo fmt -- --check
 
-      - name: Examples-ESP-Build | Clippy
+      - name: Examples-ESP-Build | Clippy - Thread
         env:
           WIFI_SSID: "ssid"
           WIFI_PASS: "pass"
           THREAD_DATASET: "000003"
-        run: cd examples/esp; cargo clippy --features thread,wifi --no-deps -- -Dwarnings
+        run: cd examples/esp; cargo clippy --features thread --no-deps -- -Dwarnings
 
-      - name: Examples-ESP-Build | Compile
+      - name: Examples-ESP-Build | Clippy - Wifi
         env:
           WIFI_SSID: "ssid"
           WIFI_PASS: "pass"
           THREAD_DATASET: "000003"
-        run: cd examples/esp; cargo build --features thread,wifi --release
+        run: cd examples/esp; cargo clippy --features wifi --no-deps -- -Dwarnings
+
+      - name: Examples-ESP-Build | Compile - Thread
+        env:
+          WIFI_SSID: "ssid"
+          WIFI_PASS: "pass"
+          THREAD_DATASET: "000003"
+        run: cd examples/esp; cargo build --features thread --release
+
+      - name: Examples-ESP-Build | Compile - Wifi
+        env:
+          WIFI_SSID: "ssid"
+          WIFI_PASS: "pass"
+          THREAD_DATASET: "000003"
+        run: cd examples/esp; cargo build --features wifi --release
 
       - name: Examples-RP-Build | Fmt Check
         run: cd examples/rp; cargo fmt -- --check
