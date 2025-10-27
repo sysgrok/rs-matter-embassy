@@ -43,23 +43,34 @@ extern crate alloc;
 
 macro_rules! mk_static {
     ($t:ty) => {{
-        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
-        #[deny(unused_attributes)]
-        let x = STATIC_CELL.uninit();
-        x
-    }};
-    ($t:ty,$val:expr) => {{
-        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
-        #[deny(unused_attributes)]
-        let x = STATIC_CELL.uninit().write($val);
-        x
+        #[cfg(not(feature = "esp32"))]
+        {
+            static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+            STATIC_CELL.uninit()
+        }
+        #[cfg(feature = "esp32")]
+        alloc::boxed::Box::leak(alloc::boxed::Box::<$t>::new_uninit())
     }};
 }
 
+/// The amount of memory for allocating all `rs-matter-stack` futures created during
+/// the execution of the `run*` methods.
+/// This does NOT include the rest of the Matter stack.
+///
+/// The futures of `rs-matter-stack` created during the execution of the `run*` methods
+/// are allocated in a special way using a small bump allocator which results
+/// in a much lower memory usage by those.
+///
+/// If - for your platform - this size is not enough, increase it until
+/// the program runs without panics during the stack initialization.
 const BUMP_SIZE: usize = 25000;
 
 /// Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
+#[cfg(not(feature = "esp32"))]
 const HEAP_SIZE: usize = 100 * 1024;
+/// On the esp32, we allocate the Matter Stack from heap as well, due to the non-contiguous memory regions on that chip
+#[cfg(feature = "esp32")]
+const HEAP_SIZE: usize = 140 * 1024;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 

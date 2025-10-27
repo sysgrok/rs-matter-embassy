@@ -56,15 +56,10 @@ use tinyrlibc as _;
 macro_rules! mk_static {
     ($t:ty) => {{
         static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
-        #[deny(unused_attributes)]
-        let x = STATIC_CELL.uninit();
-        x
+        STATIC_CELL.uninit()
     }};
     ($t:ty,$val:expr) => {{
-        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
-        #[deny(unused_attributes)]
-        let x = STATIC_CELL.uninit().write($val);
-        x
+        mk_static!($t).write($val)
     }};
 }
 
@@ -79,6 +74,16 @@ unsafe fn EGU1_SWI1() {
 
 static RADIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
+/// The amount of memory for allocating all `rs-matter-stack` futures created during
+/// the execution of the `run*` methods.
+/// This does NOT include the rest of the Matter stack.
+///
+/// The futures of `rs-matter-stack` created during the execution of the `run*` methods
+/// are allocated in a special way using a small bump allocator which results
+/// in a much lower memory usage by those.
+///
+/// If - for your platform - this size is not enough, increase it until
+/// the program runs without panics during the stack initialization.
 const BUMP_SIZE: usize = 15500;
 
 #[global_allocator]
