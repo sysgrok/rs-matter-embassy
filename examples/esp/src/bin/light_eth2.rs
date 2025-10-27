@@ -13,13 +13,12 @@
 use core::env;
 use core::pin::pin;
 
-use alloc::boxed::Box;
-
 use embassy_executor::Spawner;
 use embassy_futures::select::select;
 
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
+use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 use esp_radio::ieee802154::Ieee802154;
 
@@ -48,14 +47,36 @@ use tinyrlibc as _;
 
 extern crate alloc;
 
+macro_rules! mk_static {
+    ($t:ty) => {{
+        #[cfg(not(feature = "esp32"))]
+        {
+            static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+            STATIC_CELL.uninit()
+        }
+        #[cfg(feature = "esp32")]
+        alloc::boxed::Box::leak(alloc::boxed::Box::<$t>::new_uninit())
+    }};
+}
+
+/// The amount of memory for allocating all `rs-matter-stack` futures created during
+/// the execution of the `run*` methods.
+/// This does NOT include the rest of the Matter stack.
+///
+/// The futures of `rs-matter-stack` created during the execution of the `run*` methods
+/// are allocated in a special way using a small bump allocator which results
+/// in a much lower memory usage by those.
+///
+/// If - for your platform - this size is not enough, increase it until
+/// the program runs without panics during the stack initialization.
 const BUMP_SIZE: usize = 18500;
 
+/// Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
+#[cfg(not(feature = "esp32"))]
+const HEAP_SIZE: usize = 100 * 1024;
+/// On the esp32, we allocate the Matter Stack from heap as well, due to the non-contiguous memory regions on that chip
 #[cfg(feature = "esp32")]
-const HEAP_SIZE: usize = 40 * 1024; // 40KB for ESP32, which has a disjoint heap
-#[cfg(any(feature = "esp32c3", feature = "esp32h2"))]
-const HEAP_SIZE: usize = 160 * 1024;
-#[cfg(not(any(feature = "esp32", feature = "esp32c3", feature = "esp32h2")))]
-const HEAP_SIZE: usize = 186 * 1024;
+const HEAP_SIZE: usize = 140 * 1024;
 
 const THREAD_DATASET: &str = env!("THREAD_DATASET");
 
@@ -67,12 +88,8 @@ async fn main(_s: Spawner) {
 
     info!("Starting...");
 
-    // Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
-    // However since `esp32` specifically has a disjoint heap which causes bss size troubles, it is easier
-    // to allocate the statics once from heap as well
-    heap_allocator!(size: HEAP_SIZE);
-    #[cfg(feature = "esp32")]
-    heap_allocator!(#[link_section = ".dram2_uninit"] size: 96 * 1024);
+    heap_allocator!(size: HEAP_SIZE - RECLAIMED_RAM);
+    heap_allocator!(#[ram(reclaimed)] size: RECLAIMED_RAM);
 
     // == Step 1: ==
     // Necessary `esp-hal` and `esp-wifi` initialization boilerplate
@@ -103,7 +120,7 @@ async fn main(_s: Spawner) {
 
     // == Step 2: ==
     // Allocate the Matter stack.
-    let stack = Box::leak(Box::new_uninit()).init_with(EthMatterStack::<BUMP_SIZE, ()>::init(
+    let stack = mk_static!(EthMatterStack::<BUMP_SIZE, ()>).init_with(EthMatterStack::init(
         &TEST_BASIC_INFO,
         BasicCommData {
             password: TEST_DEV_COMM.password,
@@ -115,7 +132,7 @@ async fn main(_s: Spawner) {
     ));
 
     let mut ot_rng = MatterRngCore::new(stack.matter().rand());
-    let ot_resources = Box::leak(Box::new_uninit()).init_with(OtMatterResources::init());
+    let ot_resources = mk_static!(OtMatterResources).init_with(OtMatterResources::init());
 
     let mut ot_settings = RamSettings::new(&mut ot_resources.settings_buf);
 
@@ -223,3 +240,16 @@ const NODE: Node = Node {
         },
     ],
 };
+
+#[cfg(feature = "esp32")]
+const RECLAIMED_RAM: usize = 98767;
+#[cfg(feature = "esp32c2")]
+const RECLAIMED_RAM: usize = 66416;
+#[cfg(feature = "esp32c3")]
+const RECLAIMED_RAM: usize = 66320;
+#[cfg(feature = "esp32c6")]
+const RECLAIMED_RAM: usize = 65536;
+#[cfg(feature = "esp32h2")]
+const RECLAIMED_RAM: usize = 69392;
+#[cfg(feature = "esp32s3")]
+const RECLAIMED_RAM: usize = 73744;
