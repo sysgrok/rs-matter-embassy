@@ -22,6 +22,7 @@ use esp_alloc::heap_allocator;
 use esp_backtrace as _;
 use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
+use esp_metadata_generated::memory_range;
 
 use log::info;
 
@@ -71,6 +72,9 @@ const HEAP_SIZE: usize = 100 * 1024;
 /// On the esp32, we allocate the Matter Stack from heap as well, due to the non-contiguous memory regions on that chip
 #[cfg(feature = "esp32")]
 const HEAP_SIZE: usize = 140 * 1024;
+
+const RECLAIMED_RAM: usize =
+    memory_range!("DRAM2_UNINIT").end - memory_range!("DRAM2_UNINIT").start;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -183,16 +187,3 @@ const NODE: Node = Node {
         },
     ],
 };
-
-#[cfg(feature = "esp32")]
-const RECLAIMED_RAM: usize = 98767;
-#[cfg(feature = "esp32c2")]
-const RECLAIMED_RAM: usize = 66416;
-#[cfg(feature = "esp32c3")]
-const RECLAIMED_RAM: usize = 66320;
-#[cfg(feature = "esp32c6")]
-const RECLAIMED_RAM: usize = 65536;
-#[cfg(feature = "esp32h2")]
-const RECLAIMED_RAM: usize = 69392;
-#[cfg(feature = "esp32s3")]
-const RECLAIMED_RAM: usize = 73744;
