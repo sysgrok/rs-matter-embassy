@@ -42,14 +42,6 @@ openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next
 #edge-mdns = { git = "https://github.com/sysgrok/edge-net" }
 #trouble-host = { version = "0.4", git = "https://github.com/embassy-rs/trouble" }
 #trouble-host = { version = "0.4", path = "../../../trouble/host" }
-esp-backtrace = { git = "https://github.com/esp-rs/esp-hal" }
-esp-hal = { git = "https://github.com/esp-rs/esp-hal" }
-esp-rtos = { git = "https://github.com/esp-rs/esp-hal" }
-esp-alloc = { git = "https://github.com/esp-rs/esp-hal" }
-esp-println = { git = "https://github.com/esp-rs/esp-hal" }
-esp-radio = { git = "https://github.com/esp-rs/esp-hal" }
-esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal" }
-esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal" }
 
 [profile.dev]
 # Rust debug is too slow.
