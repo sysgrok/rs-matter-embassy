@@ -23,13 +23,8 @@ rs-matter-stack = { git = "https://github.com/ivmarkov/rs-matter-stack.git", bra
 #rs-matter-stack = { path = "../../rs-matter-stack" }
 openthread = { git = "https://github.com/sysgrok/openthread.git" }
 #openthread = { version = "0.1", path = "../../../openthread/openthread" }
-#edge-nal = { git = "https://github.com/sysgrok/edge-net" }
-#edge-nal-embassy = { git = "https://github.com/sysgrok/edge-net" }
-#edge-mdns = { git = "https://github.com/sysgrok/edge-net" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
-#trouble-host = { version = "0.4", git = "https://github.com/embassy-rs/trouble" }
-#trouble-host = { version = "0.4", path = "../../../trouble/host" }
 
 [profile.release]
 opt-level = "s"
@@ -193,9 +188,9 @@ esp-radio = { version = "0.17", optional = true, features = ["ble"] }
 esp-hal = { version = "1", optional = true, features = ["unstable"] }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the RPi Pico W MCU
-cyw43 = { version = "0.5", optional = true, features = ["firmware-logs", "bluetooth"] }
-cyw43-pio = { version = "0.8", optional = true }
-embassy-rp = { version = "0.8", optional = true, features = ["unstable-pac", "rp2040"] }
+cyw43 = { version = "0.6", optional = true, features = ["firmware-logs", "bluetooth"] }
+cyw43-pio = { version = "0.9", optional = true }
+embassy-rp = { version = "0.9", optional = true, features = ["unstable-pac", "rp2040"] }
 rand_core = { version = "0.9", optional = true }
 embassy-net-driver-channel = { version = "0.3", optional = true }
 

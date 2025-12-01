@@ -37,11 +37,6 @@ rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", bran
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
 openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
 #openthread = { version = "0.1", path = "../../../openthread/openthread" }
-#edge-nal = { git = "https://github.com/sysgrok/edge-net" }
-#edge-nal-embassy = { git = "https://github.com/sysgrok/edge-net" }
-#edge-mdns = { git = "https://github.com/sysgrok/edge-net" }
-#trouble-host = { version = "0.4", git = "https://github.com/embassy-rs/trouble" }
-#trouble-host = { version = "0.4", path = "../../../trouble/host" }
 
 [profile.dev]
 # Rust debug is too slow.

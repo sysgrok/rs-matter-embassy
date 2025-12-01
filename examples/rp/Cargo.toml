@@ -32,18 +32,6 @@ rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", bran
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
 openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
 #openthread = { version = "0.1", path = "../../../openthread/openthread" }
-#edge-nal = { git = "https://github.com/sysgrok/edge-net" }
-#edge-nal-embassy = { git = "https://github.com/sysgrok/edge-net" }
-#edge-mdns = { git = "https://github.com/sysgrok/edge-net" }
-cyw43 = { git = "https://github.com/embassy-rs/embassy" }
-cyw43-pio = { git = "https://github.com/embassy-rs/embassy" }
-embassy-rp = { git = "https://github.com/embassy-rs/embassy" }
-embassy-time-driver = { git = "https://github.com/embassy-rs/embassy" }
-embassy-net-driver = { git = "https://github.com/embassy-rs/embassy" }
-embassy-net-driver-channel = { git = "https://github.com/embassy-rs/embassy" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy" }
-#trouble-host = { version = "0.4", git = "https://github.com/embassy-rs/trouble" }
-#trouble-host = { version = "0.4", path = "../../../trouble/host" }
 
 [features]
 skip-cyw43-firmware = []
@@ -51,7 +39,7 @@ skip-cyw43-firmware = []
 [dependencies]
 embassy-executor = { version = "0.9", default-features = false, features = ["arch-cortex-m", "executor-thread", "defmt"] }
 embassy-time = { version = "0.5", default-features = false, features = ["defmt", "defmt-timestamp-uptime-ms"] }
-embassy-rp = { version = "0.8", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
+embassy-rp = { version = "0.9", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
 embassy-futures = "0.1.1"
 embassy-sync = { version = "0.7", features = ["defmt"] }
 defmt = "0.3"
@@ -60,8 +48,8 @@ rs-matter-embassy = { path = "../../rs-matter-embassy", features = ["embassy-net
 
 # Wireless examples
 bt-hci = { version = "0.6", default-features = false, features = ["defmt"] }
-cyw43 = { version = "0.5", features = ["firmware-logs", "defmt", "bluetooth"] }
-cyw43-pio = "0.8"
+cyw43 = { version = "0.6", features = ["firmware-logs", "defmt", "bluetooth"] }
+cyw43-pio = "0.9"
 
 # W5500 Ethernet examples
 embassy-net-wiznet = { version = "0.2", features = ["defmt"] }
