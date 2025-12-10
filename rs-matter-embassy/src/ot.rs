@@ -348,7 +348,7 @@ impl ThreadDiag for OtNetCtl<'_> {
         f(None)
     }
 
-    fn neightbor_table(
+    fn neighbor_table(
         &self,
         _f: &mut dyn FnMut(&NeighborTable) -> Result<(), Error>,
     ) -> Result<(), Error> {
