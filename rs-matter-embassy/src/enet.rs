@@ -202,30 +202,27 @@ pub fn multicast_mac_for_link_local_ipv6(ip: &Ipv6Addr) -> [u8; 6] {
     mac
 }
 
-pub type EnetUdp<'a> =
-    Udp<'a, ENET_MAX_UDP_SOCKETS, MAX_TX_PACKET_SIZE, MAX_RX_PACKET_SIZE, ENET_MAX_UDP_META_DATA>;
-pub type EnetDns<'a> = Dns<'a>;
-
 /// An implementation of `NetStack` for the `embassy-net` stack
 // TODO: Implement optional TCP support with a feature flag
+#[derive(Copy, Clone)]
 pub struct EnetStack<'a> {
-    udp: EnetUdp<'a>,
-    dns: EnetDns<'a>,
+    udp: Udp<'a>,
+    dns: Dns<'a>,
 }
 
 impl<'a> EnetStack<'a> {
     /// Create a new `EnetStack` instance
     pub fn new(stack: Stack<'a>, buffers: &'a EnetMatterUdpBuffers) -> Self {
         Self {
-            udp: EnetUdp::new(stack, buffers),
-            dns: EnetDns::new(stack),
+            udp: Udp::new(stack, buffers),
+            dns: Dns::new(stack),
         }
     }
 }
 
 impl<'a> NetStack for EnetStack<'a> {
     type UdpBind<'t>
-        = &'t EnetUdp<'a>
+        = Udp<'t>
     where
         Self: 't;
 
@@ -245,12 +242,12 @@ impl<'a> NetStack for EnetStack<'a> {
         Self: 't;
 
     type Dns<'t>
-        = &'t EnetDns<'a>
+        = Dns<'t>
     where
         Self: 't;
 
     fn udp_bind(&self) -> Option<Self::UdpBind<'_>> {
-        Some(&self.udp)
+        Some(self.udp)
     }
 
     fn udp_connect(&self) -> Option<Self::UdpConnect<'_>> {
@@ -266,7 +263,7 @@ impl<'a> NetStack for EnetStack<'a> {
     }
 
     fn dns(&self) -> Option<Self::Dns<'_>> {
-        Some(&self.dns)
+        Some(self.dns)
     }
 }
 

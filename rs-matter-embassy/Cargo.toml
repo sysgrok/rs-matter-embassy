@@ -176,9 +176,9 @@ embedded-storage-async = "0.4.1"
 sequential-storage = "3"
 
 embassy-net = { version = "0.7", optional = true }
-edge-nal-embassy = { version = "0.6", optional = true, features = ["proto-ipv4", "proto-ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
+edge-nal-embassy = { version = "0.7", optional = true, features = ["proto-ipv4", "proto-ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
 
-trouble-host = { version = "0.4", features = ["gatt"] }
+trouble-host = { version = "0.5", features = ["gatt"] }
 bt-hci = "0.6"
 
 openthread = { version = "0.1", optional = true, features = ["udp", "srp", "edge-nal"] }
