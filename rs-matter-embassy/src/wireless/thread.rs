@@ -381,7 +381,8 @@ where
 
         // Enable rx_on_when_idle so device can receive unsolicited messages (CASE, etc.)
         // Parameters: rx_on_when_idle=true, device_type=false (MTD), network_data=false
-        ot.set_link_mode(true, false, false).map_err(to_matter_err)?;
+        ot.set_link_mode(true, false, false)
+            .map_err(to_matter_err)?;
 
         let result = select3(&mut main, &mut radio, &mut persist)
             .coalesce()
@@ -460,7 +461,8 @@ where
 
         // Enable rx_on_when_idle so device can receive unsolicited messages (CASE, etc.)
         // Parameters: rx_on_when_idle=true, device_type=false (MTD), network_data=false
-        ot.set_link_mode(true, false, false).map_err(to_matter_err)?;
+        ot.set_link_mode(true, false, false)
+            .map_err(to_matter_err)?;
 
         let result = select3(&mut main, &mut radio, &mut persist)
             .coalesce()
