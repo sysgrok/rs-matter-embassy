@@ -459,9 +459,17 @@ impl<'d> OtMdns<'d> {
 
             let _ = self.ot.srp_remove_all(false);
 
-            // TODO: Something is still not quite right with the SRP
-            // We seem to get stuck here
+            // Wait for SRP records to be removed, but with a timeout to avoid
+            // blocking indefinitely. This is important during Matter commissioning
+            // where the Fail-Safe timer is running (typically 120-180 seconds).
+            const SRP_REMOVAL_TIMEOUT_SECS: u64 = 10;
+            let removal_start = Instant::now();
+
             while !self.ot.srp_is_empty()? {
+                if removal_start.elapsed() > Duration::from_secs(SRP_REMOVAL_TIMEOUT_SECS) {
+                    warn!("SRP removal timeout after {}s, proceeding anyway", SRP_REMOVAL_TIMEOUT_SECS);
+                    break;
+                }
                 debug!("Waiting for SRP records to be removed...");
                 select(
                     Timer::after(Duration::from_secs(1)),
