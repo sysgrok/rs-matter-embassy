@@ -298,6 +298,16 @@ impl NetCtl for OtNetCtl<'_> {
             select(self.0.wait_changed(), Timer::after(Duration::from_secs(1))).await;
         }
 
+        // Enable rx_on_when_idle AFTER Thread attach so device can receive
+        // unsolicited messages (CASE sessions, etc.). Must be called after
+        // the device has joined the network, not before.
+        // Parameters: rx_on_when_idle=true, device_type=false (MTD), network_data=false
+        if let Err(e) = self.0.set_link_mode(true, false, false) {
+            warn!("Failed to set link mode: {:?}", e);
+        } else {
+            info!("Link mode set: rx_on_when_idle=true");
+        }
+
         Ok(())
     }
 }
