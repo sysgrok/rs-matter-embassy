@@ -367,6 +367,11 @@ where
         ot.enable_ipv6(true).map_err(to_matter_err)?;
         ot.srp_autostart().map_err(to_matter_err)?;
 
+        // Enable rx_on_when_idle so device can receive unsolicited messages (CASE, etc.)
+        // Parameters: rx_on_when_idle=true, device_type=false (MTD), network_data=false
+        ot.set_link_mode(true, false, false)
+            .map_err(to_matter_err)?;
+
         let result = select3(&mut main, &mut radio, &mut persist)
             .coalesce()
             .await;
@@ -435,6 +440,11 @@ where
         let mut persist = pin!(persister.run());
         ot.enable_ipv6(true).map_err(to_matter_err)?;
         ot.srp_autostart().map_err(to_matter_err)?;
+
+        // Enable rx_on_when_idle so device can receive unsolicited messages (CASE, etc.)
+        // Parameters: rx_on_when_idle=true, device_type=false (MTD), network_data=false
+        ot.set_link_mode(true, false, false)
+            .map_err(to_matter_err)?;
 
         let result = select3(&mut main, &mut radio, &mut persist)
             .coalesce()
