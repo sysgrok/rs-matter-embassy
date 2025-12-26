@@ -450,32 +450,13 @@ impl<'d> OtMdns<'d> {
                 "Unreachable"
             );
 
-            // If the device was restarted, this call will make sure that
-            // the SRP records are removed from the SRP server
-            let _ = self.ot.srp_set_conf(&SrpConf {
-                host_name: hostname.as_str(),
-                ..Default::default()
-            });
-
-            let _ = self.ot.srp_remove_all(false);
-
-            // Wait for SRP records to be removed, but with a timeout to avoid
-            // blocking indefinitely. This is important during Matter commissioning
-            // where the Fail-Safe timer is running (typically 120-180 seconds).
-            const SRP_REMOVAL_TIMEOUT_SECS: u64 = 10;
-            let removal_start = Instant::now();
-
-            while !self.ot.srp_is_empty()? {
-                if removal_start.elapsed() > Duration::from_secs(SRP_REMOVAL_TIMEOUT_SECS) {
-                    warn!("SRP removal timeout after {}s, proceeding anyway", SRP_REMOVAL_TIMEOUT_SECS);
-                    break;
-                }
-                debug!("Waiting for SRP records to be removed...");
-                select(
-                    Timer::after(Duration::from_secs(1)),
-                    self.ot.srp_wait_changed(),
-                )
-                .await;
+            // If the device was restarted with existing SRP records,
+            // remove them immediately (don't wait for server ack).
+            // Using immediate removal (true) avoids blocking on slow/unreachable
+            // SRP servers which would consume the Matter Fail-Safe timer.
+            if !self.ot.srp_is_empty()? {
+                let _ = self.ot.srp_remove_all(true);
+                info!("SRP host removed (immediate)");
             }
 
             self.ot.srp_set_conf(&SrpConf {
