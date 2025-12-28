@@ -296,6 +296,16 @@ impl NetCtl for OtNetCtl<'_> {
             select(self.0.wait_changed(), Timer::after(Duration::from_secs(1))).await;
         }
 
+        // Enable rx_on_when_idle AFTER Thread attach so device can receive
+        // unsolicited messages (CASE sessions, etc.). Must be called after
+        // the device has joined the network, not before.
+        // Parameters: rx_on_when_idle=true, device_type=false (MTD), network_data=false
+        if let Err(e) = self.0.set_link_mode(true, false, false) {
+            warn!("Failed to set link mode: {:?}", e);
+        } else {
+            info!("Link mode set: rx_on_when_idle=true");
+        }
+
         Ok(())
     }
 }
@@ -421,6 +431,14 @@ impl<'d> OtMdns<'d> {
 
     /// Run the `OtMdns` instance by listening to the mDNS services and registering them with the SRP server
     pub async fn run(&self, matter: &Matter<'_>) -> Result<(), OtError> {
+        // On first iteration only: clean up any stale SRP records from previous runs.
+        // Using immediate removal (true) avoids blocking on slow/unreachable
+        // SRP servers which would consume the Matter Fail-Safe timer.
+        if !self.ot.srp_is_empty()? {
+            let _ = self.ot.srp_remove_all(true);
+            info!("SRP startup cleanup: removed stale records");
+        }
+
         loop {
             // TODO: Not very efficient to remove and re-add everything
 
@@ -442,26 +460,6 @@ impl<'d> OtMdns<'d> {
                 ),
                 "Unreachable"
             );
-
-            // If the device was restarted, this call will make sure that
-            // the SRP records are removed from the SRP server
-            let _ = self.ot.srp_set_conf(&SrpConf {
-                host_name: hostname.as_str(),
-                ..Default::default()
-            });
-
-            let _ = self.ot.srp_remove_all(false);
-
-            // TODO: Something is still not quite right with the SRP
-            // We seem to get stuck here
-            while !self.ot.srp_is_empty()? {
-                debug!("Waiting for SRP records to be removed...");
-                select(
-                    Timer::after(Duration::from_secs(1)),
-                    self.ot.srp_wait_changed(),
-                )
-                .await;
-            }
 
             self.ot.srp_set_conf(&SrpConf {
                 host_name: hostname.as_str(),
