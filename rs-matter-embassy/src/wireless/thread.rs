@@ -1,6 +1,7 @@
 use core::pin::pin;
 
-use embassy_futures::select::select3;
+use embassy_futures::select::{select3, select4};
+use embassy_time::{Duration, Timer};
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 
 use openthread::{OpenThread, Radio};
@@ -378,13 +379,33 @@ where
         let mut persist = pin!(persister.run());
         ot.enable_ipv6(true).map_err(to_matter_err)?;
         ot.srp_autostart().map_err(to_matter_err)?;
+        info!("SRP autostart enabled");
 
         // Enable rx_on_when_idle so device can receive unsolicited messages (CASE, etc.)
         // Parameters: rx_on_when_idle=true, device_type=false (MTD), network_data=false
         ot.set_link_mode(true, false, false)
             .map_err(to_matter_err)?;
 
-        let result = select3(&mut main, &mut radio, &mut persist)
+        // SRP diagnostic task - periodically logs SRP status
+        let ot_diag = ot.clone();
+        let mut srp_diag = pin!(async {
+            loop {
+                Timer::after(Duration::from_secs(5)).await;
+
+                let running = ot_diag.srp_running().unwrap_or(false);
+                let server_addr = ot_diag.srp_server_addr().ok().flatten();
+
+                if let Some(addr) = server_addr {
+                    info!("SRP: running={}, server={}", running, addr);
+                } else {
+                    warn!("SRP: running={}, NO SERVER FOUND", running);
+                }
+            }
+            #[allow(unreachable_code)]
+            Ok::<(), Error>(())
+        });
+
+        let result = select4(&mut main, &mut radio, &mut persist, &mut srp_diag)
             .coalesce()
             .await;
 
