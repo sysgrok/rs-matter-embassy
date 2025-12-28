@@ -386,34 +386,37 @@ where
         ot.set_link_mode(true, false, false)
             .map_err(to_matter_err)?;
 
-        // SRP diagnostic task - periodically logs SRP status
+        // SRP diagnostic task - logs status every 1 second for debugging
         let ot_diag = ot.clone();
         let mut srp_diag = pin!(async {
+            let mut tick = 0u32;
             loop {
-                Timer::after(Duration::from_secs(5)).await;
+                Timer::after(Duration::from_secs(1)).await;
+                tick += 1;
 
-                let running = ot_diag.srp_running().unwrap_or(false);
                 let server_addr = ot_diag.srp_server_addr().ok().flatten();
 
                 // Count services and their states
                 let mut total = 0u8;
                 let mut registered = 0u8;
                 let mut adding = 0u8;
+                let mut removing = 0u8;
                 let _ = ot_diag.srp_services(|svc| {
                     if let Some((_, state, _)) = svc {
                         total += 1;
                         match state {
                             openthread::SrpState::Registered => registered += 1,
                             openthread::SrpState::Adding | openthread::SrpState::ToAdd => adding += 1,
+                            openthread::SrpState::Removing | openthread::SrpState::ToRemove => removing += 1,
                             _ => {}
                         }
                     }
                 });
 
                 if let Some(addr) = server_addr {
-                    info!("SRP: server={}, services: {}/{} registered", addr, registered, total);
+                    info!("SRP[{}s]: srv={}, reg={}/{}, add={}, rm={}", tick, addr, registered, total, adding, removing);
                 } else {
-                    warn!("SRP: NO SERVER, services: {}", total);
+                    warn!("SRP[{}s]: NO SERVER, svc={}", tick, total);
                 }
             }
             #[allow(unreachable_code)]
