@@ -431,6 +431,14 @@ impl<'d> OtMdns<'d> {
 
     /// Run the `OtMdns` instance by listening to the mDNS services and registering them with the SRP server
     pub async fn run(&self, matter: &Matter<'_>) -> Result<(), OtError> {
+        // On first iteration only: clean up any stale SRP records from previous runs.
+        // Using immediate removal (true) avoids blocking on slow/unreachable
+        // SRP servers which would consume the Matter Fail-Safe timer.
+        if !self.ot.srp_is_empty()? {
+            let _ = self.ot.srp_remove_all(true);
+            info!("SRP startup cleanup: removed stale records");
+        }
+
         loop {
             // TODO: Not very efficient to remove and re-add everything
 
@@ -452,15 +460,6 @@ impl<'d> OtMdns<'d> {
                 ),
                 "Unreachable"
             );
-
-            // If the device was restarted with existing SRP records,
-            // remove them immediately (don't wait for server ack).
-            // Using immediate removal (true) avoids blocking on slow/unreachable
-            // SRP servers which would consume the Matter Fail-Safe timer.
-            if !self.ot.srp_is_empty()? {
-                let _ = self.ot.srp_remove_all(true);
-                info!("SRP host removed (immediate)");
-            }
 
             self.ot.srp_set_conf(&SrpConf {
                 host_name: hostname.as_str(),
