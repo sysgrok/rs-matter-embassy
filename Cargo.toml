@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "rs-matter-embassy",
+]
+
+exclude = ["examples"]
+
+[patch.crates-io]
+#rs-matter = { git = "https://github.com/project-chip/rs-matter" }
+rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
+#rs-matter = { path = "../../rs-matter/rs-matter" }
+rs-matter-stack = { git = "https://github.com/ivmarkov/rs-matter-stack.git", branch = "next" }
+#rs-matter-stack = { path = "../../rs-matter-stack" }
+openthread = { git = "https://github.com/sysgrok/openthread.git" }
+#openthread = { version = "0.1", path = "../../../openthread/openthread" }
+nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
+nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true
+opt-level = "z"

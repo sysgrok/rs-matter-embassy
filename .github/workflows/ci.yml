@@ -43,16 +43,16 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Build | Fmt Check
-        run: cd rs-matter-embassy; cargo fmt -- --check
+        run: cargo fmt -- --check
 
       - name: Build | Clippy
-        run: cd rs-matter-embassy; cargo clippy --features log --no-deps -- -Dwarnings
+        run: cargo clippy --features log --no-deps -- -Dwarnings
 
       - name: Build | Clippy - defmt
-        run: export DEFMT_LOG=trace; cd rs-matter-embassy; cargo clippy --features defmt --no-deps -- -Dwarnings
+        run: export DEFMT_LOG=trace; cargo clippy --features defmt --no-deps -- -Dwarnings
 
       - name: Build | Compile
-        run: cd rs-matter-embassy; cargo build
+        run: cargo build
 
       - name: Examples-ESP-Build | Fmt Check
         run: cd examples/esp; cargo fmt -- --check
