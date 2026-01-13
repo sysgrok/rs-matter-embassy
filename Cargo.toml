@@ -16,7 +16,6 @@ openthread = { git = "https://github.com/sysgrok/openthread.git" }
 #openthread = { version = "0.1", path = "../../../openthread/openthread" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
-nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 
 [profile.release]
 opt-level = "s"
