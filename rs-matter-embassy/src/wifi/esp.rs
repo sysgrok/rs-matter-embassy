@@ -60,6 +60,11 @@ where
         let mut ctl = self.0.lock().await;
 
         if !ctl.is_started().map_err(to_err)? {
+            // Start Wifi in client mode for scanning
+            ctl.set_config(&ModeConfig::Client(ClientConfig::default()))
+                .map_err(to_ctl_err)?;
+            info!("Wifi configuration updated for scanning");
+
             ctl.start_async().await.map_err(to_err)?;
             info!("Wifi started");
         }
