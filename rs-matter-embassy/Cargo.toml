@@ -137,9 +137,9 @@ max-exchanges-per-session-3 = ["rs-matter-stack/max-exchanges-per-session-3"]
 embassy-net = ["dep:embassy-net", "edge-nal-embassy", "openthread?/embassy-net-driver-channel", "esp-radio?/wifi"]
 esp = ["esp-radio", "esp-hal", "openthread?/esp-radio"]
 rp = ["cyw43", "cyw43-pio", "embassy-rp", "rand_core", "embassy-net-driver-channel"]
-nrf = ["embassy-nrf", "rand_core", "nrf-sdc", "nrf-mpsl", "portable-atomic", "openthread?/embassy-nrf"]
-log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host/log", "cyw43?/log"]
-defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host/defmt", "cyw43?/defmt", "cyw43-pio?/defmt"]
+nrf = ["embassy-nrf", "rand_core", "nrf-sdc", "nrf-mpsl", "nrf-802154", "portable-atomic", "openthread?/embassy-nrf"]
+log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host/log", "cyw43?/log", "nrf-802154?/log"]
+defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host/defmt", "cyw43?/defmt", "cyw43-pio?/defmt", "nrf-802154?/defmt"]
 
 [dependencies]
 log = { version = "0.4", default-features = false, optional = true }
@@ -180,4 +180,5 @@ embassy-net-driver-channel = { version = "0.3", optional = true }
 embassy-nrf = { version = "0.8", optional = true, features = ["time-driver-rtc1", "time", "nrf52840"], default-features = false }
 nrf-sdc = { version = "0.4", default-features = false, optional = true, features = ["peripheral", "nrf52840"] }
 nrf-mpsl = { version = "0.3", default-features = false, optional = true, features = ["nrf52840", "critical-section-impl"] }
+nrf-802154 = { version = "0.1", default-features = false, optional = true, features = ["nrf52840", "openthread"] }
 portable-atomic = { version = "1", optional = true }
