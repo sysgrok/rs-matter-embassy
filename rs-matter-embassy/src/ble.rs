@@ -16,6 +16,7 @@ use embassy_sync::blocking_mutex::raw::RawMutex;
 
 use embedded_io::ErrorType;
 
+use rs_matter_stack::matter::crypto::RngCore;
 use rs_matter_stack::matter::error::{Error, ErrorCode};
 use rs_matter_stack::matter::transport::network::btp::{
     AdvData, GattPeripheral, GattPeripheralEvent, C1_CHARACTERISTIC_UUID, C2_CHARACTERISTIC_UUID,
@@ -23,13 +24,12 @@ use rs_matter_stack::matter::transport::network::btp::{
 };
 use rs_matter_stack::matter::transport::network::BtAddr;
 use rs_matter_stack::matter::utils::init::{init, Init};
-use rs_matter_stack::matter::utils::rand::Rand;
 use rs_matter_stack::matter::utils::storage::Vec;
 use rs_matter_stack::matter::utils::sync::IfMutex;
 
 use trouble_host::att::{AttCfm, AttClient, AttReq, AttRsp, AttUns};
 use trouble_host::prelude::*;
-use trouble_host::{self, Address, BleHostError, Controller, HostResources};
+use trouble_host::{self, BleHostError, Controller, HostResources};
 
 use crate::fmt::Bytes;
 
@@ -145,28 +145,30 @@ where
 
 /// A GATT peripheral implementation for the BTP protocol in `rs-matter` via `trouble-host`.
 /// Implements the `GattPeripheral` trait.
-pub struct TroubleBtpGattPeripheral<'a, M, C>
+pub struct TroubleBtpGattPeripheral<'a, M, R, C>
 where
     M: RawMutex,
+    R: RngCore + Copy,
     C: Controller,
 {
     // TODO: Ideally this should be the controller itself, but this is not possible
     // until `bt-hci` is updated with `impl<C: Controller>` Controller for &C {}`
     ble_ctl: IfMutex<M, C>,
-    rand: Rand,
+    rand: Option<R>,
     context: &'a TroubleBtpGattContext<M>,
 }
 
-impl<'a, M, C> TroubleBtpGattPeripheral<'a, M, C>
+impl<'a, M, R, C> TroubleBtpGattPeripheral<'a, M, R, C>
 where
     M: RawMutex,
+    R: RngCore + Copy,
     C: Controller,
 {
     /// Create a new instance.
     ///
     /// Creation might fail if the GATT context cannot be reset, so user should ensure
     /// that there are no other GATT peripherals running before calling this function.
-    pub const fn new(ble_ctl: C, rand: Rand, context: &'a TroubleBtpGattContext<M>) -> Self {
+    pub const fn new(ble_ctl: C, rand: Option<R>, context: &'a TroubleBtpGattContext<M>) -> Self {
         Self {
             ble_ctl: IfMutex::new(ble_ctl),
             rand,
@@ -191,13 +193,18 @@ where
 
         let controller = ControllerRef::new(&*ble_ctl);
 
-        let mut address = [0; 6];
-        (self.rand)(&mut address);
+        let stack = trouble_host::new(controller, &mut resources);
 
-        let address = Address::random(address);
-        info!("GATT address = {:?}", address);
+        let stack = if let Some(mut rand) = self.rand {
+            let mut address = [0; 6];
+            rand.fill_bytes(&mut address);
 
-        let stack = trouble_host::new(controller, &mut resources).set_random_address(address);
+            info!("Random GATT address = {:?}", address);
+
+            stack.set_random_address(Address::random(address))
+        } else {
+            stack
+        };
 
         let Host {
             mut peripheral,
@@ -445,9 +452,10 @@ where
     }
 }
 
-impl<M, C> GattPeripheral for TroubleBtpGattPeripheral<'_, M, C>
+impl<M, R, C> GattPeripheral for TroubleBtpGattPeripheral<'_, M, R, C>
 where
     M: RawMutex,
+    R: RngCore + Copy,
     C: Controller,
 {
     async fn run<F>(&self, service_name: &str, adv_data: &AdvData, callback: F) -> Result<(), Error>

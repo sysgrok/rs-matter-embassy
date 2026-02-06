@@ -15,6 +15,7 @@ use core::pin::pin;
 
 use embassy_executor::Spawner;
 use embassy_futures::select::select;
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
@@ -26,11 +27,14 @@ use esp_radio::ieee802154::Ieee802154;
 use log::info;
 
 use rs_matter_embassy::epoch::epoch;
+use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, RngCore};
 use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
 use rs_matter_embassy::matter::dm::clusters::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::on_off::{self, OnOffHooks};
-use rs_matter_embassy::matter::dm::devices::test::{TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET};
+use rs_matter_embassy::matter::dm::devices::test::{
+    DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
+};
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, EpClMatcher, Node};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
@@ -39,10 +43,9 @@ use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
 use rs_matter_embassy::ot::openthread::esp::EspRadio;
 use rs_matter_embassy::ot::openthread::{OpenThread, RamSettings};
 use rs_matter_embassy::ot::{OtMatterResources, OtMdns, OtNetStack, OtNetif};
-use rs_matter_embassy::rand::esp::{esp_init_rand, esp_rand};
 use rs_matter_embassy::stack::eth::EthMatterStack;
 use rs_matter_embassy::stack::persist::DummyKvBlobStore;
-use rs_matter_embassy::stack::rand::{MatterRngCore, RngCore};
+use rs_matter_embassy::stack::rand::{reseeding_csprng, RngAdaptor};
 
 use tinyrlibc as _;
 
@@ -95,24 +98,9 @@ async fn main(_s: Spawner) {
     heap_allocator!(size: HEAP_SIZE - RECLAIMED_RAM);
     heap_allocator!(#[ram(reclaimed)] size: RECLAIMED_RAM);
 
-    // == Step 1: ==
     // Necessary `esp-hal` and `esp-wifi` initialization boilerplate
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
-
-    let mut rng = esp_hal::rng::Rng::new();
-
-    // Use a random/unique Matter discriminator for this session,
-    // in case there are left-overs from our previous registrations in Thread SRP
-    let discriminator = (rng.next_u32() & 0xfff) as u16;
-
-    // TODO
-    let mut ieee_eui64 = [0; 8];
-    RngCore::fill_bytes(&mut rng, &mut ieee_eui64);
-
-    // To erase generics, `Matter` takes a rand `fn` rather than a trait or a closure,
-    // so we need to initialize the global `rand` fn once
-    esp_init_rand(rng);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(
@@ -122,7 +110,22 @@ async fn main(_s: Spawner) {
             .software_interrupt0,
     );
 
-    // == Step 2: ==
+    // Create the crypto provider, using the `esp-hal` TRNG/ADC1 as the source of randomness for a reseeding CSPRNG.
+    let _trng_source = esp_hal::rng::TrngSource::new(peripherals.RNG, peripherals.ADC1);
+    let crypto = default_crypto::<NoopRawMutex, _>(
+        reseeding_csprng(esp_hal::rng::Trng::try_new().unwrap(), 1000).unwrap(),
+        DAC_PRIVKEY,
+    );
+
+    let mut weak_rand = crypto.weak_rand().unwrap();
+
+    // TODO
+    let mut ieee_eui64 = [0; 8];
+    weak_rand.fill_bytes(&mut ieee_eui64);
+
+    // in case there are left-overs from our previous registrations in Thread SRP
+    let discriminator = (weak_rand.next_u32() & 0xfff) as u16;
+
     // Allocate the Matter stack.
     let stack = mk_static!(EthMatterStack::<BUMP_SIZE, ()>).init_with(EthMatterStack::init(
         &TEST_BASIC_INFO,
@@ -132,10 +135,9 @@ async fn main(_s: Spawner) {
         },
         &TEST_DEV_ATT,
         epoch,
-        esp_rand,
     ));
 
-    let mut ot_rng = MatterRngCore::new(stack.matter().rand());
+    let mut ot_rng = RngAdaptor::new(crypto.rand().unwrap());
     let ot_resources = mk_static!(OtMatterResources).init_with(OtMatterResources::init());
 
     let mut ot_settings = RamSettings::new(&mut ot_resources.settings_buf);
@@ -163,11 +165,10 @@ async fn main(_s: Spawner) {
     ot.enable_ipv6(true).unwrap();
     ot.enable_thread(true).unwrap();
 
-    // == Step 4: ==
     // Our "light" on-off cluster.
     // It will toggle the light state every 5 seconds
     let on_off = on_off::OnOffHandler::new_standalone(
-        Dataver::new_rand(stack.matter().rand()),
+        Dataver::new_rand(&mut weak_rand),
         LIGHT_ENDPOINT_ID,
         TestOnOffDeviceLogic::new(true),
     );
@@ -186,14 +187,14 @@ async fn main(_s: Spawner) {
         // Just use the one that `rs-matter` provides out of the box
         .chain(
             EpClMatcher::new(Some(LIGHT_ENDPOINT_ID), Some(desc::DescHandler::CLUSTER.id)),
-            Async(desc::DescHandler::new(Dataver::new_rand(stack.matter().rand())).adapt()),
+            Async(desc::DescHandler::new(Dataver::new_rand(&mut weak_rand)).adapt()),
         );
 
     // Create the persister & load any previously saved state
     // `EmbassyPersist`+`EmbassyKvBlobStore` saves to a user-supplied NOR Flash region
     // However, for this demo and for simplicity, we use a dummy persister that does nothing
     let persist = stack
-        .create_persist_with_comm_window(DummyKvBlobStore)
+        .create_persist_with_comm_window(&crypto, DummyKvBlobStore)
         .await
         .unwrap();
 
@@ -208,6 +209,8 @@ async fn main(_s: Spawner) {
         OtMdns::new(ot.clone()),
         // The Matter stack needs a persister to store its state
         &persist,
+        // The crypto provider
+        &crypto,
         // Our `AsyncHandler` + `AsyncMetadata` impl
         (NODE, handler),
         // No user future to run

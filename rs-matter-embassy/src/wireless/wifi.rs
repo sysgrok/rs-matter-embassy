@@ -8,13 +8,13 @@ use rs_matter_stack::mdns::BuiltinMdns;
 use crate::ble::{ControllerRef, TroubleBtpGattContext, TroubleBtpGattPeripheral};
 use crate::enet::{create_enet_stack, EnetNetif, EnetStack};
 use crate::eth::EmbassyNetContext;
+use crate::matter::crypto::RngCore;
 use crate::matter::dm::clusters::gen_diag::InterfaceTypeEnum;
 use crate::matter::dm::clusters::net_comm::NetCtl;
 use crate::matter::dm::clusters::wifi_diag::{WifiDiag, WirelessDiag};
 use crate::matter::dm::networks::wireless::Wifi;
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
-use crate::matter::utils::rand::Rand;
 use crate::matter::utils::select::Coalesce;
 use crate::stack::network::{Embedding, Network};
 use crate::stack::wireless::{self, Gatt, GattTask};
@@ -173,46 +173,56 @@ where
 }
 
 /// A `Wireless` trait implementation for `embassy-net`'s Wifi stack.
-pub struct EmbassyWifi<'a, T> {
+pub struct EmbassyWifi<'a, T, R> {
     driver: T,
+    rand: R,
+    use_ble_random_addr: bool,
     context: &'a EmbassyNetContext,
     ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
-    rand: Rand,
 }
 
-impl<'a, T> EmbassyWifi<'a, T> {
+impl<'a, T, R> EmbassyWifi<'a, T, R> {
     /// Create a new instance of the `EmbassyWifi` type.
-    pub fn new<const B: usize, E>(driver: T, stack: &'a EmbassyWifiMatterStack<'a, B, E>) -> Self
+    pub fn new<const B: usize, E>(
+        driver: T,
+        rand: R,
+        use_ble_random_addr: bool,
+        stack: &'a EmbassyWifiMatterStack<'a, B, E>,
+    ) -> Self
     where
         E: Embedding + 'static,
     {
         Self::wrap(
             driver,
+            rand,
+            use_ble_random_addr,
             stack.network().embedding().net_context(),
             stack.network().embedding().ble_context(),
-            stack.matter().rand(),
         )
     }
 
     /// Wrap the `EmbassyWifi` type around a Wifi Driver and BLE controller runner and a network context.
     pub const fn wrap(
         driver: T,
+        rand: R,
+        use_ble_random_addr: bool,
         context: &'a EmbassyNetContext,
         ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
-        rand: Rand,
     ) -> Self {
         Self {
             driver,
+            rand,
+            use_ble_random_addr,
             context,
             ble_context,
-            rand,
         }
     }
 }
 
-impl<T> wireless::Wifi for EmbassyWifi<'_, T>
+impl<T, R> wireless::Wifi for EmbassyWifi<'_, T, R>
 where
     T: WifiDriver,
+    R: RngCore + Copy,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -228,9 +238,10 @@ where
     }
 }
 
-impl<T> wireless::WifiCoex for EmbassyWifi<'_, T>
+impl<T, R> wireless::WifiCoex for EmbassyWifi<'_, T, R>
 where
     T: WifiCoexDriver,
+    R: RngCore + Copy,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -241,15 +252,17 @@ where
                 context: self.context,
                 ble_context: self.ble_context,
                 rand: self.rand,
+                use_ble_random_addr: self.use_ble_random_addr,
                 task,
             })
             .await
     }
 }
 
-impl<T> Gatt for EmbassyWifi<'_, T>
+impl<T, R> Gatt for EmbassyWifi<'_, T, R>
 where
     T: BleDriver,
+    R: RngCore + Copy,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -258,22 +271,23 @@ where
         self.driver
             .run(BleDriverTaskImpl {
                 task,
-                rand: self.rand,
+                rand: self.use_ble_random_addr.then_some(self.rand),
                 context: self.ble_context,
             })
             .await
     }
 }
 
-struct WifiDriverTaskImpl<'a, A> {
+struct WifiDriverTaskImpl<'a, A, R> {
     context: &'a EmbassyNetContext,
-    rand: Rand,
     task: A,
+    rand: R,
 }
 
-impl<A> WifiDriverTask for WifiDriverTaskImpl<'_, A>
+impl<A, R> WifiDriverTask for WifiDriverTaskImpl<'_, A, R>
 where
     A: wireless::WifiTask,
+    R: RngCore,
 {
     async fn run<D, C>(&mut self, driver: D, net_ctl: C) -> Result<(), Error>
     where
@@ -285,7 +299,7 @@ where
         let buffers = &self.context.buffers;
 
         let mut seed = [0; core::mem::size_of::<u64>()];
-        (self.rand)(&mut seed);
+        self.rand.fill_bytes(&mut seed);
 
         let (stack, mut runner) = create_enet_stack(driver, u64::from_le_bytes(seed), resources);
 
@@ -303,16 +317,18 @@ where
     }
 }
 
-struct WifiCoexDriverTaskImpl<'a, A> {
+struct WifiCoexDriverTaskImpl<'a, A, R> {
     context: &'a EmbassyNetContext,
     ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
-    rand: Rand,
     task: A,
+    rand: R,
+    use_ble_random_addr: bool,
 }
 
-impl<A> WifiCoexDriverTask for WifiCoexDriverTaskImpl<'_, A>
+impl<A, R> WifiCoexDriverTask for WifiCoexDriverTaskImpl<'_, A, R>
 where
     A: wireless::WifiCoexTask,
+    R: RngCore + Copy,
 {
     async fn run<D, C, B>(&mut self, wifi_driver: D, net_ctl: C, ble_ctl: B) -> Result<(), Error>
     where
@@ -325,14 +341,18 @@ where
         let buffers = &self.context.buffers;
 
         let mut seed = [0; core::mem::size_of::<u64>()];
-        (self.rand)(&mut seed);
+        self.rand.fill_bytes(&mut seed);
 
         let (stack, mut runner) =
             create_enet_stack(wifi_driver, u64::from_le_bytes(seed), resources);
 
         let net_stack = EnetStack::new(stack, buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
-        let mut peripheral = TroubleBtpGattPeripheral::new(ble_ctl, self.rand, self.ble_context);
+        let mut peripheral = TroubleBtpGattPeripheral::new(
+            ble_ctl,
+            self.use_ble_random_addr.then_some(self.rand),
+            self.ble_context,
+        );
 
         let mut main =
             pin!(self

@@ -2,10 +2,10 @@
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
+use crate::matter::crypto::RngCore;
 use crate::matter::dm::networks::wireless::WirelessNetwork;
-use crate::matter::utils::rand::Rand;
-use crate::stack::matter::error::Error;
-use crate::stack::matter::utils::init::{init, Init};
+use crate::matter::error::Error;
+use crate::matter::utils::init::{init, Init};
 use crate::stack::network::{Embedding, Network};
 use crate::stack::wireless::{GattTask, WirelessBle};
 use crate::stack::MatterStack;
@@ -164,36 +164,35 @@ where
     }
 }
 
-impl<'a, C> TroubleBtpGattPeripheral<'a, CriticalSectionRawMutex, C>
+impl<'a, R, C> TroubleBtpGattPeripheral<'a, CriticalSectionRawMutex, R, C>
 where
+    R: RngCore + Copy,
     C: Controller,
 {
     pub fn new_for_stack<const B: usize, T, E>(
         ble_ctl: C,
+        rand: Option<R>,
         stack: &'a crate::wireless::EmbassyWirelessMatterStack<B, T, E>,
     ) -> Self
     where
         T: WirelessNetwork,
         E: Embedding + 'static,
     {
-        Self::new(
-            ble_ctl,
-            stack.matter().rand(),
-            stack.network().embedding().ble_context(),
-        )
+        Self::new(ble_ctl, rand, stack.network().embedding().ble_context())
     }
 }
 
 #[allow(dead_code)]
-struct BleDriverTaskImpl<'a, A> {
+struct BleDriverTaskImpl<'a, A, R> {
     task: A,
-    rand: Rand,
+    rand: Option<R>,
     context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
 }
 
-impl<A> BleDriverTask for BleDriverTaskImpl<'_, A>
+impl<A, R> BleDriverTask for BleDriverTaskImpl<'_, A, R>
 where
     A: GattTask,
+    R: RngCore + Copy,
 {
     async fn run<C>(&mut self, controller: C) -> Result<(), Error>
     where

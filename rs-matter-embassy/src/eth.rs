@@ -5,18 +5,18 @@ use core::pin::pin;
 
 use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use rs_matter_stack::mdns::BuiltinMdns;
 
 use crate::enet::{
     create_enet_stack, EnetMatterStackResources, EnetMatterUdpBuffers, EnetNetif, EnetStack,
 };
+use crate::matter::crypto::RngCore;
 use crate::matter::dm::clusters::gen_diag::InterfaceTypeEnum;
 use crate::matter::error::Error;
 use crate::matter::utils::init::{init, Init};
-use crate::matter::utils::rand::Rand;
 use crate::matter::utils::select::Coalesce;
 use crate::matter::utils::sync::IfMutex;
 use crate::stack::eth::{Eth, Ethernet, EthernetTask};
+use crate::stack::mdns::BuiltinMdns;
 use crate::stack::network::{Embedding, Network};
 use crate::stack::MatterStack;
 
@@ -145,55 +145,57 @@ where
 }
 
 /// An `Ethernet` trait implementation for `embassy-net`.
-pub struct EmbassyEthernet<'a, T> {
+pub struct EmbassyEthernet<'a, T, R> {
     driver: T,
+    rand: R,
     context: &'a EmbassyNetContext,
-    rand: Rand,
 }
 
-impl<'a, T> EmbassyEthernet<'a, T>
+impl<'a, T, R> EmbassyEthernet<'a, T, R>
 where
     T: EthernetDriver,
 {
     /// Create a new instance of the `EmbassyEthernet` type.
-    pub fn new<const B: usize, E>(driver: T, stack: &'a EmbassyEthMatterStack<'a, B, E>) -> Self
+    pub fn new<const B: usize, E>(
+        driver: T,
+        rand: R,
+        stack: &'a EmbassyEthMatterStack<'a, B, E>,
+    ) -> Self
     where
         E: Embedding + 'static,
     {
-        Self::wrap(
-            driver,
-            stack.network().embedding().net_context(),
-            stack.matter().rand(),
-        )
+        Self::wrap(driver, rand, stack.network().embedding().net_context())
     }
 
     /// Wrap an existing `Ethernet` driver with the `EmbassyEthernet` type.
-    pub fn wrap(driver: T, context: &'a EmbassyNetContext, rand: Rand) -> Self {
+    pub fn wrap(driver: T, rand: R, context: &'a EmbassyNetContext) -> Self {
         Self {
             driver,
-            context,
             rand,
+            context,
         }
     }
 }
 
-impl<T> Ethernet for EmbassyEthernet<'_, T>
+impl<T, R> Ethernet for EmbassyEthernet<'_, T, R>
 where
     T: EthernetDriver,
+    R: RngCore,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
         A: EthernetTask,
     {
-        struct EthernetDriverTaskImpl<'a, A> {
-            rand: Rand,
+        struct EthernetDriverTaskImpl<'a, 'b, A, R> {
             context: &'a EmbassyNetContext,
             task: A,
+            rand: &'b mut R,
         }
 
-        impl<A> EthernetDriverTask for EthernetDriverTaskImpl<'_, A>
+        impl<A, R> EthernetDriverTask for EthernetDriverTaskImpl<'_, '_, A, R>
         where
             A: EthernetTask,
+            R: RngCore,
         {
             async fn run<D>(&mut self, driver: D) -> Result<(), Error>
             where
@@ -204,7 +206,7 @@ where
                 let buffers = &self.context.buffers;
 
                 let mut seed = [0; core::mem::size_of::<u64>()];
-                (self.rand)(&mut seed);
+                self.rand.fill_bytes(&mut seed);
 
                 let (stack, mut runner) =
                     create_enet_stack(driver, u64::from_le_bytes(seed), resources);
@@ -225,9 +227,9 @@ where
 
         self.driver
             .run(EthernetDriverTaskImpl {
-                rand: self.rand,
                 context: self.context,
                 task,
+                rand: &mut self.rand,
             })
             .await
     }

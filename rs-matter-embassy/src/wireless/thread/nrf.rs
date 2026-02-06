@@ -22,17 +22,18 @@ use nrf_sdc::mpsl::{
 
 use openthread::nrf::Ieee802154Peripheral;
 use openthread::nrf::NrfRadio;
-pub use openthread::ProxyRadioResources as NrfThreadRadioResources;
 use openthread::{EmbassyTimeTimer, PhyRadioRunner, ProxyRadio, ProxyRadioResources};
 
 use portable_atomic::{AtomicBool, Ordering};
 
+use rs_matter_stack::matter::crypto::{CryptoRng, CryptoRngCore, RngCore};
 use rs_matter_stack::matter::error::{Error, ErrorCode};
-use rs_matter_stack::matter::utils::rand::Rand;
 use rs_matter_stack::matter::utils::sync::Signal;
-use rs_matter_stack::rand::MatterRngCore;
+use rs_matter_stack::rand::RngAdaptor;
 
 use crate::ble::MAX_MTU_SIZE;
+
+pub use openthread::ProxyRadioResources as NrfThreadRadioResources;
 
 /// Bind `RADIO`, `TIMER0` and `RTC0` to this interrupt handler
 pub struct NrfThreadHighPrioInterruptHandler;
@@ -192,7 +193,7 @@ impl<'a, 'd> NrfThreadRadioRunner<'a, 'd> {
 }
 
 /// A `ThreadDriver` implementation for the NRF52 family of chips.
-pub struct NrfThreadDriver<'d> {
+pub struct NrfThreadDriver<'d, R> {
     proxy: ProxyRadio<'d>,
     rtc0: Peri<'d, RTC0>,
     timer0: Peri<'d, TIMER0>,
@@ -212,10 +213,10 @@ pub struct NrfThreadDriver<'d> {
     ppi_ch29: Peri<'d, PPI_CH29>,
     ppi_ch30: Peri<'d, PPI_CH30>,
     ppi_ch31: Peri<'d, PPI_CH31>,
-    rand: Rand,
+    rand: R,
 }
 
-impl<'d> NrfThreadDriver<'d> {
+impl<'d, R> NrfThreadDriver<'d, R> {
     /// Create a new instance of the `NrfThreadRadio` type.
     ///
     /// # Arguments
@@ -263,7 +264,7 @@ impl<'d> NrfThreadDriver<'d> {
         ppi_ch29: Peri<'d, PPI_CH29>,
         ppi_ch30: Peri<'d, PPI_CH30>,
         ppi_ch31: Peri<'d, PPI_CH31>,
-        rand: Rand,
+        rand: R,
         _irqs: I,
     ) -> (Self, NrfThreadRadioRunner<'d, 'd>)
     where
@@ -318,7 +319,7 @@ impl<'d> NrfThreadDriver<'d> {
     }
 }
 
-impl super::ThreadDriver for NrfThreadDriver<'_> {
+impl<R> super::ThreadDriver for NrfThreadDriver<'_, R> {
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
         A: super::ThreadDriverTask,
@@ -336,7 +337,10 @@ impl super::ThreadDriver for NrfThreadDriver<'_> {
     }
 }
 
-impl super::BleDriver for NrfThreadDriver<'_> {
+impl<R> super::BleDriver for NrfThreadDriver<'_, R>
+where
+    R: CryptoRngCore + Copy, /*+ Send*/
+{
     async fn run<T>(&mut self, mut task: T) -> Result<(), Error>
     where
         T: super::BleDriverTask,
@@ -385,8 +389,7 @@ impl super::BleDriver for NrfThreadDriver<'_> {
         // TODO: Externalize as resources
         // Mem is roughly MAC_CONNECTIONS * MAX_MTU_SIZE * L2CAP_TXQ * L2CAP_RXQ
         let mut sdc_mem = nrf_sdc::Mem::<3084>::new();
-
-        let mut rng = MatterRngCore::new(self.rand);
+        let mut rand = RngAdaptor::new(SendHack(self.rand));
 
         let controller = nrf_sdc::Builder::new()
             .map_err(to_matter_err)?
@@ -398,7 +401,7 @@ impl super::BleDriver for NrfThreadDriver<'_> {
             .map_err(to_matter_err)?
             .buffer_cfg(MAX_MTU_SIZE as _, MAX_MTU_SIZE as _, L2CAP_TXQ, L2CAP_RXQ)
             .map_err(to_matter_err)?
-            .build(sdc_p, &mut rng, &mpsl, &mut sdc_mem)
+            .build(sdc_p, &mut rand, &mpsl, &mut sdc_mem)
             .map_err(to_matter_err)?;
 
         task.run(controller).await
@@ -437,3 +440,31 @@ fn to_matter_err<E: core::fmt::Debug>(e: E) -> Error {
     error!("BLE error: {:?}", debug2format!(e));
     Error::new(ErrorCode::BtpError)
 }
+
+// TODO: figure out if we need to enforce `Send` on the rand returned by the `Crypto` trait in `rs-matter`
+struct SendHack<T>(T);
+
+impl<T> RngCore for SendHack<T>
+where
+    T: RngCore,
+{
+    fn next_u32(&mut self) -> u32 {
+        self.0.next_u32()
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.0.next_u64()
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        self.0.fill_bytes(dest)
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
+        self.0.try_fill_bytes(dest)
+    }
+}
+
+impl<T> CryptoRng for SendHack<T> where T: CryptoRng + RngCore {}
+
+unsafe impl<T> Send for SendHack<T> {}

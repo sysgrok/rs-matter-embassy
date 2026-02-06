@@ -6,17 +6,17 @@ use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use openthread::{OpenThread, Radio};
 
 use crate::ble::{ControllerRef, TroubleBtpGattContext, TroubleBtpGattPeripheral};
+use crate::matter::crypto::{CryptoRngCore, RngCore};
 use crate::matter::dm::networks::wireless::Thread;
 use crate::matter::error::Error;
 use crate::matter::utils::init::{init, Init};
-use crate::matter::utils::rand::Rand;
 use crate::matter::utils::select::Coalesce;
 use crate::matter::utils::sync::IfMutex;
 use crate::ot::{to_matter_err, OtNetCtl, OtNetStack, OtPersist};
 use crate::ot::{OtMatterResources, OtMdns, OtNetif};
 use crate::stack::network::{Embedding, Network};
 use crate::stack::persist::{KvBlobStore, SharedKvBlobStore};
-use crate::stack::rand::MatterRngCore;
+use crate::stack::rand::RngAdaptor;
 use crate::stack::wireless::{self, Gatt, GattTask};
 
 use super::{BleDriver, BleDriverTask, BleDriverTaskImpl, EmbassyWirelessMatterStack};
@@ -165,48 +165,54 @@ where
 }
 
 /// A `Wireless` trait implementation for `openthread`'s Thread stack.
-pub struct EmbassyThread<'a, T, S> {
+pub struct EmbassyThread<'a, T, S, R> {
     driver: T,
     ieee_eui64: [u8; 8],
     store: &'a SharedKvBlobStore<'a, S>,
     context: &'a OtNetContext,
     ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
-    rand: Rand,
+    use_ble_random_addr: bool,
+    rand: R,
 }
 
-impl<'a, T, S> EmbassyThread<'a, T, S>
+impl<'a, T, S, R> EmbassyThread<'a, T, S, R>
 where
     T: ThreadDriver,
     S: KvBlobStore,
+    R: CryptoRngCore + Copy,
 {
     /// Create a new instance of the `EmbassyThread` type.
     pub fn new<const B: usize, E>(
         driver: T,
+        rand: R,
         ieee_eui64: [u8; 8],
         store: &'a SharedKvBlobStore<'a, S>,
         stack: &'a EmbassyThreadMatterStack<'a, B, E>,
+        use_ble_random_addr: bool,
     ) -> Self
     where
         E: Embedding + 'static,
     {
         Self::wrap(
             driver,
+            rand,
             ieee_eui64,
             store,
             stack.network().embedding().net_context(),
             stack.network().embedding().ble_context(),
-            stack.matter().rand(),
+            use_ble_random_addr,
         )
     }
 
     /// Wrap an existing `ThreadDriver` with the given parameters.
     pub fn wrap(
         driver: T,
+        rand: R,
         ieee_eui64: [u8; 8],
         store: &'a SharedKvBlobStore<'a, S>,
         context: &'a OtNetContext,
         ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
-        rand: Rand,
+        use_ble_random_addr: bool,
     ) -> Self {
         Self {
             driver,
@@ -215,14 +221,16 @@ where
             context,
             ble_context,
             rand,
+            use_ble_random_addr,
         }
     }
 }
 
-impl<T, S> wireless::Thread for EmbassyThread<'_, T, S>
+impl<T, S, R> wireless::Thread for EmbassyThread<'_, T, S, R>
 where
     T: ThreadDriver,
     S: KvBlobStore,
+    R: CryptoRngCore + Copy,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -240,10 +248,11 @@ where
     }
 }
 
-impl<T, S> wireless::ThreadCoex for EmbassyThread<'_, T, S>
+impl<T, S, R> wireless::ThreadCoex for EmbassyThread<'_, T, S, R>
 where
     T: ThreadCoexDriver,
     S: KvBlobStore,
+    R: CryptoRngCore + Copy,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -256,16 +265,18 @@ where
                 store: self.store,
                 context: self.context,
                 ble_context: self.ble_context,
+                use_ble_random_addr: self.use_ble_random_addr,
                 task,
             })
             .await
     }
 }
 
-impl<T, S> Gatt for EmbassyThread<'_, T, S>
+impl<T, S, R> Gatt for EmbassyThread<'_, T, S, R>
 where
     T: BleDriver,
     S: KvBlobStore,
+    R: RngCore + Copy,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -274,7 +285,7 @@ where
         self.driver
             .run(BleDriverTaskImpl {
                 task,
-                rand: self.rand,
+                rand: self.use_ble_random_addr.then_some(self.rand),
                 context: self.ble_context,
             })
             .await
@@ -316,24 +327,24 @@ impl Embedding for OtNetContext {
     }
 }
 
-struct ThreadDriverTaskImpl<'a, A, S> {
+struct ThreadDriverTaskImpl<'a, A, S, C> {
     ieee_eui64: [u8; 8],
-    rand: Rand,
+    rand: C,
     store: &'a SharedKvBlobStore<'a, S>,
     context: &'a OtNetContext,
     task: A,
 }
 
-impl<A, S> ThreadDriverTask for ThreadDriverTaskImpl<'_, A, S>
+impl<A, S, C> ThreadDriverTask for ThreadDriverTaskImpl<'_, A, S, C>
 where
     A: wireless::ThreadTask,
     S: KvBlobStore,
+    C: CryptoRngCore + Copy,
 {
     async fn run<R>(&mut self, radio: R) -> Result<(), Error>
     where
         R: Radio,
     {
-        let mut rng = MatterRngCore::new(self.rand);
         let mut resources = self.context.resources.lock().await;
         let resources = &mut *resources;
 
@@ -341,10 +352,11 @@ where
         persister.load().await?;
 
         let mut settings = persister.settings();
+        let mut rand = RngAdaptor::new(self.rand);
 
         let ot = OpenThread::new_with_udp_srp(
             self.ieee_eui64,
-            &mut rng,
+            &mut rand,
             &mut settings,
             &mut resources.ot,
             &mut resources.udp,
@@ -379,26 +391,27 @@ where
     }
 }
 
-struct ThreadCoexDriverTaskImpl<'a, A, S> {
+struct ThreadCoexDriverTaskImpl<'a, A, S, C> {
     ieee_eui64: [u8; 8],
-    rand: Rand,
+    rand: C,
     store: &'a SharedKvBlobStore<'a, S>,
     context: &'a OtNetContext,
     ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
     task: A,
+    use_ble_random_addr: bool,
 }
 
-impl<A, S> ThreadCoexDriverTask for ThreadCoexDriverTaskImpl<'_, A, S>
+impl<A, S, C> ThreadCoexDriverTask for ThreadCoexDriverTaskImpl<'_, A, S, C>
 where
     A: wireless::ThreadCoexTask,
     S: KvBlobStore,
+    C: CryptoRngCore + Copy,
 {
     async fn run<R, B>(&mut self, radio: R, ble_ctl: B) -> Result<(), Error>
     where
         R: Radio,
         B: trouble_host::Controller,
     {
-        let mut rng = MatterRngCore::new(self.rand);
         let mut resources = self.context.resources.lock().await;
         let resources = &mut *resources;
 
@@ -406,10 +419,11 @@ where
         persister.load().await?;
 
         let mut settings = persister.settings();
+        let mut rand = RngAdaptor::new(self.rand);
 
         let ot = OpenThread::new_with_udp_srp(
             self.ieee_eui64,
-            &mut rng,
+            &mut rand,
             &mut settings,
             &mut resources.ot,
             &mut resources.udp,
@@ -421,7 +435,11 @@ where
         let net_stack = OtNetStack::new(ot.clone());
         let netif = OtNetif::new(ot.clone());
         let mut mdns = OtMdns::new(ot.clone());
-        let mut peripheral = TroubleBtpGattPeripheral::new(ble_ctl, self.rand, self.ble_context);
+        let mut peripheral = TroubleBtpGattPeripheral::new(
+            ble_ctl,
+            self.use_ble_random_addr.then_some(self.rand),
+            self.ble_context,
+        );
 
         let mut main =
             pin!(self
