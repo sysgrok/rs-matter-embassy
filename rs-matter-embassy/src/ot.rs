@@ -12,6 +12,8 @@ use openthread::{
     Channels, OpenThread, OtError, OtResources, OtSrpResources, OtUdpResources, RamSettings,
     RamSettingsChange, SettingsKey, SharedRamSettings, SrpConf, SrpService,
 };
+use rs_matter_stack::matter::crypto::Crypto;
+use rs_matter_stack::matter::dm::ChangeNotify;
 use rs_matter_stack::matter::transport::network::mdns::Service;
 use rs_matter_stack::matter::Matter;
 use rs_matter_stack::mdns::Mdns;
@@ -420,7 +422,12 @@ impl<'d> OtMdns<'d> {
     }
 
     /// Run the `OtMdns` instance by listening to the mDNS services and registering them with the SRP server
-    pub async fn run(&self, matter: &Matter<'_>) -> Result<(), OtError> {
+    pub async fn run<C: Crypto>(
+        &self,
+        matter: &Matter<'_>,
+        crypto: C,
+        notify: &dyn ChangeNotify,
+    ) -> Result<(), OtError> {
         loop {
             // TODO: Not very efficient to remove and re-add everything
 
@@ -470,7 +477,7 @@ impl<'d> OtMdns<'d> {
 
             info!("Registered SRP host {}", hostname);
 
-            unwrap!(matter.mdns_services(|matter_service| {
+            unwrap!(matter.mdns_services(&crypto, notify, |matter_service| {
                 Service::call_with(
                     &matter_service,
                     matter.dev_det(),
@@ -506,9 +513,11 @@ impl<'d> OtMdns<'d> {
 }
 
 impl Mdns for OtMdns<'_> {
-    async fn run<U>(
+    async fn run<C, U>(
         &mut self,
         matter: &Matter<'_>,
+        crypto: C,
+        notify: &dyn ChangeNotify,
         _udp: U,
         _mac: &[u8],
         _ipv4: core::net::Ipv4Addr,
@@ -516,9 +525,12 @@ impl Mdns for OtMdns<'_> {
         _interface: u32,
     ) -> Result<(), Error>
     where
+        C: Crypto,
         U: UdpBind,
     {
-        OtMdns::run(self, matter).await.map_err(to_matter_err)
+        OtMdns::run(self, matter, crypto, notify)
+            .await
+            .map_err(to_matter_err)
     }
 }
 

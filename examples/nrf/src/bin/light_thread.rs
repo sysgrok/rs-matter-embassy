@@ -20,23 +20,27 @@ use embassy_nrf::{bind_interrupts, rng};
 
 use embassy_executor::{InterruptExecutor, Spawner};
 
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+
 use embedded_alloc::LlffHeap;
 
 use defmt::{info, unwrap};
 
 use rs_matter_embassy::epoch::epoch;
+use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, RngCore};
 use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
 use rs_matter_embassy::matter::dm::clusters::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::on_off::{self, OnOffHooks};
-use rs_matter_embassy::matter::dm::devices::test::{TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET};
+use rs_matter_embassy::matter::dm::devices::test::{
+    DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
+};
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, EpClMatcher, Node};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
-use rs_matter_embassy::rand::nrf::{nrf_init_rand, nrf_rand};
 use rs_matter_embassy::stack::persist::DummyKvBlobStore;
-use rs_matter_embassy::stack::rand::RngCore;
+use rs_matter_embassy::stack::rand::reseeding_csprng;
 use rs_matter_embassy::wireless::nrf::{
     NrfThreadClockInterruptHandler, NrfThreadDriver, NrfThreadHighPrioInterruptHandler,
     NrfThreadLowPrioInterruptHandler, NrfThreadRadioResources, NrfThreadRadioRunner,
@@ -101,7 +105,6 @@ async fn main(_s: Spawner) {
         unsafe { HEAP.init(addr_of_mut!(HEAP_MEM) as usize, HEAP_SIZE) }
     }
 
-    // == Step 1: ==
     // Necessary `nrf-hal` initialization boilerplate
 
     rtt_target::rtt_init_defmt!(rtt_target::ChannelMode::NoBlockSkip, LOG_RINGBUF_SIZE);
@@ -113,21 +116,22 @@ async fn main(_s: Spawner) {
 
     let p = embassy_nrf::init(config);
 
-    let mut rng = rng::Rng::new_blocking(p.RNG);
+    // Create the crypto provider, using the NRF RNG peripheral (which is a TRNG) as the source of randomness for a reseeding CSPRNG.
+    let crypto = default_crypto::<NoopRawMutex, _>(
+        reseeding_csprng(rng::Rng::new_blocking(p.RNG), 1000).unwrap(),
+        DAC_PRIVKEY,
+    );
+
+    let mut weak_rand = crypto.weak_rand().unwrap();
 
     // Use a random/unique Matter discriminator for this session,
     // in case there are left-overs from our previous registrations in Thread SRP
-    let discriminator = (rng.next_u32() & 0xfff) as u16;
+    let discriminator = (weak_rand.next_u32() & 0xfff) as u16;
 
     // TODO
     let mut ieee_eui64 = [0; 8];
-    RngCore::fill_bytes(&mut rng, &mut ieee_eui64);
+    weak_rand.fill_bytes(&mut ieee_eui64);
 
-    // To erase generics, `Matter` takes a rand `fn` rather than a trait or a closure,
-    // so we need to initialize the global `rand` fn once
-    nrf_init_rand(rng);
-
-    // == Step 2: ==
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
@@ -140,7 +144,6 @@ async fn main(_s: Spawner) {
             },
             &TEST_DEV_ATT,
             epoch,
-            nrf_rand,
         ),
     );
 
@@ -165,7 +168,7 @@ async fn main(_s: Spawner) {
         p.PPI_CH29,
         p.PPI_CH30,
         p.PPI_CH31,
-        stack.matter().rand(),
+        crypto.rand().unwrap(),
         Irqs,
     );
 
@@ -179,11 +182,10 @@ async fn main(_s: Spawner) {
         .start(interrupt::EGU1_SWI1)
         .spawn(run_radio(thread_radio_runner)));
 
-    // == Step 4: ==
     // Our "light" on-off cluster.
     // It will toggle the light state every 5 seconds
     let on_off = on_off::OnOffHandler::new_standalone(
-        Dataver::new_rand(stack.matter().rand()),
+        Dataver::new_rand(&mut weak_rand),
         LIGHT_ENDPOINT_ID,
         TestOnOffDeviceLogic::new(true),
     );
@@ -202,24 +204,32 @@ async fn main(_s: Spawner) {
         // Just use the one that `rs-matter` provides out of the box
         .chain(
             EpClMatcher::new(Some(LIGHT_ENDPOINT_ID), Some(desc::DescHandler::CLUSTER.id)),
-            Async(desc::DescHandler::new(Dataver::new_rand(stack.matter().rand())).adapt()),
+            Async(desc::DescHandler::new(Dataver::new_rand(&mut weak_rand)).adapt()),
         );
 
     let persist = stack
-        .create_persist_with_comm_window(DummyKvBlobStore)
+        .create_persist_with_comm_window(&crypto, DummyKvBlobStore)
         .await
         .unwrap();
 
-    // == Step 5: ==
     // Run the Matter stack with our handler
     // Using `pin!` is completely optional, but reduces the size of the final future
     //
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
     let matter = pin!(stack.run(
         // The Matter stack needs to instantiate `openthread`
-        EmbassyThread::new(thread_driver, ieee_eui64, persist.store(), stack),
+        EmbassyThread::new(
+            thread_driver,
+            crypto.rand().unwrap(),
+            ieee_eui64,
+            persist.store(),
+            stack,
+            true, // Use a random BLE address
+        ),
         // The Matter stack needs a persister to store its state
         &persist,
+        // The crypto provider
+        &crypto,
         // Our `AsyncHandler` + `AsyncMetadata` impl
         (NODE, handler),
         // No user future to run

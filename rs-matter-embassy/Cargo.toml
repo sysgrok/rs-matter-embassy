@@ -16,7 +16,7 @@ rust-version = "1.84"
 harness = false
 
 [features]
-default = []
+default = ["rustcrypto"]
 
 # Sizing
 
@@ -136,10 +136,12 @@ max-exchanges-per-session-3 = ["rs-matter-stack/max-exchanges-per-session-3"]
 # General
 embassy-net = ["dep:embassy-net", "edge-nal-embassy", "openthread?/embassy-net-driver-channel", "esp-radio?/wifi"]
 esp = ["esp-radio", "esp-hal", "openthread?/esp-radio"]
-rp = ["cyw43", "cyw43-pio", "embassy-rp", "rand_core", "embassy-net-driver-channel"]
-nrf = ["embassy-nrf", "rand_core", "nrf-sdc", "nrf-mpsl", "portable-atomic", "openthread?/embassy-nrf"]
+rp = ["cyw43", "cyw43-pio", "embassy-rp", "embassy-net-driver-channel"]
+nrf = ["embassy-nrf", "nrf-sdc", "nrf-mpsl", "portable-atomic", "openthread?/embassy-nrf"]
 log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host/log", "cyw43?/log"]
 defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host/defmt", "cyw43?/defmt", "cyw43-pio?/defmt"]
+rustcrypto = ["rs-matter-stack/rustcrypto"]
+mbedtls = ["rs-matter-stack/mbedtls"]
 
 [dependencies]
 log = { version = "0.4", default-features = false, optional = true }
@@ -151,8 +153,9 @@ embassy-sync = "0.7"
 embassy-time = "0.5"
 embedded-io = "0.6"
 scopeguard = { version = "1", default-features = false }
-rs-matter-stack = { version = "0.1", default-features = false, features = ["rustcrypto"] }
+rs-matter-stack = { version = "0.1", default-features = false }
 static_cell = "2"
+rand = { version = "0.8", default-features = false }
 
 embedded-storage-async = "0.4.1"
 sequential-storage = "3"
@@ -165,6 +168,8 @@ bt-hci = "0.6"
 
 openthread = { version = "0.1", optional = true, features = ["udp", "srp", "edge-nal"] }
 
+rand_core = "0.9"
+
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the `esp32*` chips family
 esp-radio = { version = "0.17", optional = true, features = ["ble"] }
 esp-hal = { version = "1", optional = true, features = ["unstable"] }
@@ -173,7 +178,6 @@ esp-hal = { version = "1", optional = true, features = ["unstable"] }
 cyw43 = { version = "0.6", optional = true, features = ["firmware-logs", "bluetooth"] }
 cyw43-pio = { version = "0.9", optional = true }
 embassy-rp = { version = "0.9", optional = true, features = ["unstable-pac", "rp2040"] }
-rand_core = { version = "0.9", optional = true }
 embassy-net-driver-channel = { version = "0.3", optional = true }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for Nordic silicon

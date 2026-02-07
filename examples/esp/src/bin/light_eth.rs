@@ -15,6 +15,7 @@ use core::pin::pin;
 
 use embassy_executor::Spawner;
 use embassy_futures::select::select;
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
@@ -27,17 +28,20 @@ use log::info;
 
 use rs_matter_embassy::epoch::epoch;
 use rs_matter_embassy::eth::{EmbassyEthMatterStack, EmbassyEthernet, PreexistingEthDriver};
+use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
 use rs_matter_embassy::matter::dm::clusters::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::on_off::{self, OnOffHooks};
-use rs_matter_embassy::matter::dm::devices::test::{TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET};
+use rs_matter_embassy::matter::dm::devices::test::{
+    DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
+};
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, EpClMatcher, Node};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::select::Coalesce;
 use rs_matter_embassy::matter::{clusters, devices};
-use rs_matter_embassy::rand::esp::{esp_init_rand, esp_rand};
 use rs_matter_embassy::stack::persist::DummyKvBlobStore;
+use rs_matter_embassy::stack::rand::reseeding_csprng;
 use rs_matter_embassy::stack::utils::futures::IntoFaillble;
 
 extern crate alloc;
@@ -90,14 +94,9 @@ async fn main(_s: Spawner) {
     heap_allocator!(size: HEAP_SIZE - RECLAIMED_RAM);
     heap_allocator!(#[ram(reclaimed)] size: RECLAIMED_RAM);
 
-    // == Step 1: ==
     // Necessary `esp-hal` and `esp-wifi` initialization boilerplate
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
-
-    // To erase generics, `Matter` takes a rand `fn` rather than a trait or a closure,
-    // so we need to initialize the global `rand` fn once
-    esp_init_rand(esp_hal::rng::Rng::new());
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(
@@ -109,8 +108,11 @@ async fn main(_s: Spawner) {
 
     let init = esp_radio::init().unwrap();
 
+    // Allocate the Matter stack.
+    // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
+    // It is also (currently) a mandatory requirement when the wireless stack variation is used.
     let stack = mk_static!(EmbassyEthMatterStack::<BUMP_SIZE, ()>).init_with(
-        EmbassyEthMatterStack::init(&TEST_DEV_DET, TEST_DEV_COMM, &TEST_DEV_ATT, epoch, esp_rand),
+        EmbassyEthMatterStack::init(&TEST_DEV_DET, TEST_DEV_COMM, &TEST_DEV_ATT, epoch),
     );
 
     // Configure and start the Wifi first
@@ -118,10 +120,18 @@ async fn main(_s: Spawner) {
     let (controller, wifi_interface) =
         esp_radio::wifi::new(&init, wifi, esp_radio::wifi::Config::default()).unwrap();
 
+    // Create the crypto provider, using the `esp-hal` TRNG as the source of randomness for a reseeding CSPRNG.
+    let crypto = default_crypto::<NoopRawMutex, _>(
+        reseeding_csprng(esp_hal::rng::Trng::try_new().unwrap(), 1000).unwrap(),
+        DAC_PRIVKEY,
+    );
+
+    let mut weak_rand = crypto.weak_rand().unwrap();
+
     // Our "light" on-off cluster.
     // It will toggle the light state every 5 seconds
     let on_off = on_off::OnOffHandler::new_standalone(
-        Dataver::new_rand(stack.matter().rand()),
+        Dataver::new_rand(&mut weak_rand),
         LIGHT_ENDPOINT_ID,
         TestOnOffDeviceLogic::new(true),
     );
@@ -140,14 +150,14 @@ async fn main(_s: Spawner) {
         // Just use the one that `rs-matter` provides out of the box
         .chain(
             EpClMatcher::new(Some(LIGHT_ENDPOINT_ID), Some(desc::DescHandler::CLUSTER.id)),
-            Async(desc::DescHandler::new(Dataver::new_rand(stack.matter().rand())).adapt()),
+            Async(desc::DescHandler::new(Dataver::new_rand(&mut weak_rand)).adapt()),
         );
 
     // Create the persister & load any previously saved state
     // `EmbassyPersist`+`EmbassyKvBlobStore` saves to a user-supplied NOR Flash region
     // However, for this demo and for simplicity, we use a dummy persister that does nothing
     let persist = stack
-        .create_persist_with_comm_window(DummyKvBlobStore)
+        .create_persist_with_comm_window(&crypto, DummyKvBlobStore)
         .await
         .unwrap();
 
@@ -155,9 +165,15 @@ async fn main(_s: Spawner) {
     // Using `pin!` is completely optional, but reduces the size of the final future
     let mut matter = pin!(stack.run(
         // The Matter stack needs the ethernet inteface to run
-        EmbassyEthernet::new(PreexistingEthDriver::new(wifi_interface.sta), stack),
+        EmbassyEthernet::new(
+            PreexistingEthDriver::new(wifi_interface.sta),
+            weak_rand,
+            stack,
+        ),
         // The Matter stack needs a persister to store its state
         &persist,
+        // The crypto provider
+        &crypto,
         // Our `AsyncHandler` + `AsyncMetadata` impl
         (NODE, handler),
         // No user future to run
