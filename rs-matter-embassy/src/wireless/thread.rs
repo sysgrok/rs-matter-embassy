@@ -365,6 +365,13 @@ where
         )
         .map_err(to_matter_err)?;
 
+        // Set radio capabilities matching the actual hardware.
+        // ESP32 supports ACK_TIMEOUT and CSMA_BACKOFF.
+        ot.set_radio_caps(
+            (openthread::sys::OT_RADIO_CAPS_ACK_TIMEOUT
+                | openthread::sys::OT_RADIO_CAPS_CSMA_BACKOFF) as u8,
+        );
+
         let net_ctl = OtNetCtl::new(ot.clone());
         let net_stack = OtNetStack::new(ot.clone());
         let netif = OtNetif::new(ot.clone());
@@ -479,6 +486,13 @@ where
             &mut resources.srp,
         )
         .map_err(to_matter_err)?;
+
+        // Set radio capabilities matching the actual hardware.
+        // ESP32 supports ACK_TIMEOUT and CSMA_BACKOFF.
+        ot.set_radio_caps(
+            (openthread::sys::OT_RADIO_CAPS_ACK_TIMEOUT
+                | openthread::sys::OT_RADIO_CAPS_CSMA_BACKOFF) as u8,
+        );
 
         let net_ctl = OtNetCtl::new(ot.clone());
         let net_stack = OtNetStack::new(ot.clone());
