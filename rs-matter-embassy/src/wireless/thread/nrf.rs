@@ -467,7 +467,10 @@ where
 
 impl<T> CryptoRng for SendHack<T> where T: CryptoRng + RngCore {}
 
-// SAFETY: SendHack is used to satisfy the `Send` bound required by `nrf_sdc::Builder::build()`.
-// The RNG is only used within a single async task (the BLE driver task) and is never shared
-// across threads. The `Crypto` trait does not require `Send` on its RNG, but `nrf-sdc` does.
+// SAFETY: SendHack bypasses the `Send` bound required by `nrf_sdc::Builder::build()`.
+// This is safe because:
+// - Target is a single-threaded MCU (nRF52); no OS threads exist.
+// - The RNG is only used within a single async task (the BLE driver task).
+// - The upstream `Crypto` trait in rs-matter does not require `Send` on its RNG,
+//   but `nrf-sdc` does — this wrapper bridges that mismatch.
 unsafe impl<T> Send for SendHack<T> {}
