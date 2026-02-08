@@ -505,6 +505,10 @@ where
 
 /// Log SRP client diagnostics (server address, service counts and states).
 /// Runs in a loop, logging every 10 seconds until cancelled.
+///
+/// Returns `Result<(), Error>` (never actually returns) to match the signature
+/// expected by `select4` / `Coalesce` — all branches must share the same type
+/// so that whichever completes first can be coalesced into a single result.
 async fn log_srp_state(ot: &OpenThread<'_>) -> Result<(), Error> {
     let mut tick = 0u32;
     loop {
