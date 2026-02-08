@@ -629,7 +629,11 @@ impl<'d> OtMdns<'d> {
                 if all_ok {
                     current_hash = new_hash;
                 } else {
-                    warn!("SRP: partial registration failure, will retry");
+                    warn!("SRP: partial registration failure, will retry in 5s");
+                    // Use a short timer to retry rather than waiting on wait_mdns(),
+                    // which may never return if Matter believes services are unchanged.
+                    Timer::after(Duration::from_secs(5)).await;
+                    continue;
                 }
             } else {
                 debug!("SRP services unchanged, skipping re-registration");
