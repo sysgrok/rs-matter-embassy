@@ -508,7 +508,11 @@ impl<'d> OtMdns<'d> {
         Self { ot }
     }
 
-    /// Run the `OtMdns` instance by listening to the mDNS services and registering them with the SRP server
+    /// Run the `OtMdns` instance by listening to the mDNS services and registering them with the SRP server.
+    ///
+    /// `_crypto` and `_notify` are required by the `Mdns` trait signature but unused here:
+    /// OpenThread's SRP client handles service registration internally without needing
+    /// external crypto or change notifications.
     pub async fn run<C: Crypto>(
         &self,
         matter: &Matter<'_>,
