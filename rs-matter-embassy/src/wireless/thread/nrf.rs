@@ -467,4 +467,4 @@ where
 
 impl<T> CryptoRng for SendHack<T> where T: CryptoRng + RngCore {}
 
-unsafe impl<T> Send for SendHack<T> {}
+unsafe impl<T: Send> Send for SendHack<T> {}
