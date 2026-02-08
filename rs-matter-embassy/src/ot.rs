@@ -464,6 +464,13 @@ impl Fnv1aHasher {
 
 /// Compute a hash of all mDNS services currently published by Matter.
 /// Used to detect when services have changed and need to be re-registered with SRP.
+///
+/// Note: This intentionally hashes only the service identity (type marker,
+/// id/discriminator for commissionable, compressed_fabric_id/node_id for
+/// commissioned) and not TXT records, port, or subtypes. The identity fields
+/// are the ones that determine _which_ services exist; TXT records and port
+/// are derived deterministically from the Matter state for a given service
+/// identity, so they cannot change independently.
 fn compute_services_hash(matter: &Matter<'_>) -> u64 {
     let mut hasher = Fnv1aHasher::new();
 
