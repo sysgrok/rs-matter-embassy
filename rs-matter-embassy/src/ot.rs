@@ -298,10 +298,12 @@ impl NetCtl for OtNetCtl<'_> {
             select(self.0.wait_changed(), Timer::after(Duration::from_secs(1))).await;
         }
 
-        // Enable rx_on_when_idle AFTER Thread attach so device can receive
-        // unsolicited messages (CASE sessions, etc.). Must be called after
-        // the device has joined the network, not before.
-        // Parameters: rx_on_when_idle=true, device_type=false (MTD), network_data=false
+        // Enable rx_on_when_idle AFTER Thread attach completes.
+        // Root cause: set_link_mode updates radio_conf.rx_when_idle, which
+        // changes the radio auto-switching behavior (radio stays in RX after
+        // TX/RX instead of going to sleep). If set before attach, the ESP
+        // radio driver keeps receiving during the MLE attach handshake,
+        // interfering with the attach timing and causing failures.
         if let Err(e) = self.0.set_link_mode(true, false, false) {
             warn!("Failed to set link mode: {:?}", e);
         } else {
@@ -503,8 +505,8 @@ impl<'d> OtMdns<'d> {
     pub async fn run<C: Crypto>(
         &self,
         matter: &Matter<'_>,
-        crypto: C,
-        notify: &dyn ChangeNotify,
+        _crypto: C,
+        _notify: &dyn ChangeNotify,
     ) -> Result<(), OtError> {
         info!("Running mDNS");
 
@@ -516,12 +518,17 @@ impl<'d> OtMdns<'d> {
         self.ot.wait_rx_when_idle().await;
         info!("rx_when_idle=true, starting SRP registration");
 
-        // On first iteration only: clean up any stale SRP records from previous runs.
-        // Using immediate removal (true) avoids blocking on slow/unreachable
-        // SRP servers which would consume the Matter Fail-Safe timer.
+        // On first iteration only: clear stale local SRP state from previous runs.
+        // Immediate removal (clear local state without server notification) is used because:
+        // 1. The SRP server from a previous session may be unreachable
+        // 2. Graceful removal would block waiting for server response during startup
+        // 3. The ECDSA key is persisted (via OtPersist), so re-registration under
+        //    the same FQDN succeeds — the server validates key ownership
+        // 4. Without this, re-adding the device to Apple Home fails: the device
+        //    thinks records are registered but the controller sees a timeout
         if !self.ot.srp_is_empty()? {
             let _ = self.ot.srp_remove_all(true);
-            info!("SRP startup cleanup: removed stale records");
+            info!("SRP startup cleanup: cleared stale local state");
         }
 
         // Track hash of currently registered services to avoid unnecessary re-registration
@@ -538,11 +545,12 @@ impl<'d> OtMdns<'d> {
                     current_hash, new_hash
                 );
 
-                // Remove old services if we had any registered
+                // Clear local SRP state before re-registering changed services.
+                // Immediate removal is safe: the persisted ECDSA key ensures the
+                // SRP server accepts re-registration under the same FQDN.
                 if current_hash != 0 && !self.ot.srp_is_empty()? {
                     let _ = self.ot.srp_remove_all(true);
-                    info!("SRP: removed old services");
-                    // 100ms debounce for SRP server synchronization
+                    info!("SRP: cleared old services");
                     Timer::after(Duration::from_millis(100)).await;
                 }
 
@@ -573,7 +581,7 @@ impl<'d> OtMdns<'d> {
                 info!("Registered SRP host {}", hostname);
 
                 // Add all current services
-                unwrap!(matter.mdns_services(&crypto, notify, |matter_service| {
+                unwrap!(matter.mdns_services(|matter_service| {
                     Service::call_with(
                         &matter_service,
                         matter.dev_det(),

@@ -391,49 +391,7 @@ where
         // Note: rx_when_idle is set by OtNetCtl::connect() after device attaches.
         // OtMdns::run() waits for rx_when_idle=true before registering SRP services.
 
-        // SRP diagnostic task - logs status every 1 second for debugging
-        let ot_diag = ot.clone();
-        let mut srp_diag = pin!(async {
-            let mut tick = 0u32;
-            loop {
-                Timer::after(Duration::from_secs(1)).await;
-                tick += 1;
-
-                let server_addr = ot_diag.srp_server_addr().ok().flatten();
-
-                // Count services and their states
-                let mut total = 0u8;
-                let mut registered = 0u8;
-                let mut adding = 0u8;
-                let mut removing = 0u8;
-                let _ = ot_diag.srp_services(|svc| {
-                    if let Some((_, state, _)) = svc {
-                        total += 1;
-                        match state {
-                            openthread::SrpState::Registered => registered += 1,
-                            openthread::SrpState::Adding | openthread::SrpState::ToAdd => {
-                                adding += 1
-                            }
-                            openthread::SrpState::Removing | openthread::SrpState::ToRemove => {
-                                removing += 1
-                            }
-                            _ => {}
-                        }
-                    }
-                });
-
-                if let Some(addr) = server_addr {
-                    info!(
-                        "SRP[{}s]: srv={}, reg={}/{}, add={}, rm={}",
-                        tick, addr, registered, total, adding, removing
-                    );
-                } else {
-                    warn!("SRP[{}s]: NO SERVER, svc={}", tick, total);
-                }
-            }
-            #[allow(unreachable_code)]
-            Ok::<(), Error>(())
-        });
+        let mut srp_diag = pin!(log_srp_state(&ot));
 
         let result = select4(&mut main, &mut radio, &mut persist, &mut srp_diag)
             .coalesce()
@@ -530,5 +488,44 @@ where
         let _ = ot.enable_ipv6(false);
 
         result
+    }
+}
+
+/// Log SRP client diagnostics (server address, service counts and states).
+/// Runs in a loop, logging every second until cancelled.
+async fn log_srp_state(ot: &OpenThread<'_>) -> Result<(), Error> {
+    let mut tick = 0u32;
+    loop {
+        Timer::after(Duration::from_secs(1)).await;
+        tick += 1;
+
+        let server_addr = ot.srp_server_addr().ok().flatten();
+
+        let mut total = 0u8;
+        let mut registered = 0u8;
+        let mut adding = 0u8;
+        let mut removing = 0u8;
+        let _ = ot.srp_services(|svc| {
+            if let Some((_, state, _)) = svc {
+                total += 1;
+                match state {
+                    openthread::SrpState::Registered => registered += 1,
+                    openthread::SrpState::Adding | openthread::SrpState::ToAdd => adding += 1,
+                    openthread::SrpState::Removing | openthread::SrpState::ToRemove => {
+                        removing += 1
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        if let Some(addr) = server_addr {
+            info!(
+                "SRP[{}s]: srv={}, reg={}/{}, add={}, rm={}",
+                tick, addr, registered, total, adding, removing
+            );
+        } else {
+            warn!("SRP[{}s]: NO SERVER, svc={}", tick, total);
+        }
     }
 }
