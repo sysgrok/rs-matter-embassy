@@ -15,7 +15,7 @@ use openthread::{
 use rs_matter_stack::matter::crypto::Crypto;
 use rs_matter_stack::matter::dm::ChangeNotify;
 use rs_matter_stack::matter::transport::network::mdns::Service;
-use rs_matter_stack::matter::Matter;
+use rs_matter_stack::matter::{Matter, MatterMdnsService};
 use rs_matter_stack::mdns::Mdns;
 use rs_matter_stack::nal::noop::NoopNet;
 use rs_matter_stack::nal::{NetStack, UdpBind};
@@ -420,6 +420,74 @@ impl ThreadDiag for OtNetCtl<'_> {
     }
 }
 
+/// FNV-1a hash implementation for no_std environments.
+/// Used to detect changes in mDNS service sets without storing full service data.
+struct Fnv1aHasher {
+    state: u64,
+}
+
+impl Fnv1aHasher {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    const fn new() -> Self {
+        Self {
+            state: Self::FNV_OFFSET_BASIS,
+        }
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.state ^= *byte as u64;
+            self.state = self.state.wrapping_mul(Self::FNV_PRIME);
+        }
+    }
+
+    fn write_u8(&mut self, val: u8) {
+        self.write(&[val]);
+    }
+
+    fn write_u16(&mut self, val: u16) {
+        self.write(&val.to_le_bytes());
+    }
+
+    fn write_u64(&mut self, val: u64) {
+        self.write(&val.to_le_bytes());
+    }
+
+    const fn finish(&self) -> u64 {
+        self.state
+    }
+}
+
+/// Compute a hash of all mDNS services currently published by Matter.
+/// Used to detect when services have changed and need to be re-registered with SRP.
+fn compute_services_hash(matter: &Matter<'_>) -> u64 {
+    let mut hasher = Fnv1aHasher::new();
+
+    // We can't return Result from the callback, so we just hash what we can
+    let _ = matter.mdns_services(|service| {
+        match service {
+            MatterMdnsService::Commissionable { id, discriminator } => {
+                hasher.write_u8(0); // Type marker for Commissionable
+                hasher.write_u64(id);
+                hasher.write_u16(discriminator);
+            }
+            MatterMdnsService::Commissioned {
+                compressed_fabric_id,
+                node_id,
+            } => {
+                hasher.write_u8(1); // Type marker for Commissioned
+                hasher.write_u64(compressed_fabric_id);
+                hasher.write_u64(node_id);
+            }
+        }
+        Ok(())
+    });
+
+    hasher.finish()
+}
+
 /// An mDNS trait implementation for `openthread` using Thread SRP
 pub struct OtMdns<'d> {
     ot: OpenThread<'d>,
@@ -438,6 +506,16 @@ impl<'d> OtMdns<'d> {
         crypto: C,
         notify: &dyn ChangeNotify,
     ) -> Result<(), OtError> {
+        info!("Running mDNS");
+
+        // Wait for rx_when_idle=true before registering SRP services.
+        // Without this, SRP requests are sent but responses cannot be received
+        // (causing RESPONSE_TIMEOUT code=28). The netif comes up when device
+        // becomes child, but rx_when_idle is set later by OtNetCtl::connect().
+        info!("Waiting for rx_when_idle=true...");
+        self.ot.wait_rx_when_idle().await;
+        info!("rx_when_idle=true, starting SRP registration");
+
         // On first iteration only: clean up any stale SRP records from previous runs.
         // Using immediate removal (true) avoids blocking on slow/unreachable
         // SRP servers which would consume the Matter Fail-Safe timer.
@@ -446,64 +524,87 @@ impl<'d> OtMdns<'d> {
             info!("SRP startup cleanup: removed stale records");
         }
 
+        // Track hash of currently registered services to avoid unnecessary re-registration
+        let mut current_hash: u64 = 0;
+
         loop {
-            // TODO: Not very efficient to remove and re-add everything
+            // Compute hash of services Matter wants to publish
+            let new_hash = compute_services_hash(matter);
 
-            let ieee_eui64 = self.ot.ieee_eui64();
+            // Only update SRP registration if services have changed
+            if new_hash != current_hash {
+                debug!(
+                    "SRP services changed: {:016x} -> {:016x}",
+                    current_hash, new_hash
+                );
 
-            let mut hostname = heapless::String::<16>::new();
-            unwrap!(
-                write!(
-                    hostname,
-                    "{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
-                    ieee_eui64[0],
-                    ieee_eui64[1],
-                    ieee_eui64[2],
-                    ieee_eui64[3],
-                    ieee_eui64[4],
-                    ieee_eui64[5],
-                    ieee_eui64[6],
-                    ieee_eui64[7]
-                ),
-                "Unreachable"
-            );
+                // Remove old services if we had any registered
+                if current_hash != 0 && !self.ot.srp_is_empty()? {
+                    let _ = self.ot.srp_remove_all(true);
+                    info!("SRP: removed old services");
+                    // 100ms debounce for SRP server synchronization
+                    Timer::after(Duration::from_millis(100)).await;
+                }
 
-            self.ot.srp_set_conf(&SrpConf {
-                host_name: hostname.as_str(),
-                ..Default::default()
-            })?;
+                // Generate hostname from IEEE EUI-64
+                let ieee_eui64 = self.ot.ieee_eui64();
+                let mut hostname = heapless::String::<16>::new();
+                unwrap!(
+                    write!(
+                        hostname,
+                        "{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+                        ieee_eui64[0],
+                        ieee_eui64[1],
+                        ieee_eui64[2],
+                        ieee_eui64[3],
+                        ieee_eui64[4],
+                        ieee_eui64[5],
+                        ieee_eui64[6],
+                        ieee_eui64[7]
+                    ),
+                    "Unreachable"
+                );
 
-            info!("Registered SRP host {}", hostname);
+                // Register hostname with SRP
+                self.ot.srp_set_conf(&SrpConf {
+                    host_name: hostname.as_str(),
+                    ..Default::default()
+                })?;
+                info!("Registered SRP host {}", hostname);
 
-            unwrap!(matter.mdns_services(&crypto, notify, |matter_service| {
-                Service::call_with(
-                    &matter_service,
-                    matter.dev_det(),
-                    matter.port(),
-                    |service| {
-                        unwrap!(self.ot.srp_add_service(&SrpService {
-                            name: service.service_protocol,
-                            instance_name: service.name,
-                            port: service.port,
-                            subtype_labels: service.service_subtypes.iter().cloned(),
-                            txt_entries: service
-                                .txt_kvs
-                                .iter()
-                                .cloned()
-                                .filter(|(k, _)| !k.is_empty())
-                                .map(|(k, v)| (k, v.as_bytes())),
-                            priority: 0,
-                            weight: 0,
-                            lease_secs: 0,
-                            key_lease_secs: 0,
-                        })); // TODO
+                // Add all current services
+                unwrap!(matter.mdns_services(&crypto, notify, |matter_service| {
+                    Service::call_with(
+                        &matter_service,
+                        matter.dev_det(),
+                        matter.port(),
+                        |service| {
+                            unwrap!(self.ot.srp_add_service(&SrpService {
+                                name: service.service_protocol,
+                                instance_name: service.name,
+                                port: service.port,
+                                subtype_labels: service.service_subtypes.iter().cloned(),
+                                txt_entries: service
+                                    .txt_kvs
+                                    .iter()
+                                    .cloned()
+                                    .filter(|(k, _)| !k.is_empty())
+                                    .map(|(k, v)| (k, v.as_bytes())),
+                                priority: 0,
+                                weight: 0,
+                                lease_secs: 0,
+                                key_lease_secs: 0,
+                            }));
+                            info!("Added service {:?}", matter_service);
+                            Ok(())
+                        },
+                    )
+                }));
 
-                        info!("Added service {:?}", matter_service);
-
-                        Ok(())
-                    },
-                )
-            }));
+                current_hash = new_hash;
+            } else {
+                debug!("SRP services unchanged, skipping re-registration");
+            }
 
             matter.wait_mdns().await;
         }

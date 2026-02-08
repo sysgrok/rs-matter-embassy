@@ -1,8 +1,8 @@
 use core::pin::pin;
 
 use embassy_futures::select::{select3, select4};
-use embassy_time::{Duration, Timer};
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
+use embassy_time::{Duration, Timer};
 
 use openthread::{OpenThread, Radio};
 
@@ -381,10 +381,8 @@ where
         ot.srp_autostart().map_err(to_matter_err)?;
         info!("SRP autostart enabled");
 
-        // Enable rx_on_when_idle so device can receive unsolicited messages (CASE, etc.)
-        // Parameters: rx_on_when_idle=true, device_type=false (MTD), network_data=false
-        ot.set_link_mode(true, false, false)
-            .map_err(to_matter_err)?;
+        // Note: rx_when_idle is set by OtNetCtl::connect() after device attaches.
+        // OtMdns::run() waits for rx_when_idle=true before registering SRP services.
 
         // SRP diagnostic task - logs status every 1 second for debugging
         let ot_diag = ot.clone();
@@ -406,15 +404,22 @@ where
                         total += 1;
                         match state {
                             openthread::SrpState::Registered => registered += 1,
-                            openthread::SrpState::Adding | openthread::SrpState::ToAdd => adding += 1,
-                            openthread::SrpState::Removing | openthread::SrpState::ToRemove => removing += 1,
+                            openthread::SrpState::Adding | openthread::SrpState::ToAdd => {
+                                adding += 1
+                            }
+                            openthread::SrpState::Removing | openthread::SrpState::ToRemove => {
+                                removing += 1
+                            }
                             _ => {}
                         }
                     }
                 });
 
                 if let Some(addr) = server_addr {
-                    info!("SRP[{}s]: srv={}, reg={}/{}, add={}, rm={}", tick, addr, registered, total, adding, removing);
+                    info!(
+                        "SRP[{}s]: srv={}, reg={}/{}, add={}, rm={}",
+                        tick, addr, registered, total, adding, removing
+                    );
                 } else {
                     warn!("SRP[{}s]: NO SERVER, svc={}", tick, total);
                 }
@@ -497,11 +502,10 @@ where
         let mut persist = pin!(persister.run());
         ot.enable_ipv6(true).map_err(to_matter_err)?;
         ot.srp_autostart().map_err(to_matter_err)?;
+        info!("SRP autostart enabled");
 
-        // Enable rx_on_when_idle so device can receive unsolicited messages (CASE, etc.)
-        // Parameters: rx_on_when_idle=true, device_type=false (MTD), network_data=false
-        ot.set_link_mode(true, false, false)
-            .map_err(to_matter_err)?;
+        // Note: rx_when_idle is set by OtNetCtl::connect() after device attaches.
+        // OtMdns::run() waits for rx_when_idle=true before registering SRP services.
 
         let result = select3(&mut main, &mut radio, &mut persist)
             .coalesce()
