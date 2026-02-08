@@ -527,8 +527,11 @@ impl<'d> OtMdns<'d> {
         // 4. Without this, re-adding the device to Apple Home fails: the device
         //    thinks records are registered but the controller sees a timeout
         if !self.ot.srp_is_empty()? {
-            let _ = self.ot.srp_remove_all(true);
-            info!("SRP startup cleanup: cleared stale local state");
+            if let Err(e) = self.ot.srp_remove_all(true) {
+                warn!("SRP startup cleanup failed: {:?}", e);
+            } else {
+                info!("SRP startup cleanup: cleared stale local state");
+            }
         }
 
         // Track hash of currently registered services to avoid unnecessary re-registration
@@ -549,8 +552,11 @@ impl<'d> OtMdns<'d> {
                 // Immediate removal is safe: the persisted ECDSA key ensures the
                 // SRP server accepts re-registration under the same FQDN.
                 if current_hash != 0 && !self.ot.srp_is_empty()? {
-                    let _ = self.ot.srp_remove_all(true);
-                    info!("SRP: cleared old services");
+                    if let Err(e) = self.ot.srp_remove_all(true) {
+                        warn!("SRP: failed to clear old services: {:?}", e);
+                    } else {
+                        info!("SRP: cleared old services");
+                    }
                     Timer::after(Duration::from_millis(100)).await;
                 }
 

@@ -509,7 +509,7 @@ async fn log_srp_state(ot: &OpenThread<'_>) -> Result<(), Error> {
     let mut tick = 0u32;
     loop {
         Timer::after(Duration::from_secs(10)).await;
-        tick += 10;
+        tick = tick.wrapping_add(10);
 
         let server_addr = ot.srp_server_addr().ok().flatten();
 
