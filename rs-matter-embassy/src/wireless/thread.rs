@@ -1,6 +1,6 @@
 use core::pin::pin;
 
-use embassy_futures::select::{select3, select4};
+use embassy_futures::select::select4;
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use embassy_time::{Duration, Timer};
 
@@ -488,7 +488,9 @@ where
         // Note: rx_when_idle is set by OtNetCtl::connect() after device attaches.
         // OtMdns::run() waits for rx_when_idle=true before registering SRP services.
 
-        let result = select3(&mut main, &mut radio, &mut persist)
+        let mut srp_diag = pin!(log_srp_state(&ot));
+
+        let result = select4(&mut main, &mut radio, &mut persist, &mut srp_diag)
             .coalesce()
             .await;
 

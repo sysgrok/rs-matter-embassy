@@ -580,7 +580,8 @@ impl<'d> OtMdns<'d> {
                 })?;
                 info!("Registered SRP host {}", hostname);
 
-                // Add all current services
+                // Add all current services, tracking failures
+                let mut all_ok = true;
                 let _ = matter.mdns_services(|matter_service| {
                     Service::call_with(
                         &matter_service,
@@ -604,17 +605,26 @@ impl<'d> OtMdns<'d> {
                                 key_lease_secs: 0,
                             }) {
                                 Ok(()) => info!("Added service {:?}", matter_service),
-                                Err(e) => error!(
-                                    "Failed to add SRP service {:?}: {:?}",
-                                    matter_service, e
-                                ),
+                                Err(e) => {
+                                    error!(
+                                        "Failed to add SRP service {:?}: {:?}",
+                                        matter_service, e
+                                    );
+                                    all_ok = false;
+                                }
                             }
                             Ok(())
                         },
                     )
                 });
 
-                current_hash = new_hash;
+                // Only update hash if all services registered successfully.
+                // On partial failure, the next iteration will retry.
+                if all_ok {
+                    current_hash = new_hash;
+                } else {
+                    warn!("SRP: partial registration failure, will retry");
+                }
             } else {
                 debug!("SRP services unchanged, skipping re-registration");
             }

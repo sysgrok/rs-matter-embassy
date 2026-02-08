@@ -15,9 +15,6 @@ rust-version = "1.84"
 [lib]
 harness = false
 
-[patch.crates-io]
-# Fork with set_link_mode method: https://github.com/esp-rs/openthread/pull/50
-openthread = { git = "https://github.com/lexfrei/openthread", branch = "feat/add-set-link-mode" }
 [features]
 default = ["rustcrypto"]
 
