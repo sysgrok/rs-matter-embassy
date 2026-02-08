@@ -7,15 +7,13 @@ members = [
 exclude = ["examples"]
 
 [patch.crates-io]
-#rs-matter = { git = "https://github.com/project-chip/rs-matter" }
+# Fork dependencies used while upstream PRs are pending review:
+# - rs-matter / rs-matter-stack: sysgrok "next" branch with required fixes
+# - openthread: fork with set_link_mode + configurable radio caps (esp-rs/openthread#50)
+# - nrf-sdc / nrf-mpsl: pinned to specific rev for BLE compatibility
 rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
-#rs-matter = { path = "../../rs-matter/rs-matter" }
 rs-matter-stack = { git = "https://github.com/ivmarkov/rs-matter-stack.git", branch = "next" }
-#rs-matter-stack = { path = "../../rs-matter-stack" }
-# Fork with set_link_mode + configurable radio caps: https://github.com/esp-rs/openthread/pull/50
 openthread = { git = "https://github.com/lexfrei/openthread", branch = "feat/add-set-link-mode" }
-#openthread = { git = "https://github.com/sysgrok/openthread.git" }
-#openthread = { version = "0.1", path = "../../../openthread/openthread" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
 
