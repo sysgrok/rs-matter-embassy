@@ -174,6 +174,7 @@ pub struct EmbassyThread<'a, T, S, R> {
     ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
     use_ble_random_addr: bool,
     rand: R,
+    radio_caps: Option<u8>,
 }
 
 impl<'a, T, S, R> EmbassyThread<'a, T, S, R>
@@ -223,7 +224,17 @@ where
             ble_context,
             rand,
             use_ble_random_addr,
+            radio_caps: None,
         }
+    }
+
+    /// Set hardware-specific radio capabilities.
+    ///
+    /// If not set, OpenThread uses the default (ACK_TIMEOUT only).
+    /// For ESP32, use `OT_RADIO_CAPS_ACK_TIMEOUT | OT_RADIO_CAPS_CSMA_BACKOFF`.
+    pub fn with_radio_caps(mut self, caps: u8) -> Self {
+        self.radio_caps = Some(caps);
+        self
     }
 }
 
@@ -244,6 +255,7 @@ where
                 store: self.store,
                 context: self.context,
                 task,
+                radio_caps: self.radio_caps,
             })
             .await
     }
@@ -268,6 +280,7 @@ where
                 ble_context: self.ble_context,
                 use_ble_random_addr: self.use_ble_random_addr,
                 task,
+                radio_caps: self.radio_caps,
             })
             .await
     }
@@ -334,6 +347,7 @@ struct ThreadDriverTaskImpl<'a, A, S, C> {
     store: &'a SharedKvBlobStore<'a, S>,
     context: &'a OtNetContext,
     task: A,
+    radio_caps: Option<u8>,
 }
 
 impl<A, S, C> ThreadDriverTask for ThreadDriverTaskImpl<'_, A, S, C>
@@ -365,12 +379,9 @@ where
         )
         .map_err(to_matter_err)?;
 
-        // Set radio capabilities matching the actual hardware.
-        // ESP32 supports ACK_TIMEOUT and CSMA_BACKOFF.
-        ot.set_radio_caps(
-            (openthread::sys::OT_RADIO_CAPS_ACK_TIMEOUT
-                | openthread::sys::OT_RADIO_CAPS_CSMA_BACKOFF) as u8,
-        );
+        if let Some(caps) = self.radio_caps {
+            ot.set_radio_caps(caps);
+        }
 
         let net_ctl = OtNetCtl::new(ot.clone());
         let net_stack = OtNetStack::new(ot.clone());
@@ -413,6 +424,7 @@ struct ThreadCoexDriverTaskImpl<'a, A, S, C> {
     ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
     task: A,
     use_ble_random_addr: bool,
+    radio_caps: Option<u8>,
 }
 
 impl<A, S, C> ThreadCoexDriverTask for ThreadCoexDriverTaskImpl<'_, A, S, C>
@@ -445,12 +457,9 @@ where
         )
         .map_err(to_matter_err)?;
 
-        // Set radio capabilities matching the actual hardware.
-        // ESP32 supports ACK_TIMEOUT and CSMA_BACKOFF.
-        ot.set_radio_caps(
-            (openthread::sys::OT_RADIO_CAPS_ACK_TIMEOUT
-                | openthread::sys::OT_RADIO_CAPS_CSMA_BACKOFF) as u8,
-        );
+        if let Some(caps) = self.radio_caps {
+            ot.set_radio_caps(caps);
+        }
 
         let net_ctl = OtNetCtl::new(ot.clone());
         let net_stack = OtNetStack::new(ot.clone());
@@ -492,12 +501,12 @@ where
 }
 
 /// Log SRP client diagnostics (server address, service counts and states).
-/// Runs in a loop, logging every second until cancelled.
+/// Runs in a loop, logging every 10 seconds until cancelled.
 async fn log_srp_state(ot: &OpenThread<'_>) -> Result<(), Error> {
     let mut tick = 0u32;
     loop {
-        Timer::after(Duration::from_secs(1)).await;
-        tick += 1;
+        Timer::after(Duration::from_secs(10)).await;
+        tick += 10;
 
         let server_addr = ot.srp_server_addr().ok().flatten();
 

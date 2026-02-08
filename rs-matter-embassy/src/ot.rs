@@ -581,13 +581,13 @@ impl<'d> OtMdns<'d> {
                 info!("Registered SRP host {}", hostname);
 
                 // Add all current services
-                unwrap!(matter.mdns_services(|matter_service| {
+                let _ = matter.mdns_services(|matter_service| {
                     Service::call_with(
                         &matter_service,
                         matter.dev_det(),
                         matter.port(),
                         |service| {
-                            unwrap!(self.ot.srp_add_service(&SrpService {
+                            match self.ot.srp_add_service(&SrpService {
                                 name: service.service_protocol,
                                 instance_name: service.name,
                                 port: service.port,
@@ -602,12 +602,17 @@ impl<'d> OtMdns<'d> {
                                 weight: 0,
                                 lease_secs: 0,
                                 key_lease_secs: 0,
-                            }));
-                            info!("Added service {:?}", matter_service);
+                            }) {
+                                Ok(()) => info!("Added service {:?}", matter_service),
+                                Err(e) => error!(
+                                    "Failed to add SRP service {:?}: {:?}",
+                                    matter_service, e
+                                ),
+                            }
                             Ok(())
                         },
                     )
-                }));
+                });
 
                 current_hash = new_hash;
             } else {
