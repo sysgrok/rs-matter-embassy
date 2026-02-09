@@ -604,7 +604,7 @@ impl<'d> OtMdns<'d> {
 
                 // Add all current services, tracking failures
                 let mut all_ok = true;
-                let _ = matter.mdns_services(&crypto, notify, |matter_service| {
+                if let Err(e) = matter.mdns_services(&crypto, notify, |matter_service| {
                     Service::call_with(
                         &matter_service,
                         matter.dev_det(),
@@ -638,7 +638,10 @@ impl<'d> OtMdns<'d> {
                             Ok(())
                         },
                     )
-                });
+                }) {
+                    error!("Failed to enumerate mDNS services: {:?}", e);
+                    all_ok = false;
+                }
 
                 // Only update hash if all services registered successfully.
                 // On partial failure, the next iteration will retry.
