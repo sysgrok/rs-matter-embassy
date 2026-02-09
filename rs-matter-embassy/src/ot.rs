@@ -475,11 +475,9 @@ fn compute_services_hash<C: Crypto>(
     matter: &Matter<'_>,
     crypto: &C,
     notify: &dyn ChangeNotify,
-) -> u64 {
+) -> Option<u64> {
     let mut hasher = Fnv1aHasher::new();
 
-    // We can't return Result from the callback, so we just hash what we can.
-    // Log errors but proceed with whatever was hashed so far.
     if let Err(e) = matter.mdns_services(crypto, notify, |service| {
         match service {
             MatterMdnsService::Commissionable { id, discriminator } => {
@@ -499,9 +497,10 @@ fn compute_services_hash<C: Crypto>(
         Ok(())
     }) {
         warn!("Failed to enumerate mDNS services for hashing: {:?}", e);
+        return None;
     }
 
-    hasher.finish()
+    Some(hasher.finish())
 }
 
 /// An mDNS trait implementation for `openthread` using Thread SRP
@@ -549,23 +548,27 @@ impl<'d> OtMdns<'d> {
         }
 
         // Track hash of currently registered services to avoid unnecessary re-registration
-        let mut current_hash: u64 = 0;
+        let mut current_hash: Option<u64> = None;
 
         loop {
-            // Compute hash of services Matter wants to publish
-            let new_hash = compute_services_hash(matter, &crypto, notify);
+            // Compute hash of services Matter wants to publish.
+            // On enumeration failure, skip this iteration and retry.
+            let Some(new_hash) = compute_services_hash(matter, &crypto, notify) else {
+                Timer::after(Duration::from_secs(5)).await;
+                continue;
+            };
 
             // Only update SRP registration if services have changed
-            if new_hash != current_hash {
+            if Some(new_hash) != current_hash {
                 debug!(
-                    "SRP services changed: {:016x} -> {:016x}",
+                    "SRP services changed: {:016x?} -> {:016x}",
                     current_hash, new_hash
                 );
 
                 // Clear local SRP state before re-registering changed services.
                 // Immediate removal is safe: the persisted ECDSA key ensures the
                 // SRP server accepts re-registration under the same FQDN.
-                if current_hash != 0 && !self.ot.srp_is_empty()? {
+                if current_hash.is_some() && !self.ot.srp_is_empty()? {
                     if let Err(e) = self.ot.srp_remove_all(true) {
                         warn!("SRP: failed to clear old services: {:?}", e);
                     } else {
@@ -646,7 +649,7 @@ impl<'d> OtMdns<'d> {
                 // Only update hash if all services registered successfully.
                 // On partial failure, the next iteration will retry.
                 if all_ok {
-                    current_hash = new_hash;
+                    current_hash = Some(new_hash);
                 } else {
                     warn!("SRP: partial registration failure, will retry in 5s");
                     // Use a short timer to retry rather than waiting on wait_mdns(),

@@ -486,10 +486,10 @@ where
 /// expected by `select4` / `Coalesce` — all branches must share the same type
 /// so that whichever completes first can be coalesced into a single result.
 async fn log_srp_state(ot: &OpenThread<'_>) -> Result<(), Error> {
-    let mut tick = 0u32;
+    let mut tick = 0u64;
     loop {
         Timer::after(Duration::from_secs(10)).await;
-        tick = tick.wrapping_add(10);
+        tick = tick.saturating_add(10);
 
         let server_addr = ot.srp_server_addr().ok().flatten();
 

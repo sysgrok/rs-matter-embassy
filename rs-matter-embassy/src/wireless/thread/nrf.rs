@@ -473,4 +473,4 @@ impl<T> CryptoRng for SendHack<T> where T: CryptoRng + RngCore {}
 // - The RNG is only used within a single async task (the BLE driver task).
 // - The upstream `Crypto` trait in rs-matter does not require `Send` on its RNG,
 //   but `nrf-sdc` does — this wrapper bridges that mismatch.
-unsafe impl<T> Send for SendHack<T> {}
+unsafe impl<T: CryptoRngCore> Send for SendHack<T> {}
