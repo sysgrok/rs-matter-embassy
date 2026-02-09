@@ -219,6 +219,10 @@ where
                     if address[i] != 0x00 {
                         has_one = true;
                     }
+                    // Early exit if both conditions are satisfied
+                    if has_zero && has_one {
+                        break;
+                    }
                 }
                 // Check lower 6 bits of the MSB (bits 0-5, excluding bits 6-7 which we set to 11)
                 let msb_lower = address[5] & 0x3F;
