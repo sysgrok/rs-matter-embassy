@@ -560,10 +560,11 @@ impl<'d> OtMdns<'d> {
 
             // Only update SRP registration if services have changed
             if Some(new_hash) != current_hash {
-                debug!(
-                    "SRP services changed: {:016x?} -> {:016x}",
-                    current_hash, new_hash
-                );
+                if let Some(old) = current_hash {
+                    debug!("SRP services changed: {:016x} -> {:016x}", old, new_hash);
+                } else {
+                    debug!("SRP services initial registration: {:016x}", new_hash);
+                }
 
                 // Clear local SRP state before re-registering changed services.
                 // Immediate removal is safe: the persisted ECDSA key ensures the
