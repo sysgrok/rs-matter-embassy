@@ -629,7 +629,7 @@ impl<'d> OtMdns<'d> {
                                 lease_secs: 0,
                                 key_lease_secs: 0,
                             }) {
-                                Ok(()) => info!("Added service {:?}", matter_service),
+                                Ok(_) => info!("Added service {:?}", matter_service),
                                 Err(e) => {
                                     error!(
                                         "Failed to add SRP service {:?}: {:?}",
