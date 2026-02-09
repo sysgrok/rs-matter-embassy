@@ -199,6 +199,10 @@ where
             let mut address = [0; 6];
             rand.fill_bytes(&mut address);
 
+            // Ensure the address is a valid BLE Static Random Address
+            // (two most significant bits of the MSB must be 11)
+            address[5] |= 0xC0;
+
             info!("Random GATT address = {:?}", address);
 
             stack.set_random_address(Address::random(address))
