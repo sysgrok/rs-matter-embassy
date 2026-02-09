@@ -471,11 +471,15 @@ impl Fnv1aHasher {
 /// are the ones that determine _which_ services exist; TXT records and port
 /// are derived deterministically from the Matter state for a given service
 /// identity, so they cannot change independently.
-fn compute_services_hash(matter: &Matter<'_>) -> u64 {
+fn compute_services_hash<C: Crypto>(
+    matter: &Matter<'_>,
+    crypto: &C,
+    notify: &dyn ChangeNotify,
+) -> u64 {
     let mut hasher = Fnv1aHasher::new();
 
     // We can't return Result from the callback, so we just hash what we can
-    let _ = matter.mdns_services(|service| {
+    let _ = matter.mdns_services(crypto, notify, |service| {
         match service {
             MatterMdnsService::Commissionable { id, discriminator } => {
                 hasher.write_u8(0); // Type marker for Commissionable
@@ -509,15 +513,11 @@ impl<'d> OtMdns<'d> {
     }
 
     /// Run the `OtMdns` instance by listening to the mDNS services and registering them with the SRP server.
-    ///
-    /// `_crypto` and `_notify` are required by the `Mdns` trait signature but unused here:
-    /// OpenThread's SRP client handles service registration internally without needing
-    /// external crypto or change notifications.
     pub async fn run<C: Crypto>(
         &self,
         matter: &Matter<'_>,
-        _crypto: C,
-        _notify: &dyn ChangeNotify,
+        crypto: C,
+        notify: &dyn ChangeNotify,
     ) -> Result<(), OtError> {
         info!("Running mDNS");
 
@@ -550,7 +550,7 @@ impl<'d> OtMdns<'d> {
 
         loop {
             // Compute hash of services Matter wants to publish
-            let new_hash = compute_services_hash(matter);
+            let new_hash = compute_services_hash(matter, &crypto, notify);
 
             // Only update SRP registration if services have changed
             if new_hash != current_hash {
@@ -599,7 +599,7 @@ impl<'d> OtMdns<'d> {
 
                 // Add all current services, tracking failures
                 let mut all_ok = true;
-                let _ = matter.mdns_services(|matter_service| {
+                let _ = matter.mdns_services(&crypto, notify, |matter_service| {
                     Service::call_with(
                         &matter_service,
                         matter.dev_det(),
