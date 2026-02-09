@@ -536,7 +536,7 @@ async fn log_srp_state(ot: &OpenThread<'_>) -> Result<(), Error> {
         });
 
         if let Some(addr) = server_addr {
-            info!(
+            debug!(
                 "SRP[{}s]: srv={}, reg={}/{}, add={}, rm={}",
                 tick, addr, registered, total, adding, removing
             );
