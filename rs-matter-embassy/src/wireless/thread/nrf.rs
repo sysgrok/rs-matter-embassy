@@ -339,7 +339,7 @@ impl<R> super::ThreadDriver for NrfThreadDriver<'_, R> {
 
 impl<R> super::BleDriver for NrfThreadDriver<'_, R>
 where
-    R: CryptoRngCore + Copy, /*+ Send*/
+    R: CryptoRngCore + Copy,
 {
     async fn run<T>(&mut self, mut task: T) -> Result<(), Error>
     where
@@ -467,4 +467,10 @@ where
 
 impl<T> CryptoRng for SendHack<T> where T: CryptoRng + RngCore {}
 
-unsafe impl<T> Send for SendHack<T> {}
+// SAFETY: SendHack bypasses the `Send` bound required by `nrf_sdc::Builder::build()`.
+// This is safe because:
+// - Target is a single-threaded MCU (nRF52); no OS threads exist.
+// - The RNG is only used within a single async task (the BLE driver task).
+// - The upstream `Crypto` trait in rs-matter does not require `Send` on its RNG,
+//   but `nrf-sdc` does — this wrapper bridges that mismatch.
+unsafe impl<T: CryptoRngCore> Send for SendHack<T> {}

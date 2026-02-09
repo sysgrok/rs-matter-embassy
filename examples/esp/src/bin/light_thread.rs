@@ -95,6 +95,9 @@ async fn main(_s: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     // Create the crypto provider, using the `esp-hal` TRNG/ADC1 as the source of randomness for a reseeding CSPRNG.
+    // Side-effect: TrngSource::new() takes ownership of RNG+ADC1 peripherals, which is
+    // required for Trng::try_new() to succeed. The binding is kept alive (not dropped)
+    // to maintain this peripheral reservation for the lifetime of the program.
     let _trng_source = esp_hal::rng::TrngSource::new(peripherals.RNG, peripherals.ADC1);
     let crypto = default_crypto::<NoopRawMutex, _>(
         reseeding_csprng(esp_hal::rng::Trng::try_new().unwrap(), 1000).unwrap(),

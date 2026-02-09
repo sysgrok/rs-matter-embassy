@@ -1,7 +1,8 @@
 use core::pin::pin;
 
-use embassy_futures::select::select3;
+use embassy_futures::select::select4;
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
+use embassy_time::{Duration, Timer};
 
 use openthread::{OpenThread, Radio};
 
@@ -378,8 +379,14 @@ where
         let mut persist = pin!(persister.run());
         ot.enable_ipv6(true).map_err(to_matter_err)?;
         ot.srp_autostart().map_err(to_matter_err)?;
+        info!("SRP autostart enabled");
 
-        let result = select3(&mut main, &mut radio, &mut persist)
+        // Note: rx_when_idle is set by OtNetCtl::connect() after device attaches.
+        // OtMdns::run() waits for rx_when_idle=true before registering SRP services.
+
+        let mut srp_diag = pin!(log_srp_state(&ot));
+
+        let result = select4(&mut main, &mut radio, &mut persist, &mut srp_diag)
             .coalesce()
             .await;
 
@@ -453,8 +460,14 @@ where
         let mut persist = pin!(persister.run());
         ot.enable_ipv6(true).map_err(to_matter_err)?;
         ot.srp_autostart().map_err(to_matter_err)?;
+        info!("SRP autostart enabled");
 
-        let result = select3(&mut main, &mut radio, &mut persist)
+        // Note: rx_when_idle is set by OtNetCtl::connect() after device attaches.
+        // OtMdns::run() waits for rx_when_idle=true before registering SRP services.
+
+        let mut srp_diag = pin!(log_srp_state(&ot));
+
+        let result = select4(&mut main, &mut radio, &mut persist, &mut srp_diag)
             .coalesce()
             .await;
 
@@ -463,5 +476,50 @@ where
         let _ = ot.enable_ipv6(false);
 
         result
+    }
+}
+
+/// Log SRP client diagnostics (server address, service counts and states).
+/// Runs in a loop, logging every 10 seconds until cancelled.
+///
+/// Returns `Result<(), Error>` (never actually returns) to match the signature
+/// expected by `select4` / `Coalesce` — all branches must share the same type
+/// so that whichever completes first can be coalesced into a single result.
+async fn log_srp_state(ot: &OpenThread<'_>) -> Result<(), Error> {
+    let mut tick = 0u64;
+    loop {
+        Timer::after(Duration::from_secs(10)).await;
+        tick = tick.saturating_add(10);
+
+        let server_addr = ot.srp_server_addr().ok().flatten();
+
+        let mut total = 0u8;
+        let mut registered = 0u8;
+        let mut adding = 0u8;
+        let mut removing = 0u8;
+        let _ = ot.srp_services(|svc| {
+            if let Some((_, state, _)) = svc {
+                total = total.saturating_add(1);
+                match state {
+                    openthread::SrpState::Registered => registered = registered.saturating_add(1),
+                    openthread::SrpState::Adding | openthread::SrpState::ToAdd => {
+                        adding = adding.saturating_add(1)
+                    }
+                    openthread::SrpState::Removing | openthread::SrpState::ToRemove => {
+                        removing = removing.saturating_add(1)
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        if let Some(addr) = server_addr {
+            debug!(
+                "SRP[{}s]: srv={}, reg={}/{}, add={}, rm={}",
+                tick, addr, registered, total, adding, removing
+            );
+        } else {
+            warn!("SRP[{}s]: NO SERVER, svc={}", tick, total);
+        }
     }
 }
