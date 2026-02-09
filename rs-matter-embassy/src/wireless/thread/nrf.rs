@@ -339,7 +339,7 @@ impl<R> super::ThreadDriver for NrfThreadDriver<'_, R> {
 
 impl<R> super::BleDriver for NrfThreadDriver<'_, R>
 where
-    R: CryptoRngCore + Copy, /*+ Send*/
+    R: CryptoRngCore + Copy,
 {
     async fn run<T>(&mut self, mut task: T) -> Result<(), Error>
     where
