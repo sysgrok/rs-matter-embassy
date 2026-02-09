@@ -196,8 +196,17 @@ where
         let stack = trouble_host::new(controller, &mut resources);
 
         let stack = if let Some(mut rand) = self.rand {
-            let mut address = [0; 6];
-            rand.fill_bytes(&mut address);
+            // Generate a valid BLE Static Random Address
+            // - Two most significant bits must be 11 (static random address)
+            // - Lower 46 bits must contain at least one 0 and one 1
+            let address: [u8; 6] = loop {
+                let addr = rand.next_u64() & 0x3f_ff_ff_ff_ff_ff;
+                if addr != 0 && addr != 0x3f_ff_ff_ff_ff_ff {
+                    break (addr | 0xc0_00_00_00_00_00).to_be_bytes()[2..]
+                        .try_into()
+                        .unwrap();
+                }
+            };
 
             info!("Random GATT address = {:?}", address);
 
