@@ -203,6 +203,11 @@ where
             // (two most significant bits of the MSB must be 11)
             address[5] |= 0xC0;
 
+            // Ensure at least one 0 bit and one 1 bit in the lower 46 bits
+            // by setting bit 0 to 1 and bit 1 to 0 in the LSB if needed
+            address[0] |= 0x01; // Ensure at least one 1 bit
+            address[0] &= 0xFD; // Ensure at least one 0 bit (clear bit 1)
+
             info!("Random GATT address = {:?}", address);
 
             stack.set_random_address(Address::random(address))
