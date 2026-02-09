@@ -304,11 +304,11 @@ impl NetCtl for OtNetCtl<'_> {
         // TX/RX instead of going to sleep). If set before attach, the ESP
         // radio driver keeps receiving during the MLE attach handshake,
         // interfering with the attach timing and causing failures.
-        if let Err(e) = self.0.set_link_mode(true, false, false) {
+        self.0.set_link_mode(true, false, false).map_err(|e| {
             warn!("Failed to set link mode: {:?}", e);
-        } else {
-            info!("Link mode set: rx_on_when_idle=true");
-        }
+            NetCtlError::OtherConnectionFailure
+        })?;
+        info!("Link mode set: rx_on_when_idle=true");
 
         Ok(())
     }
@@ -478,8 +478,9 @@ fn compute_services_hash<C: Crypto>(
 ) -> u64 {
     let mut hasher = Fnv1aHasher::new();
 
-    // We can't return Result from the callback, so we just hash what we can
-    let _ = matter.mdns_services(crypto, notify, |service| {
+    // We can't return Result from the callback, so we just hash what we can.
+    // Log errors but proceed with whatever was hashed so far.
+    if let Err(e) = matter.mdns_services(crypto, notify, |service| {
         match service {
             MatterMdnsService::Commissionable { id, discriminator } => {
                 hasher.write_u8(0); // Type marker for Commissionable
@@ -496,7 +497,9 @@ fn compute_services_hash<C: Crypto>(
             }
         }
         Ok(())
-    });
+    }) {
+        warn!("Failed to enumerate mDNS services for hashing: {:?}", e);
+    }
 
     hasher.finish()
 }
@@ -568,6 +571,8 @@ impl<'d> OtMdns<'d> {
                     } else {
                         info!("SRP: cleared old services");
                     }
+                    // Brief delay to let the SRP client process the local removal
+                    // before registering new services.
                     Timer::after(Duration::from_millis(100)).await;
                 }
 

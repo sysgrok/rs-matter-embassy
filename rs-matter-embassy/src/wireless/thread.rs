@@ -499,12 +499,14 @@ async fn log_srp_state(ot: &OpenThread<'_>) -> Result<(), Error> {
         let mut removing = 0u8;
         let _ = ot.srp_services(|svc| {
             if let Some((_, state, _)) = svc {
-                total += 1;
+                total = total.saturating_add(1);
                 match state {
-                    openthread::SrpState::Registered => registered += 1,
-                    openthread::SrpState::Adding | openthread::SrpState::ToAdd => adding += 1,
+                    openthread::SrpState::Registered => registered = registered.saturating_add(1),
+                    openthread::SrpState::Adding | openthread::SrpState::ToAdd => {
+                        adding = adding.saturating_add(1)
+                    }
                     openthread::SrpState::Removing | openthread::SrpState::ToRemove => {
-                        removing += 1
+                        removing = removing.saturating_add(1)
                     }
                     _ => {}
                 }
