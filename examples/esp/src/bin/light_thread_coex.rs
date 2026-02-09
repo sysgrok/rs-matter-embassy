@@ -185,10 +185,6 @@ async fn main(_s: Spawner) {
             persist.store(),
             stack,
             true, // Use a random BLE address
-        )
-        .with_radio_caps(
-            (openthread::sys::OT_RADIO_CAPS_ACK_TIMEOUT
-                | openthread::sys::OT_RADIO_CAPS_CSMA_BACKOFF) as openthread::sys::otRadioCaps,
         ),
         // The Matter stack needs a persister to store its state
         &persist,

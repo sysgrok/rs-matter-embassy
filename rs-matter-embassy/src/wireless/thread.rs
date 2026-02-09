@@ -4,7 +4,6 @@ use embassy_futures::select::select4;
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use embassy_time::{Duration, Timer};
 
-use openthread::sys::otRadioCaps;
 use openthread::{OpenThread, Radio};
 
 use crate::ble::{ControllerRef, TroubleBtpGattContext, TroubleBtpGattPeripheral};
@@ -175,7 +174,6 @@ pub struct EmbassyThread<'a, T, S, R> {
     ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
     use_ble_random_addr: bool,
     rand: R,
-    radio_caps: Option<otRadioCaps>,
 }
 
 impl<'a, T, S, R> EmbassyThread<'a, T, S, R>
@@ -225,17 +223,7 @@ where
             ble_context,
             rand,
             use_ble_random_addr,
-            radio_caps: None,
         }
-    }
-
-    /// Set hardware-specific radio capabilities.
-    ///
-    /// If not set, OpenThread uses the default (ACK_TIMEOUT only).
-    /// For ESP32, use `OT_RADIO_CAPS_ACK_TIMEOUT | OT_RADIO_CAPS_CSMA_BACKOFF`.
-    pub fn with_radio_caps(mut self, caps: otRadioCaps) -> Self {
-        self.radio_caps = Some(caps);
-        self
     }
 }
 
@@ -256,7 +244,6 @@ where
                 store: self.store,
                 context: self.context,
                 task,
-                radio_caps: self.radio_caps,
             })
             .await
     }
@@ -281,7 +268,6 @@ where
                 ble_context: self.ble_context,
                 use_ble_random_addr: self.use_ble_random_addr,
                 task,
-                radio_caps: self.radio_caps,
             })
             .await
     }
@@ -348,7 +334,6 @@ struct ThreadDriverTaskImpl<'a, A, S, C> {
     store: &'a SharedKvBlobStore<'a, S>,
     context: &'a OtNetContext,
     task: A,
-    radio_caps: Option<otRadioCaps>,
 }
 
 impl<A, S, C> ThreadDriverTask for ThreadDriverTaskImpl<'_, A, S, C>
@@ -379,10 +364,6 @@ where
             &mut resources.srp,
         )
         .map_err(to_matter_err)?;
-
-        if let Some(caps) = self.radio_caps {
-            ot.set_radio_caps(caps);
-        }
 
         let net_ctl = OtNetCtl::new(ot.clone());
         let net_stack = OtNetStack::new(ot.clone());
@@ -425,7 +406,6 @@ struct ThreadCoexDriverTaskImpl<'a, A, S, C> {
     ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
     task: A,
     use_ble_random_addr: bool,
-    radio_caps: Option<otRadioCaps>,
 }
 
 impl<A, S, C> ThreadCoexDriverTask for ThreadCoexDriverTaskImpl<'_, A, S, C>
@@ -457,10 +437,6 @@ where
             &mut resources.srp,
         )
         .map_err(to_matter_err)?;
-
-        if let Some(caps) = self.radio_caps {
-            ot.set_radio_caps(caps);
-        }
 
         let net_ctl = OtNetCtl::new(ot.clone());
         let net_stack = OtNetStack::new(ot.clone());
