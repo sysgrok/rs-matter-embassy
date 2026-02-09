@@ -196,47 +196,17 @@ where
         let stack = trouble_host::new(controller, &mut resources);
 
         let stack = if let Some(mut rand) = self.rand {
-            let mut address = [0; 6];
-
-            // Generate a valid BLE Static Random Address by regenerating until compliant
-            loop {
-                rand.fill_bytes(&mut address);
-
-                // Ensure the address is a valid BLE Static Random Address
-                // (two most significant bits of the MSB must be 11)
-                address[5] |= 0xC0;
-
-                // Check that the lower 46 bits contain at least one 0 and one 1
-                // by verifying the address is not all 1s or all 0s (after masking the top 2 bits)
-                let mut has_zero = false;
-                let mut has_one = false;
-
-                // Check all bytes
-                for i in 0..5 {
-                    if address[i] != 0xFF {
-                        has_zero = true;
-                    }
-                    if address[i] != 0x00 {
-                        has_one = true;
-                    }
-                    // Early exit if both conditions are satisfied
-                    if has_zero && has_one {
-                        break;
-                    }
+            // Generate a valid BLE Static Random Address
+            // - Two most significant bits must be 11 (static random address)
+            // - Lower 46 bits must contain at least one 0 and one 1
+            let address: [u8; 6] = loop {
+                let addr = rand.next_u64() & 0x3f_ff_ff_ff_ff_ff;
+                if addr != 0 && addr != 0x3f_ff_ff_ff_ff_ff {
+                    break (addr | 0xc0_00_00_00_00_00).to_be_bytes()[2..]
+                        .try_into()
+                        .unwrap();
                 }
-                // Check lower 6 bits of the MSB (bits 0-5, excluding bits 6-7 which we set to 11)
-                let msb_lower = address[5] & 0x3F;
-                if msb_lower != 0x3F {
-                    has_zero = true;
-                }
-                if msb_lower != 0x00 {
-                    has_one = true;
-                }
-
-                if has_zero && has_one {
-                    break; // Address is valid
-                }
-            }
+            };
 
             info!("Random GATT address = {:?}", address);
 
