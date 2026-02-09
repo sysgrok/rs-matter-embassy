@@ -197,16 +197,42 @@ where
 
         let stack = if let Some(mut rand) = self.rand {
             let mut address = [0; 6];
-            rand.fill_bytes(&mut address);
 
-            // Ensure the address is a valid BLE Static Random Address
-            // (two most significant bits of the MSB must be 11)
-            address[5] |= 0xC0;
+            // Generate a valid BLE Static Random Address by regenerating until compliant
+            loop {
+                rand.fill_bytes(&mut address);
 
-            // Ensure at least one 0 bit and one 1 bit in the lower 46 bits
-            // by setting bit 0 to 1 and bit 1 to 0 in the LSB if needed
-            address[0] |= 0x01; // Ensure at least one 1 bit
-            address[0] &= 0xFD; // Ensure at least one 0 bit (clear bit 1)
+                // Ensure the address is a valid BLE Static Random Address
+                // (two most significant bits of the MSB must be 11)
+                address[5] |= 0xC0;
+
+                // Check that the lower 46 bits contain at least one 0 and one 1
+                // by verifying the address is not all 1s or all 0s (after masking the top 2 bits)
+                let mut has_zero = false;
+                let mut has_one = false;
+
+                // Check all bytes
+                for i in 0..5 {
+                    if address[i] != 0xFF {
+                        has_zero = true;
+                    }
+                    if address[i] != 0x00 {
+                        has_one = true;
+                    }
+                }
+                // Check lower 6 bits of the MSB (bits 0-5, excluding bits 6-7 which we set to 11)
+                let msb_lower = address[5] & 0x3F;
+                if msb_lower != 0x3F {
+                    has_zero = true;
+                }
+                if msb_lower != 0x00 {
+                    has_one = true;
+                }
+
+                if has_zero && has_one {
+                    break; // Address is valid
+                }
+            }
 
             info!("Random GATT address = {:?}", address);
 
