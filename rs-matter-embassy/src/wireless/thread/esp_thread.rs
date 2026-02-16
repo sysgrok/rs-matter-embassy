@@ -8,31 +8,28 @@ use rs_matter_stack::matter::error::Error;
 use crate::wireless::SLOTS;
 
 /// A `ThreadRadio` implementation for the ESP32 family of chips.
-pub struct EspThreadDriver<'a, 'd> {
-    controller: &'a esp_radio::Controller<'d>,
+pub struct EspThreadDriver<'d> {
     radio_peripheral: esp_hal::peripherals::IEEE802154<'d>,
     bt_peripheral: esp_hal::peripherals::BT<'d>,
 }
 
-impl<'a, 'd> EspThreadDriver<'a, 'd> {
+impl<'d> EspThreadDriver<'d> {
     /// Create a new instance of the `EspThreadRadio` type.
     ///
     /// # Arguments
     /// - `peripheral` - The Thread radio peripheral instance.
     pub fn new(
-        controller: &'a esp_radio::Controller<'d>,
         radio_peripheral: esp_hal::peripherals::IEEE802154<'d>,
         bt_peripheral: esp_hal::peripherals::BT<'d>,
     ) -> Self {
         Self {
-            controller,
             radio_peripheral,
             bt_peripheral,
         }
     }
 }
 
-impl super::ThreadDriver for EspThreadDriver<'_, '_> {
+impl super::ThreadDriver for EspThreadDriver<'_> {
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
         A: super::ThreadDriverTask,
@@ -45,13 +42,12 @@ impl super::ThreadDriver for EspThreadDriver<'_, '_> {
     }
 }
 
-impl super::ThreadCoexDriver for EspThreadDriver<'_, '_> {
+impl super::ThreadCoexDriver for EspThreadDriver<'_> {
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
         A: super::ThreadCoexDriverTask,
     {
         let ble_controller = ExternalController::<_, SLOTS>::new(unwrap!(BleConnector::new(
-            self.controller,
             self.bt_peripheral.reborrow(),
             Default::default(),
         )));
@@ -64,13 +60,12 @@ impl super::ThreadCoexDriver for EspThreadDriver<'_, '_> {
     }
 }
 
-impl super::BleDriver for EspThreadDriver<'_, '_> {
+impl super::BleDriver for EspThreadDriver<'_> {
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
         A: super::BleDriverTask,
     {
         let ble_controller = ExternalController::<_, SLOTS>::new(unwrap!(BleConnector::new(
-            self.controller,
             self.bt_peripheral.reborrow(),
             Default::default(),
         )));

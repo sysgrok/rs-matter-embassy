@@ -4,9 +4,9 @@ use embassy_sync::blocking_mutex;
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_sync::mutex::Mutex;
 
-use esp_radio::wifi::{
-    AuthMethod, ClientConfig, ModeConfig, ScanConfig, WifiController, WifiError,
-};
+use esp_radio::wifi::scan::ScanConfig;
+use esp_radio::wifi::sta::StationConfig;
+use esp_radio::wifi::{AuthenticationMethod, Config, WifiController, WifiError};
 
 use crate::matter::dm::clusters::net_comm::{
     NetCtl, NetCtlError, NetworkScanInfo, NetworkType, WiFiBandEnum, WiFiSecurityBitmap,
@@ -59,14 +59,11 @@ where
 
         let mut ctl = self.0.lock().await;
 
-        if !ctl.is_started().map_err(to_err)? {
+        if !ctl.is_started() {
             // Start Wifi in client mode for scanning
-            ctl.set_config(&ModeConfig::Client(ClientConfig::default()))
+            ctl.set_config(&Config::Station(StationConfig::default()))
                 .map_err(to_ctl_err)?;
             info!("Wifi configuration updated for scanning");
-
-            ctl.start_async().await.map_err(to_err)?;
-            info!("Wifi started");
         }
 
         let mut scan_config = ScanConfig::default();
@@ -74,32 +71,31 @@ where
             scan_config = scan_config.with_ssid(core::str::from_utf8(network).unwrap_or("???"));
         }
 
-        let aps = ctl
-            .scan_with_config_async(scan_config)
-            .await
-            .map_err(to_err)?;
+        let aps = ctl.scan_async(&scan_config).await.map_err(to_err)?;
 
         info!("Wifi scan complete, reporting {} results", aps.len());
 
         for ap in aps {
             f(&NetworkScanInfo::Wifi {
-                ssid: ap.ssid.as_bytes(),
+                ssid: ap.ssid.as_str().as_bytes(),
                 bssid: &ap.bssid,
                 channel: ap.channel as _,
                 rssi: ap.signal_strength,
                 band: WiFiBandEnum::V2G4, // TODO: Once c5 is out we can no longer hard-code this
                 security: match ap.auth_method {
-                    Some(AuthMethod::None) => WiFiSecurityBitmap::UNENCRYPTED,
-                    Some(AuthMethod::Wep) => WiFiSecurityBitmap::WEP,
-                    Some(AuthMethod::Wpa) => WiFiSecurityBitmap::WPA_PERSONAL,
-                    Some(AuthMethod::Wpa2Personal) => WiFiSecurityBitmap::WPA_2_PERSONAL,
-                    Some(AuthMethod::WpaWpa2Personal) => {
+                    Some(AuthenticationMethod::None) => WiFiSecurityBitmap::UNENCRYPTED,
+                    Some(AuthenticationMethod::Wep) => WiFiSecurityBitmap::WEP,
+                    Some(AuthenticationMethod::Wpa) => WiFiSecurityBitmap::WPA_PERSONAL,
+                    Some(AuthenticationMethod::Wpa2Personal) => WiFiSecurityBitmap::WPA_2_PERSONAL,
+                    Some(AuthenticationMethod::WpaWpa2Personal) => {
                         WiFiSecurityBitmap::WPA_PERSONAL | WiFiSecurityBitmap::WPA_2_PERSONAL
                     }
-                    Some(AuthMethod::Wpa2Wpa3Personal) => {
+                    Some(AuthenticationMethod::Wpa2Wpa3Personal) => {
                         WiFiSecurityBitmap::WPA_2_PERSONAL | WiFiSecurityBitmap::WPA_3_PERSONAL
                     }
-                    Some(AuthMethod::Wpa2Enterprise) => WiFiSecurityBitmap::WPA_2_PERSONAL,
+                    Some(AuthenticationMethod::Wpa2Enterprise) => {
+                        WiFiSecurityBitmap::WPA_2_PERSONAL
+                    }
                     _ => WiFiSecurityBitmap::WPA_2_PERSONAL, // Best guess
                 },
             })?;
@@ -122,22 +118,13 @@ where
 
         info!("Wifi connect request for SSID {}", ssid);
 
-        if ctl.is_started().map_err(to_ctl_err)? {
-            ctl.stop_async().await.map_err(to_ctl_err)?;
-
-            info!("Wifi stopped");
-        }
-
-        ctl.set_config(&ModeConfig::Client(
-            ClientConfig::default()
-                .with_ssid(unwrap!(ssid.try_into()))
+        ctl.set_config(&Config::Station(
+            StationConfig::default()
+                .with_ssid(ssid)
                 .with_password(unwrap!(pass.try_into())),
         ))
         .map_err(to_ctl_err)?;
         info!("Wifi configuration updated");
-
-        ctl.start_async().await.map_err(to_ctl_err)?;
-        info!("Wifi started");
 
         ctl.connect_async().await.map_err(to_ctl_err)?;
 
@@ -160,7 +147,7 @@ where
         let fetch_connected = || async {
             let ctl = self.0.lock().await;
 
-            let new_connected = ctl.is_connected().unwrap_or(false);
+            let new_connected = ctl.is_connected();
             self.1.lock(|connected| {
                 if connected.get() != new_connected {
                     warn!(
@@ -251,7 +238,7 @@ fn to_ctl_err(e: WifiError) -> NetCtlError {
     error!("Wifi error: {:?}", e);
 
     match e {
-        WifiError::Disconnected => NetCtlError::OtherConnectionFailure,
+        WifiError::NotConnected => NetCtlError::OtherConnectionFailure,
         WifiError::Unsupported => NetCtlError::UnsupportedSecurity,
         _ => NetCtlError::Other(ErrorCode::NoNetworkInterface.into()),
     }

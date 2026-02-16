@@ -84,7 +84,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_rtos::main]
 async fn main(_s: Spawner) {
-    esp_println::logger::init_logger(log::LevelFilter::Info);
+    esp_println::logger::init_logger(log::LevelFilter::Debug);
 
     info!("Starting...");
 
@@ -102,8 +102,6 @@ async fn main(_s: Spawner) {
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT)
             .software_interrupt0,
     );
-
-    let init = esp_radio::init().unwrap();
 
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
@@ -161,7 +159,7 @@ async fn main(_s: Spawner) {
     let matter = pin!(stack.run_coex(
         // The Matter stack needs to instantiate an `embassy-net` `Driver` and `Controller`
         EmbassyWifi::new(
-            EspWifiDriver::new(&init, peripherals.WIFI, peripherals.BT),
+            EspWifiDriver::new(peripherals.WIFI, peripherals.BT),
             weak_rand,
             true, // Use a random BLE address
             stack,

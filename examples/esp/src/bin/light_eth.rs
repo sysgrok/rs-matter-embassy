@@ -22,7 +22,8 @@ use esp_backtrace as _;
 use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 use esp_metadata_generated::memory_range;
-use esp_radio::wifi::{ClientConfig, ModeConfig, WifiController, WifiEvent, WifiStaState};
+use esp_radio::wifi::sta::StationConfig;
+use esp_radio::wifi::{Config, WifiController};
 
 use log::info;
 
@@ -106,8 +107,6 @@ async fn main(_s: Spawner) {
             .software_interrupt0,
     );
 
-    let init = esp_radio::init().unwrap();
-
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
@@ -118,7 +117,7 @@ async fn main(_s: Spawner) {
     // Configure and start the Wifi first
     let wifi = peripherals.WIFI;
     let (controller, wifi_interface) =
-        esp_radio::wifi::new(&init, wifi, esp_radio::wifi::Config::default()).unwrap();
+        esp_radio::wifi::new(wifi, esp_radio::wifi::ControllerConfig::default()).unwrap();
 
     // Create the crypto provider, using the `esp-hal` TRNG as the source of randomness for a reseeding CSPRNG.
     let crypto = default_crypto::<NoopRawMutex, _>(
@@ -166,7 +165,7 @@ async fn main(_s: Spawner) {
     let mut matter = pin!(stack.run(
         // The Matter stack needs the ethernet inteface to run
         EmbassyEthernet::new(
-            PreexistingEthDriver::new(wifi_interface.sta),
+            PreexistingEthDriver::new(wifi_interface.station),
             weak_rand,
             stack,
         ),
@@ -189,23 +188,23 @@ async fn main(_s: Spawner) {
 
 async fn connection(mut controller: WifiController<'_>) {
     info!("start connection task");
-    info!("Device capabilities: {:?}", controller.capabilities());
     loop {
-        if esp_radio::wifi::sta_state() == WifiStaState::Connected {
+        if controller.is_connected() {
             // wait until we're no longer connected
-            controller.wait_for_event(WifiEvent::StaDisconnected).await;
+            controller
+                .wait_for_access_point_connected_event_async()
+                .await
+                .unwrap();
             embassy_time::Timer::after(embassy_time::Duration::from_millis(5000)).await
         }
-        if !matches!(controller.is_started(), Ok(true)) {
-            let client_config = ModeConfig::Client(
-                ClientConfig::default()
-                    .with_ssid(WIFI_SSID.into())
+        if !controller.is_started() {
+            info!("Starting wifi");
+            let client_config = Config::Station(
+                StationConfig::default()
+                    .with_ssid(WIFI_SSID)
                     .with_password(WIFI_PASS.into()),
             );
             controller.set_config(&client_config).unwrap();
-            info!("Starting wifi");
-            controller.start_async().await.unwrap();
-            info!("Wifi started!");
         }
         info!("About to connect...");
 

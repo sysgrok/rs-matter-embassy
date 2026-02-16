@@ -84,7 +84,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_rtos::main]
 async fn main(_s: Spawner) {
-    esp_println::logger::init_logger(log::LevelFilter::Debug);
+    esp_println::logger::init_logger(log::LevelFilter::Info);
 
     info!("Starting...");
 
@@ -102,8 +102,6 @@ async fn main(_s: Spawner) {
         esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT)
             .software_interrupt0,
     );
-
-    let init = esp_radio::init().unwrap();
 
     // Create the crypto provider, using the `esp-hal` TRNG/ADC1 as the source of randomness for a reseeding CSPRNG.
     let _trng_source = esp_hal::rng::TrngSource::new(peripherals.RNG, peripherals.ADC1);
@@ -176,7 +174,7 @@ async fn main(_s: Spawner) {
     let matter = pin!(stack.run_coex(
         // The Matter stack needs to instantiate an `openthread` Radio
         EmbassyThread::new(
-            EspThreadDriver::new(&init, peripherals.IEEE802154, peripherals.BT),
+            EspThreadDriver::new(peripherals.IEEE802154, peripherals.BT),
             crypto.rand().unwrap(),
             ieee_eui64,
             persist.store(),

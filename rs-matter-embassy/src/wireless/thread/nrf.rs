@@ -389,9 +389,7 @@ where
         let controller = nrf_sdc::Builder::new()
             .map_err(to_matter_err)?
             .support_adv()
-            .map_err(to_matter_err)?
             .support_peripheral()
-            .map_err(to_matter_err)?
             .peripheral_count(1)
             .map_err(to_matter_err)?
             .buffer_cfg(MAX_MTU_SIZE as _, MAX_MTU_SIZE as _, L2CAP_TXQ, L2CAP_RXQ)

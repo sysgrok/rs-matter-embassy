@@ -30,13 +30,29 @@ required-features = ["thread"]
 harness = false
 
 [patch.crates-io]
-#rs-matter = { git = "https://github.com/project-chip/rs-matter" }
 rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
 #rs-matter = { path = "../../../rs-matter/rs-matter" }
 rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", branch = "next" }
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
 openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
-#openthread = { version = "0.1", path = "../../../openthread/openthread" }
+#openthread = { path = "../../../openthread/openthread" }
+esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
+esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
+esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
+esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
+esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
+#esp-radio = { path = "../../../esp-hal/esp-radio" }
+#esp-backtrace = { path = "../../../esp-hal/esp-backtrace" }
+#esp-hal = { path = "../../../esp-hal/esp-hal" }
+#esp-rtos = { path = "../../../esp-hal/esp-rtos" }
+#esp-alloc = { path = "../../../esp-hal/esp-alloc" }
+#esp-println = { path = "../../../esp-hal/esp-println" }
+#esp-bootloader-esp-idf = { path = "../../../esp-hal/esp-bootloader-esp-idf" }
+#esp-metadata-generated = { path = "../../../esp-hal/esp-metadata-generated" }
+trouble-host = { git = "https://github.com/embassy-rs/trouble" }
 
 [profile.dev]
 # Rust debug is too slow.

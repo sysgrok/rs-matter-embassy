@@ -197,7 +197,7 @@ where
     }
 }
 
-fn to_ctl_err(e: cyw43::ControlError) -> NetCtlError {
+fn to_ctl_err(e: cyw43::JoinError) -> NetCtlError {
     error!("Wifi error: {:?}", debug2format!(e));
 
     NetCtlError::OtherConnectionFailure

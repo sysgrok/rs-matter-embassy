@@ -12,10 +12,20 @@ rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
 #rs-matter = { path = "../../rs-matter/rs-matter" }
 rs-matter-stack = { git = "https://github.com/ivmarkov/rs-matter-stack.git", branch = "next" }
 #rs-matter-stack = { path = "../../rs-matter-stack" }
-openthread = { git = "https://github.com/sysgrok/openthread.git" }
-#openthread = { version = "0.1", path = "../../../openthread/openthread" }
-nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
-nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "11d5c3c3653af73b511133c2f8231f33eb0696f4" }
+#openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
+openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "for-review" }
+#openthread = { path = "../../../openthread/openthread" }
+nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "43df6b8b0affeacd9cb4094a3ab4f81576554887" }
+nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "43df6b8b0affeacd9cb4094a3ab4f81576554887" }
+esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
+#esp-radio = { path = "../../../esp-hal/esp-radio" }
+#esp-hal = { path = "../../../esp-hal/esp-hal" }
+cyw43 = { git = "https://github.com/embassy-rs/embassy" }
+cyw43-pio = { git = "https://github.com/embassy-rs/embassy" }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy" }
+embassy-net-driver-channel = { git = "https://github.com/embassy-rs/embassy" }
+embassy-time-driver = { git = "https://github.com/embassy-rs/embassy" }
 
 [profile.release]
 opt-level = "s"

@@ -18,11 +18,14 @@ use core::mem::MaybeUninit;
 use core::pin::pin;
 use core::ptr::addr_of_mut;
 
+#[cfg(not(feature = "skip-cyw43-firmware"))]
+use cyw43::{aligned_bytes, Aligned, A4};
 use embassy_executor::Spawner;
 
 use embassy_rp::bind_interrupts;
 use embassy_rp::clocks::RoscRng;
-use embassy_rp::peripherals::PIO0;
+use embassy_rp::dma;
+use embassy_rp::peripherals::{DMA_CH0, PIO0};
 use embassy_rp::pio::InterruptHandler;
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
@@ -61,6 +64,7 @@ macro_rules! mk_static {
 
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
+    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>;
 });
 
 /// The amount of memory for allocating all `rs-matter-stack` futures created during
@@ -100,17 +104,19 @@ async fn main(_spawner: Spawner) {
     info!("Starting...");
 
     #[cfg(feature = "skip-cyw43-firmware")]
-    let (fw, clm, btfw) = (
-        Option::<&[u8]>::None,
-        Option::<&[u8]>::None,
-        Option::<&[u8]>::None,
+    let (fw, clm, btfw, nvram) = (
+        Option::<&Aligned<A4, [u8]>>::None,
+        Option::<&Aligned<A4, [u8]>>::None,
+        Option::<&Aligned<A4, [u8]>>::None,
+        Option::<&Aligned<A4, [u8]>>::None,
     );
 
     #[cfg(not(feature = "skip-cyw43-firmware"))]
-    let (fw, clm, btfw) = (
-        Option::<&[u8]>::Some(include_bytes!("../../cyw43-firmware/43439A0.bin")),
-        Option::<&[u8]>::Some(include_bytes!("../../cyw43-firmware/43439A0_clm.bin")),
-        Option::<&[u8]>::Some(include_bytes!("../../cyw43-firmware/43439A0_btfw.bin")),
+    let (fw, clm, btfw, nvram) = (
+        Option::<&Aligned<A4, [u8]>>::Some(aligned_bytes!("../../cyw43-firmware/43439A0.bin")),
+        Option::<&Aligned<A4, [u8]>>::Some(aligned_bytes!("../../cyw43-firmware/43439A0_clm.bin")),
+        Option::<&Aligned<A4, [u8]>>::Some(aligned_bytes!("../../cyw43-firmware/43439A0_btfw.bin")),
+        Option::<&Aligned<A4, [u8]>>::Some(aligned_bytes!("../../cyw43-firmware/nvram_rp2040.bin")),
     );
 
     // Statically allocate the Matter stack.
@@ -165,6 +171,7 @@ async fn main(_spawner: Spawner) {
         EmbassyWifi::new(
             RpWifiDriver::new(
                 p.PIN_23, p.PIN_25, p.PIN_24, p.PIN_29, p.DMA_CH0, p.PIO0, Irqs, fw, clm, btfw,
+                nvram,
             ),
             crypto.rand().unwrap(),
             true, // Use a random BLE address
