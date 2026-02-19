@@ -22,7 +22,8 @@ use nrf_sdc::mpsl::{
 
 use openthread::nrf::Ieee802154Peripheral;
 use openthread::nrf::NrfRadio;
-use openthread::{EmbassyTimeTimer, PhyRadioRunner, ProxyRadio, ProxyRadioResources};
+use openthread::sys::otRadioCaps;
+use openthread::{EmbassyTimeTimer, PhyRadioRunner, ProxyRadio, ProxyRadioResources, Radio};
 
 use portable_atomic::{AtomicBool, Ordering};
 
@@ -192,9 +193,11 @@ impl<'a, 'd> NrfThreadRadioRunner<'a, 'd> {
     }
 }
 
+const NRF_RADIO_CAPS: otRadioCaps = NrfRadio::CAPS.bits();
+
 /// A `ThreadDriver` implementation for the NRF52 family of chips.
 pub struct NrfThreadDriver<'d, R> {
-    proxy: ProxyRadio<'d>,
+    proxy: ProxyRadio<'d, NRF_RADIO_CAPS>,
     rtc0: Peri<'d, RTC0>,
     timer0: Peri<'d, TIMER0>,
     temp: Peri<'d, TEMP>,
@@ -279,15 +282,7 @@ impl<'d, R> NrfThreadDriver<'d, R> {
                 NrfThreadHighPrioInterruptHandler,
             >,
     {
-        let caps = openthread::Capabilities::empty();
-        // TODO: A bit dirty as we create it and then drop it immediately
-        // NrfRadio::new(embassy_nrf::radio::ieee802154::Radio::new(
-        //     &mut radio_peripheral,
-        //     NrfThreadRadioInterrupts,
-        // ))
-        // .caps();
-
-        let (proxy, proxy_runner) = ProxyRadio::new(caps, resources);
+        let (proxy, proxy_runner) = ProxyRadio::new(resources);
 
         let runner = NrfThreadRadioRunner::new(proxy_runner, radio);
 
