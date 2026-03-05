@@ -1,8 +1,7 @@
 //! An example utilizing the `EmbassyThreadMatterStack` struct.
 //!
 //! As the name suggests, this Matter stack assembly uses Thread as the main transport,
-//! and thus BLE for commissioning, in non-concurrent commissioning mode
-//! (the IEEE802154 radio and BLE cannot not run at the same time yet with `embassy-nrf` and `nrf-sdc`).
+//! and thus BLE for commissioning, in concurrent commissioning mode.
 //!
 //! The example implements a fictitious Light device (an On-Off Matter cluster).
 #![no_std]
@@ -13,15 +12,12 @@ use core::mem::MaybeUninit;
 use core::pin::pin;
 use core::ptr::addr_of_mut;
 
-use embassy_nrf::interrupt;
-use embassy_nrf::interrupt::{InterruptExt, Priority};
 use embassy_nrf::peripherals::RNG;
 use embassy_nrf::{bind_interrupts, rng};
 
-use embassy_executor::{InterruptExecutor, Spawner};
+use embassy_executor::Spawner;
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-
 use embedded_alloc::LlffHeap;
 
 use defmt::{info, unwrap};
@@ -42,8 +38,8 @@ use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
 use rs_matter_embassy::stack::persist::DummyKvBlobStore;
 use rs_matter_embassy::stack::rand::reseeding_csprng;
 use rs_matter_embassy::wireless::nrf::{
-    NrfThreadClockInterruptHandler, NrfThreadHighPrioInterruptHandler,
-    NrfThreadLowPrioInterruptHandler, NrfThreadRadioResources, NrfThreadRustRadioDriver,
+    Egu0InterruptHandler, LpTimerInterruptHandler, NrfThreadClockInterruptHandler,
+    NrfThreadHighPrioInterruptHandler, NrfThreadLowPrioInterruptHandler, NrfThreadMpslRadioDriver,
     NrfThreadRustRadioRunner,
 };
 use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
@@ -64,30 +60,14 @@ macro_rules! mk_static {
 
 bind_interrupts!(struct Irqs {
     RNG => rng::InterruptHandler<RNG>;
-    EGU0_SWI0 => NrfThreadLowPrioInterruptHandler;
+    EGU0_SWI0 => NrfThreadLowPrioInterruptHandler, Egu0InterruptHandler;
     CLOCK_POWER => NrfThreadClockInterruptHandler;
     RADIO => NrfThreadHighPrioInterruptHandler;
     TIMER0 => NrfThreadHighPrioInterruptHandler;
     RTC0 => NrfThreadHighPrioInterruptHandler;
+    RTC2 => LpTimerInterruptHandler;
 });
 
-#[interrupt]
-unsafe fn EGU1_SWI1() {
-    RADIO_EXECUTOR.on_interrupt()
-}
-
-static RADIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
-
-/// The amount of memory for allocating all `rs-matter-stack` futures created during
-/// the execution of the `run*` methods.
-/// This does NOT include the rest of the Matter stack.
-///
-/// The futures of `rs-matter-stack` created during the execution of the `run*` methods
-/// are allocated in a special way using a small bump allocator which results
-/// in a much lower memory usage by those.
-///
-/// If - for your platform - this size is not enough, increase it until
-/// the program runs without panics during the stack initialization.
 const BUMP_SIZE: usize = 20500;
 
 #[global_allocator]
@@ -148,11 +128,13 @@ async fn main(_s: Spawner) {
         ),
     );
 
-    let (thread_driver, thread_radio_runner) = NrfThreadRustRadioDriver::new(
-        mk_static!(NrfThreadRadioResources, NrfThreadRadioResources::new()),
+    let thread_driver = NrfThreadMpslRadioDriver::new(
         p.RADIO,
+        p.EGU0,
         p.RTC0,
+        p.RTC2,
         p.TIMER0,
+        p.TIMER2,
         p.TEMP,
         p.PPI_CH17,
         p.PPI_CH18,
@@ -172,16 +154,6 @@ async fn main(_s: Spawner) {
         crypto.rand().unwrap(),
         Irqs,
     );
-
-    // High-priority executor: EGU1_SWI1, priority level 6
-    interrupt::EGU1_SWI1.set_priority(Priority::P6);
-
-    // The NRF radio needs to run in a high priority executor
-    // because it is lacking hardware MAC-filtering and ACK caps,
-    // hence these are emulated in software, so low latency is crucial
-    unwrap!(RADIO_EXECUTOR
-        .start(interrupt::EGU1_SWI1)
-        .spawn(run_radio(thread_radio_runner)));
 
     // Our "light" on-off cluster.
     // It will toggle the light state every 5 seconds
@@ -217,7 +189,7 @@ async fn main(_s: Spawner) {
     // Using `pin!` is completely optional, but reduces the size of the final future
     //
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
-    let matter = pin!(stack.run(
+    let matter = pin!(stack.run_coex(
         // The Matter stack needs to instantiate `openthread`
         EmbassyThread::new(
             thread_driver,

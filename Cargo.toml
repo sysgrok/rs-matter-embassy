@@ -17,6 +17,7 @@ openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "for-
 #openthread = { path = "../../../openthread/openthread" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "43df6b8b0affeacd9cb4094a3ab4f81576554887" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "43df6b8b0affeacd9cb4094a3ab4f81576554887" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
 esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
 #esp-radio = { path = "../../../esp-hal/esp-radio" }
