@@ -151,7 +151,7 @@ enumset = { version = "1", default-features = false }
 embassy-futures = "0.1"
 embassy-sync = "0.7"
 embassy-time = "0.5"
-embedded-io = "0.6"
+embedded-io = "0.7"
 scopeguard = { version = "1", default-features = false }
 rs-matter-stack = { version = "0.1", default-features = false }
 static_cell = "2"
@@ -163,8 +163,8 @@ sequential-storage = "3"
 embassy-net = { version = "0.7", optional = true }
 edge-nal-embassy = { version = "0.7", optional = true, features = ["proto-ipv4", "proto-ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
 
-trouble-host = { version = "0.5", features = ["gatt"] }
-bt-hci = "0.6"
+trouble-host = { version = "0.6", features = ["gatt"] }
+bt-hci = "0.8"
 
 openthread = { version = "0.1", optional = true, features = ["udp", "srp", "edge-nal"] }
 
@@ -181,7 +181,7 @@ embassy-rp = { version = "0.9", optional = true, features = ["unstable-pac", "rp
 embassy-net-driver-channel = { version = "0.3", optional = true }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for Nordic silicon
-embassy-nrf = { version = "0.8", optional = true, features = ["time-driver-rtc1", "time", "nrf52840"], default-features = false }
+embassy-nrf = { version = "0.9", optional = true, features = ["time-driver-rtc1", "time", "nrf52840"], default-features = false }
 nrf-sdc = { version = "0.4", default-features = false, optional = true, features = ["peripheral", "nrf52840"] }
 nrf-mpsl = { version = "0.3", default-features = false, optional = true, features = ["nrf52840", "critical-section-impl"] }
 portable-atomic = { version = "1", optional = true }

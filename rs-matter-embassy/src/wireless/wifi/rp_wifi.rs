@@ -2,13 +2,14 @@ use core::pin::pin;
 
 use bt_hci::controller::ExternalController;
 
-use cyw43::Control;
+use cyw43::{Aligned, Control, A4};
 use cyw43_pio::PioSpi;
 use embassy_futures::select::select;
 use embassy_futures::select::Either::{First, Second};
 use embassy_net_driver_channel::Device;
+use embassy_rp::dma::{self, Channel};
 use embassy_rp::gpio::{Level, Output};
-use embassy_rp::interrupt::typelevel::{Binding, PIO0_IRQ_0};
+use embassy_rp::interrupt::typelevel::{Binding, DMA_IRQ_0, PIO0_IRQ_0};
 use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_24, PIN_25, PIN_29, PIO0};
 use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_rp::Peri;
@@ -23,9 +24,11 @@ use crate::enet::{
 use crate::matter::error::Error;
 use crate::wifi::rp::Cyw43WifiController;
 
+#[derive(Copy, Clone)]
 struct Cyw43PioInterrupts;
 
 unsafe impl Binding<PIO0_IRQ_0, InterruptHandler<PIO0>> for Cyw43PioInterrupts {}
+unsafe impl Binding<DMA_IRQ_0, dma::InterruptHandler<DMA_CH0>> for Cyw43PioInterrupts {}
 
 /// A `WifiDriver` implementation for the ESP32 family of chips.
 pub struct RpWifiDriver<'d> {
@@ -35,9 +38,10 @@ pub struct RpWifiDriver<'d> {
     clk: Peri<'d, PIN_29>,
     dma: Peri<'d, DMA_CH0>,
     pio: Peri<'d, PIO0>,
-    fmw: Option<&'d [u8]>,
-    fmw_clm: Option<&'d [u8]>,
-    fmw_bt: Option<&'d [u8]>,
+    fmw: Option<&'d Aligned<A4, [u8]>>,
+    fmw_clm: Option<&'d Aligned<A4, [u8]>>,
+    fmw_bt: Option<&'d Aligned<A4, [u8]>>,
+    nvram: Option<&'d Aligned<A4, [u8]>>,
 }
 
 impl<'d> RpWifiDriver<'d> {
@@ -54,6 +58,7 @@ impl<'d> RpWifiDriver<'d> {
     /// - `fmw` - The optional firmware binary for the cyw chip.
     /// - `fmw_clm` - The optional CLM firmware binary for the cyw chip.
     /// - `fmw_bt` - The optional Bluetooth firmware binary for the cyw chip.
+    /// - `nvram` - The optional NVRAM binary for the cyw chip.
     pub fn new<I>(
         pwr: Peri<'d, PIN_23>,
         cs: Peri<'d, PIN_25>,
@@ -62,12 +67,14 @@ impl<'d> RpWifiDriver<'d> {
         dma: Peri<'d, DMA_CH0>,
         pio: Peri<'d, PIO0>,
         _irq: I,
-        fmw: Option<&'d [u8]>,
-        fmw_clm: Option<&'d [u8]>,
-        fmw_bt: Option<&'d [u8]>,
+        fmw: Option<&'d Aligned<A4, [u8]>>,
+        fmw_clm: Option<&'d Aligned<A4, [u8]>>,
+        fmw_bt: Option<&'d Aligned<A4, [u8]>>,
+        nvram: Option<&'d Aligned<A4, [u8]>>,
     ) -> Self
     where
-        I: Binding<PIO0_IRQ_0, InterruptHandler<PIO0>>,
+        I: Binding<PIO0_IRQ_0, InterruptHandler<PIO0>> + 'd,
+        I: Binding<DMA_IRQ_0, dma::InterruptHandler<DMA_CH0>> + 'd,
     {
         Self {
             pwr,
@@ -79,15 +86,16 @@ impl<'d> RpWifiDriver<'d> {
             fmw,
             fmw_clm,
             fmw_bt,
+            nvram,
         }
     }
 
     async fn init_net_controller<const N: usize>(
         net_device: &mut Device<'_, N>,
         net_controller: &mut Control<'_>,
-        fmw_clm: Option<&[u8]>,
+        fmw_clm: Option<&Aligned<A4, [u8]>>,
     ) {
-        net_controller.init(fmw_clm.unwrap_or(&[])).await;
+        net_controller.init(fmw_clm.unwrap_or(&Aligned([]))).await;
 
         // cyw43 is a bit special in that it needs to have allowlisted all multicast MAC addresses
         // it should listen on. Therefore, add the mDNS ipv4 and ipv6 multicast MACs to the list,
@@ -128,6 +136,8 @@ impl super::WifiDriver for RpWifiDriver<'_> {
         let pwr = Output::new(self.pwr.reborrow(), Level::Low);
         let cs = Output::new(self.cs.reborrow(), Level::High);
         let mut pio = Pio::new(self.pio.reborrow(), Cyw43PioInterrupts);
+        let dma = Channel::new(self.dma.reborrow(), Cyw43PioInterrupts);
+
         let spi = PioSpi::new(
             &mut pio.common,
             pio.sm0,
@@ -139,11 +149,17 @@ impl super::WifiDriver for RpWifiDriver<'_> {
             cs,
             self.dio.reborrow(),
             self.clk.reborrow(),
-            self.dma.reborrow(),
+            dma,
         );
 
-        let (mut net_device, mut net_controller, runner) =
-            cyw43::new(&mut state, pwr, spi, self.fmw.unwrap_or(&[])).await;
+        let (mut net_device, mut net_controller, runner) = cyw43::new(
+            &mut state,
+            pwr,
+            spi,
+            self.fmw.unwrap_or(&Aligned([])),
+            self.nvram.unwrap_or(&Aligned([])),
+        )
+        .await;
 
         Self::init_net_controller(&mut net_device, &mut net_controller, self.fmw_clm).await;
 
@@ -170,6 +186,8 @@ impl super::WifiCoexDriver for RpWifiDriver<'_> {
         let pwr = Output::new(self.pwr.reborrow(), Level::Low);
         let cs = Output::new(self.cs.reborrow(), Level::High);
         let mut pio = Pio::new(self.pio.reborrow(), Cyw43PioInterrupts);
+        let dma = Channel::new(self.dma.reborrow(), Cyw43PioInterrupts);
+
         let spi = PioSpi::new(
             &mut pio.common,
             pio.sm0,
@@ -181,15 +199,16 @@ impl super::WifiCoexDriver for RpWifiDriver<'_> {
             cs,
             self.dio.reborrow(),
             self.clk.reborrow(),
-            self.dma.reborrow(),
+            dma,
         );
 
         let (mut net_device, bt_device, mut net_controller, runner) = cyw43::new_with_bluetooth(
             &mut state,
             pwr,
             spi,
-            self.fmw.unwrap_or(&[]),
-            self.fmw_bt.unwrap_or(&[]),
+            self.fmw.unwrap_or(&Aligned([])),
+            self.fmw_bt.unwrap_or(&Aligned([])),
+            self.nvram.unwrap_or(&Aligned([])),
         )
         .await;
 
@@ -219,6 +238,8 @@ impl super::BleDriver for RpWifiDriver<'_> {
         let pwr = Output::new(self.pwr.reborrow(), Level::Low);
         let cs = Output::new(self.cs.reborrow(), Level::High);
         let mut pio = Pio::new(self.pio.reborrow(), Cyw43PioInterrupts);
+        let dma = Channel::new(self.dma.reborrow(), Cyw43PioInterrupts);
+
         let spi = PioSpi::new(
             &mut pio.common,
             pio.sm0,
@@ -230,15 +251,16 @@ impl super::BleDriver for RpWifiDriver<'_> {
             cs,
             self.dio.reborrow(),
             self.clk.reborrow(),
-            self.dma.reborrow(),
+            dma,
         );
 
         let (_net_device, bt_device, _net_controller, runner) = cyw43::new_with_bluetooth(
             &mut state,
             pwr,
             spi,
-            self.fmw.unwrap_or(&[]),
-            self.fmw_bt.unwrap_or(&[]),
+            self.fmw.unwrap_or(&Aligned([])),
+            self.fmw_bt.unwrap_or(&Aligned([])),
+            self.nvram.unwrap_or(&Aligned([])),
         )
         .await;
 

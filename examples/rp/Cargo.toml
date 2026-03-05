@@ -32,6 +32,18 @@ rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", bran
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
 openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
 #openthread = { version = "0.1", path = "../../../openthread/openthread" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy" }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy" }
+cyw43 = { git = "https://github.com/embassy-rs/embassy" }
+cyw43-pio = { git = "https://github.com/embassy-rs/embassy" }
+embassy-net-wiznet = { git = "https://github.com/embassy-rs/embassy" }
+embassy-time-driver = { git = "https://github.com/embassy-rs/embassy" }
+#embassy-net = { git = "https://github.com/embassy-rs/embassy" }
+embassy-net-driver = { git = "https://github.com/embassy-rs/embassy" }
+embassy-net-driver-channel = { git = "https://github.com/embassy-rs/embassy" }
 
 [features]
 skip-cyw43-firmware = []
@@ -47,7 +59,7 @@ embedded-alloc = "0.6"
 rs-matter-embassy = { path = "../../rs-matter-embassy", features = ["embassy-net", "rp", "defmt"] }
 
 # Wireless examples
-bt-hci = { version = "0.6", default-features = false, features = ["defmt"] }
+bt-hci = { version = "0.8", default-features = false, features = ["defmt"] }
 cyw43 = { version = "0.6", features = ["firmware-logs", "defmt", "bluetooth"] }
 cyw43-pio = "0.9"
 

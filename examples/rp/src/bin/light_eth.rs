@@ -21,8 +21,9 @@ use embassy_net_wiznet::{Runner, State};
 
 use embassy_rp::clocks::RoscRng;
 use embassy_rp::gpio::{Input, Level, Output, Pull};
-use embassy_rp::peripherals::SPI0;
+use embassy_rp::peripherals::{DMA_CH0, DMA_CH1, SPI0};
 use embassy_rp::spi::{Async as SpiAsync, Config as SpiConfig, Spi};
+use embassy_rp::{bind_interrupts, dma};
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_time::Delay;
@@ -60,6 +61,10 @@ macro_rules! mk_static {
         mk_static!($t).write($val)
     }};
 }
+
+bind_interrupts!(struct Irqs {
+    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>, dma::InterruptHandler<DMA_CH1>;
+});
 
 /// The amount of memory for allocating all `rs-matter-stack` futures created during
 /// the execution of the `run*` methods.
@@ -100,7 +105,7 @@ async fn main(spawner: Spawner) {
     let mut spi_cfg = SpiConfig::default();
     spi_cfg.frequency = 50_000_000;
     let (miso, mosi, clk) = (p.PIN_16, p.PIN_19, p.PIN_18);
-    let spi = Spi::new(p.SPI0, clk, mosi, miso, p.DMA_CH0, p.DMA_CH1, spi_cfg);
+    let spi = Spi::new(p.SPI0, clk, mosi, miso, p.DMA_CH0, p.DMA_CH1, Irqs, spi_cfg);
     let cs = Output::new(p.PIN_17, Level::High);
     let w5500_int = Input::new(p.PIN_21, Pull::Up);
     let w5500_reset = Output::new(p.PIN_20, Level::High);
@@ -117,7 +122,7 @@ async fn main(spawner: Spawner) {
         "Failed to initialize W5500",
     );
 
-    unwrap!(spawner.spawn(ethernet_task(runner)));
+    spawner.spawn(unwrap!(ethernet_task(runner)));
 
     // Statically allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).

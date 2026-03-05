@@ -1,6 +1,7 @@
 // BLE: `TroubleBtpGattPeripheral` - an implementation of the `GattPeripheral` trait from `rs-matter`.
 
 #![allow(clippy::useless_conversion)] // https://github.com/embassy-rs/trouble/issues/248
+#![allow(clippy::needless_borrows_for_generic_args)] // In latest trouble-host: ^^^^^^^^ help: change this to: `External`
 
 use core::future::Future;
 use core::mem::MaybeUninit;
