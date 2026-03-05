@@ -68,7 +68,7 @@ macro_rules! mk_static {
 ///
 /// If - for your platform - this size is not enough, increase it until
 /// the program runs without panics during the stack initialization.
-const BUMP_SIZE: usize = 16500;
+const BUMP_SIZE: usize = 17500;
 
 /// Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
 #[cfg(not(feature = "esp32"))]
