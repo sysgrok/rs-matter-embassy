@@ -86,7 +86,7 @@ macro_rules! mk_static {
 ///
 /// If - for your platform - this size is not enough, increase it until
 /// the program runs without panics during the stack initialization.
-const BUMP_SIZE: usize = 16500;
+const BUMP_SIZE: usize = 17500;
 
 /// Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
 #[cfg(not(feature = "esp32"))]
@@ -102,7 +102,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_rtos::main]
 async fn main(_s: Spawner) {
-    esp_println::logger::init_logger(log::LevelFilter::Debug);
+    esp_println::logger::init_logger_from_env();
 
     info!("Starting...");
 

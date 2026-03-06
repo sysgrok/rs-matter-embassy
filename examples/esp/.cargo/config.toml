@@ -16,3 +16,7 @@ rustflags = ["-C", "link-arg=-Wl,-Tlinkall.x", "-C", "link-arg=-nostartfiles"]
 
 # For host builds and STD targets
 build-std = ["core", "alloc", "panic_abort"]
+
+[env]
+DEFMT_LOG="info"
+ESP_LOG="info"
