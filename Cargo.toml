@@ -8,18 +8,17 @@ exclude = ["examples"]
 
 [patch.crates-io]
 #rs-matter = { git = "https://github.com/project-chip/rs-matter" }
-rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
-#rs-matter = { path = "../../rs-matter/rs-matter" }
-rs-matter-stack = { git = "https://github.com/ivmarkov/rs-matter-stack.git", branch = "next" }
-#rs-matter-stack = { path = "../../rs-matter-stack" }
+#rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
+rs-matter = { path = "../../rs-matter/rs-matter" }
+#rs-matter-stack = { git = "https://github.com/ivmarkov/rs-matter-stack.git", branch = "next" }
+rs-matter-stack = { path = "../../rs-matter-stack" }
 #openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
-openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "for-review" }
-#openthread = { path = "../../../openthread/openthread" }
+openthread = { path = "../../../openthread/openthread" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "43df6b8b0affeacd9cb4094a3ab4f81576554887" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "43df6b8b0affeacd9cb4094a3ab4f81576554887" }
 nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
-esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
-esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
+esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "cc8f4c24" }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "cc8f4c24" }
 #esp-radio = { path = "../../../esp-hal/esp-radio" }
 #esp-hal = { path = "../../../esp-hal/esp-hal" }
 cyw43 = { git = "https://github.com/embassy-rs/embassy" }

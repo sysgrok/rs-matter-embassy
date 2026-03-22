@@ -191,7 +191,7 @@ where
         use_ble_random_addr: bool,
     ) -> Self
     where
-        E: Embedding + 'static,
+        E: Embedding,
     {
         Self::wrap(
             driver,
