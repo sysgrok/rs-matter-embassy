@@ -166,7 +166,7 @@ edge-nal-embassy = { version = "0.8", optional = true, features = ["proto-ipv4",
 trouble-host = { version = "0.6", features = ["gatt"] }
 bt-hci = "0.8"
 
-openthread = { version = "0.1", optional = true, features = ["udp", "srp", "edge-nal"] }
+openthread = { version = "0.1", optional = true, features = ["udp", "srp", "edge-nal", "force-generate-bindings"] }
 
 rand_core = "0.9"
 
