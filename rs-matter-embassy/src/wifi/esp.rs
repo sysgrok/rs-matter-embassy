@@ -1,9 +1,5 @@
 use core::cell::Cell;
 
-use embassy_sync::blocking_mutex;
-use embassy_sync::blocking_mutex::raw::RawMutex;
-use embassy_sync::mutex::Mutex;
-
 use esp_radio::wifi::scan::ScanConfig;
 use esp_radio::wifi::sta::StationConfig;
 use esp_radio::wifi::{AuthenticationMethod, Config, WifiController, WifiError};
@@ -18,35 +14,23 @@ use crate::matter::dm::clusters::wifi_diag::{
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::{Error, ErrorCode};
 use crate::matter::tlv::Nullable;
+use crate::matter::utils::sync::blocking::Mutex;
+use crate::matter::utils::sync::IfMutex;
 
 /// An adaptor from the `esp-wifi` Wifi controller API to the `rs-matter` Wifi controller API
-pub struct EspWifiController<'a, M>(
-    Mutex<M, WifiController<'a>>,
-    blocking_mutex::Mutex<M, Cell<bool>>,
-)
-where
-    M: RawMutex;
+pub struct EspWifiController<'a>(IfMutex<WifiController<'a>>, Mutex<Cell<bool>>);
 
-impl<'a, M> EspWifiController<'a, M>
-where
-    M: RawMutex,
-{
+impl<'a> EspWifiController<'a> {
     /// Create a new instance of the `Esp32Controller` type.
     ///
     /// # Arguments
     /// - `controller` - The `esp-wifi` Wifi controller instance.
     pub const fn new(controller: WifiController<'a>) -> Self {
-        Self(
-            Mutex::new(controller),
-            blocking_mutex::Mutex::new(Cell::new(false)),
-        )
+        Self(IfMutex::new(controller), Mutex::new(Cell::new(false)))
     }
 }
 
-impl<M> NetCtl for EspWifiController<'_, M>
-where
-    M: RawMutex,
-{
+impl NetCtl for EspWifiController<'_> {
     fn net_type(&self) -> NetworkType {
         NetworkType::Wifi
     }
@@ -139,10 +123,7 @@ where
     }
 }
 
-impl<M> NetChangeNotif for EspWifiController<'_, M>
-where
-    M: RawMutex,
-{
+impl NetChangeNotif for EspWifiController<'_> {
     async fn wait_changed(&self) {
         let fetch_connected = || async {
             let ctl = self.0.lock().await;
@@ -184,19 +165,13 @@ where
     }
 }
 
-impl<M> WirelessDiag for EspWifiController<'_, M>
-where
-    M: RawMutex,
-{
+impl WirelessDiag for EspWifiController<'_> {
     fn connected(&self) -> Result<bool, Error> {
         Ok(self.1.lock(|connected| connected.get()))
     }
 }
 
-impl<M> WifiDiag for EspWifiController<'_, M>
-where
-    M: RawMutex,
-{
+impl WifiDiag for EspWifiController<'_> {
     fn bssid(&self, f: &mut dyn FnMut(Option<&[u8]>) -> Result<(), Error>) -> Result<(), Error> {
         // TODO: How to get the BSSID?
         // let ctl = unwrap!(self.0.try_lock());

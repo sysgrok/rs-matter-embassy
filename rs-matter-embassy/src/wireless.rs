@@ -1,7 +1,5 @@
 //! Wireless: Type aliases and state structs for an Embassy Matter stack running over a wireless network (Wifi or Thread) and BLE.
 
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-
 use crate::matter::crypto::RngCore;
 use crate::matter::dm::networks::wireless::WirelessNetwork;
 use crate::matter::error::Error;
@@ -49,8 +47,7 @@ pub type EmbassyWirelessMatterStack<'a, const B: usize, T, N, E = ()> =
 
 /// A type alias for an Embassy implementation of the `Network` trait for a Matter stack running over
 /// BLE during commissioning, and then over either WiFi or Thread when operating.
-pub type EmbassyWirelessBle<T, N, E = ()> =
-    WirelessBle<CriticalSectionRawMutex, T, EmbassyGatt<N, E>>;
+pub type EmbassyWirelessBle<T, N, E = ()> = WirelessBle<T, EmbassyGatt<N, E>>;
 
 #[allow(unused)]
 pub(crate) const SLOTS: usize = 20;
@@ -61,12 +58,12 @@ pub(crate) const SLOTS: usize = 20;
 ///
 /// Usage:
 /// ```no_run
-/// MatterStack<WirelessBle<CriticalSectionRawMutex, Wifi, EmbassyGatt<C, E>>>::new(...);
+/// MatterStack<WirelessBle<Wifi, EmbassyGatt<C, E>>>::new(...);
 /// ```
 ///
 /// ... where `E` can be a next-level, user-supplied embedding or just `()` if the user does not need to embed anything.
 pub struct EmbassyGatt<N, E = ()> {
-    btp_gatt_context: TroubleBtpGattContext<CriticalSectionRawMutex>,
+    btp_gatt_context: TroubleBtpGattContext,
     net_context: N,
     embedding: E,
 }
@@ -97,7 +94,7 @@ where
     }
 
     /// Return a reference to the Bluedroid Gatt peripheral context.
-    pub fn ble_context(&self) -> &TroubleBtpGattContext<CriticalSectionRawMutex> {
+    pub fn ble_context(&self) -> &TroubleBtpGattContext {
         &self.btp_gatt_context
     }
 
@@ -164,7 +161,7 @@ where
     }
 }
 
-impl<'a, R, C> TroubleBtpGattPeripheral<'a, CriticalSectionRawMutex, R, C>
+impl<'a, R, C> TroubleBtpGattPeripheral<'a, R, C>
 where
     R: RngCore + Copy,
     C: Controller,
@@ -186,7 +183,7 @@ where
 struct BleDriverTaskImpl<'a, A, R> {
     task: A,
     rand: Option<R>,
-    context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
+    context: &'a TroubleBtpGattContext,
 }
 
 impl<A, R> BleDriverTask for BleDriverTaskImpl<'_, A, R>

@@ -17,7 +17,6 @@
 use core::pin::pin;
 
 use embassy_executor::Spawner;
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
@@ -112,7 +111,7 @@ async fn main(_s: Spawner) {
 
     // Create the crypto provider, using the `esp-hal` TRNG/ADC1 as the source of randomness for a reseeding CSPRNG.
     let _trng_source = esp_hal::rng::TrngSource::new(peripherals.RNG, peripherals.ADC1);
-    let crypto = default_crypto::<NoopRawMutex, _>(
+    let crypto = default_crypto(
         reseeding_csprng(esp_hal::rng::Trng::try_new().unwrap(), 1000).unwrap(),
         DAC_PRIVKEY,
     );

@@ -5,17 +5,19 @@ use core::cell::Cell;
 use core::net::Ipv6Addr;
 
 use embassy_futures::select::select;
+
 use embassy_net::driver::{Driver, HardwareAddress as DriverHardwareAddress};
 use embassy_net::{
     Config, ConfigV6, HardwareAddress, Ipv6Cidr, Runner, Stack, StackResources, StaticConfigV6,
 };
-use embassy_sync::blocking_mutex::{raw::CriticalSectionRawMutex, Mutex};
+
 use embassy_time::{Duration, Timer};
 
 use crate::matter::dm::clusters::gen_diag::{InterfaceTypeEnum, NetifDiag, NetifInfo};
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
 use crate::matter::transport::network::{MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE};
+use crate::matter::utils::sync::blocking::Mutex;
 use crate::stack::nal::noop::NoopNet;
 use crate::stack::nal::NetStack;
 
@@ -70,7 +72,7 @@ const TIMEOUT_PERIOD_SECS: u8 = 5;
 /// A `Netif` trait implementation for `embassy-net`
 pub struct EnetNetif<'d> {
     stack: Stack<'d>,
-    up: Mutex<CriticalSectionRawMutex, Cell<bool>>,
+    up: Mutex<Cell<bool>>,
     netif_type: InterfaceTypeEnum,
 }
 

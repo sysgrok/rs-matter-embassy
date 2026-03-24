@@ -2,10 +2,6 @@ use core::cell::Cell;
 
 use cyw43::{Control, JoinOptions, ScanOptions};
 
-use embassy_sync::blocking_mutex;
-use embassy_sync::blocking_mutex::raw::RawMutex;
-use embassy_sync::mutex::Mutex;
-
 use crate::fmt::Bytes;
 
 use crate::matter::dm::clusters::net_comm::{
@@ -18,32 +14,23 @@ use crate::matter::dm::clusters::wifi_diag::{
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::{Error, ErrorCode};
 use crate::matter::tlv::Nullable;
+use crate::matter::utils::sync::blocking::Mutex;
+use crate::matter::utils::sync::IfMutex;
 
 /// An adaptor from the `cyw43` Wifi controller API to the `rs-matter` Wifi controller API
-pub struct Cyw43WifiController<'a, M>(Mutex<M, Control<'a>>, blocking_mutex::Mutex<M, Cell<bool>>)
-where
-    M: RawMutex;
+pub struct Cyw43WifiController<'a>(IfMutex<Control<'a>>, Mutex<Cell<bool>>);
 
-impl<'a, M> Cyw43WifiController<'a, M>
-where
-    M: RawMutex,
-{
+impl<'a> Cyw43WifiController<'a> {
     /// Create a new instance of the `Cyw43WifiController` type.
     ///
     /// # Arguments
     /// - `controller` - The `cyw43` Wifi controller instance.
     pub const fn new(controller: Control<'a>) -> Self {
-        Self(
-            Mutex::new(controller),
-            blocking_mutex::Mutex::new(Cell::new(false)),
-        )
+        Self(IfMutex::new(controller), Mutex::new(Cell::new(false)))
     }
 }
 
-impl<M> NetCtl for Cyw43WifiController<'_, M>
-where
-    M: RawMutex,
-{
+impl NetCtl for Cyw43WifiController<'_> {
     fn net_type(&self) -> NetworkType {
         NetworkType::Wifi
     }
@@ -124,10 +111,7 @@ where
     }
 }
 
-impl<M> NetChangeNotif for Cyw43WifiController<'_, M>
-where
-    M: RawMutex,
-{
+impl NetChangeNotif for Cyw43WifiController<'_> {
     async fn wait_changed(&self) {
         let fetch_connected = || async {
             let _ctl = self.0.lock().await;
@@ -163,19 +147,13 @@ where
     }
 }
 
-impl<M> WirelessDiag for Cyw43WifiController<'_, M>
-where
-    M: RawMutex,
-{
+impl WirelessDiag for Cyw43WifiController<'_> {
     fn connected(&self) -> Result<bool, Error> {
         Ok(self.1.lock(|connected| connected.get()))
     }
 }
 
-impl<M> WifiDiag for Cyw43WifiController<'_, M>
-where
-    M: RawMutex,
-{
+impl WifiDiag for Cyw43WifiController<'_> {
     fn bssid(&self, f: &mut dyn FnMut(Option<&[u8]>) -> Result<(), Error>) -> Result<(), Error> {
         f(None)
     }

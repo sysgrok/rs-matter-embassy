@@ -17,7 +17,6 @@ use embassy_nrf::{bind_interrupts, rng};
 
 use embassy_executor::Spawner;
 
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embedded_alloc::LlffHeap;
 
 use defmt::{info, unwrap};
@@ -98,7 +97,7 @@ async fn main(_s: Spawner) {
     let p = embassy_nrf::init(config);
 
     // Create the crypto provider, using the NRF RNG peripheral (which is a TRNG) as the source of randomness for a reseeding CSPRNG.
-    let crypto = default_crypto::<NoopRawMutex, _>(
+    let crypto = default_crypto(
         reseeding_csprng(rng::Rng::new_blocking(p.RNG), 1000).unwrap(),
         DAC_PRIVKEY,
     );

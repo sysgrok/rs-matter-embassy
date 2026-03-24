@@ -4,7 +4,6 @@ use core::mem::MaybeUninit;
 use core::pin::pin;
 
 use embassy_futures::select::select;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
 use crate::enet::{
     create_enet_stack, EnetMatterStackResources, EnetMatterUdpBuffers, EnetNetif, EnetStack,
@@ -238,7 +237,7 @@ where
 /// A context (storage) for the network layer of the Matter stack.
 pub struct EmbassyNetContext {
     pub(crate) buffers: EnetMatterUdpBuffers,
-    pub(crate) resources: IfMutex<CriticalSectionRawMutex, EnetMatterStackResources>,
+    pub(crate) resources: IfMutex<EnetMatterStackResources>,
 }
 
 impl EmbassyNetContext {

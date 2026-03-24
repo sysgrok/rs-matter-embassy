@@ -1,7 +1,5 @@
 use bt_hci::controller::ExternalController;
 
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-
 use esp_radio::ble::controller::BleConnector;
 
 use crate::matter::error::Error;
@@ -44,11 +42,8 @@ impl super::WifiDriver for EspWifiDriver<'_> {
         // esp32c6-specific - need to boost the power to get a good signal
         unwrap!(controller.set_power_saving(esp_radio::wifi::PowerSaveMode::None));
 
-        task.run(
-            wifi_interface.station,
-            EspWifiController::<NoopRawMutex>::new(controller),
-        )
-        .await
+        task.run(wifi_interface.station, EspWifiController::new(controller))
+            .await
     }
 }
 
@@ -72,7 +67,7 @@ impl super::WifiCoexDriver for EspWifiDriver<'_> {
 
         task.run(
             wifi_interface.station,
-            EspWifiController::<NoopRawMutex>::new(controller),
+            EspWifiController::new(controller),
             ble_ctl,
         )
         .await

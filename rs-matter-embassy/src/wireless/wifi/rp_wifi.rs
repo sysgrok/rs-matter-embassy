@@ -14,8 +14,6 @@ use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_24, PIN_25, PIN_29, PIO0};
 use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_rp::Peri;
 
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-
 use crate::enet::net::driver::{Driver as _, HardwareAddress as DriverHardwareAddress};
 use crate::enet::{
     create_link_local_ipv6, multicast_mac_for_link_local_ipv6, MDNS_MULTICAST_MAC_IPV4,
@@ -164,10 +162,7 @@ impl super::WifiDriver for RpWifiDriver<'_> {
         Self::init_net_controller(&mut net_device, &mut net_controller, self.fmw_clm).await;
 
         let mut runner = pin!(runner.run());
-        let mut task = pin!(task.run(
-            net_device,
-            Cyw43WifiController::<NoopRawMutex>::new(net_controller),
-        ));
+        let mut task = pin!(task.run(net_device, Cyw43WifiController::new(net_controller),));
 
         match select(&mut runner, &mut task).await {
             First(_) => Ok(()),
@@ -217,7 +212,7 @@ impl super::WifiCoexDriver for RpWifiDriver<'_> {
         let mut runner = pin!(runner.run());
         let mut task = pin!(task.run(
             net_device,
-            Cyw43WifiController::<NoopRawMutex>::new(net_controller),
+            Cyw43WifiController::new(net_controller),
             ExternalController::<_, 20>::new(bt_device),
         ));
 

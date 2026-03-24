@@ -2,7 +2,6 @@ use core::pin::pin;
 
 use embassy_futures::select::select;
 
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use rs_matter_stack::mdns::BuiltinMdns;
 
 use crate::ble::{ControllerRef, TroubleBtpGattContext, TroubleBtpGattPeripheral};
@@ -178,7 +177,7 @@ pub struct EmbassyWifi<'a, T, R> {
     rand: R,
     use_ble_random_addr: bool,
     context: &'a EmbassyNetContext,
-    ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
+    ble_context: &'a TroubleBtpGattContext,
 }
 
 impl<'a, T, R> EmbassyWifi<'a, T, R> {
@@ -207,7 +206,7 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
         rand: R,
         use_ble_random_addr: bool,
         context: &'a EmbassyNetContext,
-        ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
+        ble_context: &'a TroubleBtpGattContext,
     ) -> Self {
         Self {
             driver,
@@ -319,7 +318,7 @@ where
 
 struct WifiCoexDriverTaskImpl<'a, A, R> {
     context: &'a EmbassyNetContext,
-    ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
+    ble_context: &'a TroubleBtpGattContext,
     task: A,
     rand: R,
     use_ble_random_addr: bool,
