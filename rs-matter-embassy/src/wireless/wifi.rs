@@ -190,7 +190,7 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
         stack: &'a EmbassyWifiMatterStack<'a, B, E>,
     ) -> Self
     where
-        E: Embedding + 'static,
+        E: Embedding,
     {
         Self::wrap(
             driver,

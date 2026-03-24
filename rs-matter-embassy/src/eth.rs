@@ -162,7 +162,7 @@ where
         stack: &'a EmbassyEthMatterStack<'a, B, E>,
     ) -> Self
     where
-        E: Embedding + 'static,
+        E: Embedding,
     {
         Self::wrap(driver, rand, stack.network().embedding().net_context())
     }

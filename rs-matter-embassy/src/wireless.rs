@@ -176,7 +176,7 @@ where
     ) -> Self
     where
         T: WirelessNetwork,
-        E: Embedding + 'static,
+        E: Embedding,
     {
         Self::new(ble_ctl, rand, stack.network().embedding().ble_context())
     }
@@ -198,8 +198,8 @@ where
     where
         C: trouble_host::Controller,
     {
-        let peripheral = TroubleBtpGattPeripheral::new(controller, self.rand, self.context);
+        let mut peripheral = TroubleBtpGattPeripheral::new(controller, self.rand, self.context);
 
-        self.task.run(&peripheral).await
+        self.task.run(&mut peripheral).await
     }
 }
