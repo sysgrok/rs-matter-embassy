@@ -10,9 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-# Until latest nightly is able to compile `embassy-rp`'s inline assembly that contains `.macro` defs again
-#  rust_toolchain: nightly
-  rust_toolchain: nightly-2025-08-12
+  rust_toolchain: nightly
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
@@ -85,15 +83,6 @@ jobs:
           THREAD_DATASET: "000003"
         run: cd examples/esp; cargo build --features wifi --release
 
-      - name: Examples-RP-Build | Fmt Check
-        run: cd examples/rp; cargo fmt -- --check
-
-      - name: Examples-RP-Build | Clippy
-        run: cd examples/rp; cargo clippy --no-deps -- -Dwarnings
-
-      - name: Examples-RP-Build | Compile
-        run: cd examples/rp; cargo build --release
-
       - name: Examples-NRF-Build | Fmt Check
         run: cd examples/nrf; cargo fmt -- --check
 
@@ -106,6 +95,15 @@ jobs:
         env:
           THREAD_DATASET: "000003"
         run: cd examples/nrf; cargo build --release
+
+      - name: Examples-RP-Build | Fmt Check
+        run: cd examples/rp; cargo fmt -- --check
+
+      - name: Examples-RP-Build | Clippy
+        run: cd examples/rp; cargo clippy --no-deps -- -Dwarnings
+
+      - name: Examples-RP-Build | Compile
+        run: cd examples/rp; cargo build --release
 
       - name: Set up environment for size reports
         uses: ./.github/actions/setup-size-reports

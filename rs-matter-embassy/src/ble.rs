@@ -15,8 +15,6 @@ use bt_hci::data::{AclPacket, IsoPacket, SyncPacket};
 use bt_hci::ControllerToHostPacket;
 
 use embassy_futures::select::select;
-use embassy_sync::blocking_mutex::raw::RawMutex;
-use embassy_sync::signal::Signal;
 
 use embedded_io::ErrorType;
 
@@ -30,7 +28,7 @@ use rs_matter_stack::matter::transport::network::BtAddr;
 use rs_matter_stack::matter::utils::init::{init, Init};
 use rs_matter_stack::matter::utils::select::Coalesce;
 use rs_matter_stack::matter::utils::storage::Vec;
-use rs_matter_stack::matter::utils::sync::IfMutex;
+use rs_matter_stack::matter::utils::sync::{IfMutex, Notification};
 
 use trouble_host::att::{AttCfm, AttClient, AttReq, AttRsp, AttUns};
 use trouble_host::prelude::*;
@@ -88,17 +86,11 @@ impl TroubleBtpResources {
 /// The state of the `TroubleBtpGattPeripheral` struct.
 /// Isolated as a separate struct to allow for `const fn` construction
 /// and static allocation.
-pub struct TroubleBtpGattContext<M>
-where
-    M: RawMutex,
-{
-    resources: IfMutex<M, TroubleBtpResources>,
+pub struct TroubleBtpGattContext {
+    resources: IfMutex<TroubleBtpResources>,
 }
 
-impl<M> TroubleBtpGattContext<M>
-where
-    M: RawMutex,
-{
+impl TroubleBtpGattContext {
     /// Create a new instance.
     #[allow(clippy::large_stack_frames)]
     #[inline(always)]
@@ -126,10 +118,7 @@ where
     // }
 }
 
-impl<M> Default for TroubleBtpGattContext<M>
-where
-    M: RawMutex,
-{
+impl Default for TroubleBtpGattContext {
     // TODO
     #[allow(clippy::large_stack_frames)]
     #[inline(always)]
@@ -140,9 +129,8 @@ where
 
 /// A GATT peripheral implementation for the BTP protocol in `rs-matter` via `trouble-host`.
 /// Implements the `GattPeripheral` trait.
-pub struct TroubleBtpGattPeripheral<'a, M, R, C>
+pub struct TroubleBtpGattPeripheral<'a, R, C>
 where
-    M: RawMutex,
     R: RngCore + Copy,
     C: Controller,
 {
@@ -150,12 +138,11 @@ where
     // until `bt-hci` is updated with `impl<C: Controller>` Controller for &C {}`
     ble_ctl: C,
     rand: Option<R>,
-    context: &'a TroubleBtpGattContext<M>,
+    context: &'a TroubleBtpGattContext,
 }
 
-impl<'a, M, R, C> TroubleBtpGattPeripheral<'a, M, R, C>
+impl<'a, R, C> TroubleBtpGattPeripheral<'a, R, C>
 where
-    M: RawMutex,
     R: RngCore + Copy,
     C: Controller,
 {
@@ -163,7 +150,7 @@ where
     ///
     /// Creation might fail if the GATT context cannot be reset, so user should ensure
     /// that there are no other GATT peripherals running before calling this function.
-    pub const fn new(ble_ctl: C, rand: Option<R>, context: &'a TroubleBtpGattContext<M>) -> Self {
+    pub const fn new(ble_ctl: C, rand: Option<R>, context: &'a TroubleBtpGattContext) -> Self {
         Self {
             ble_ctl,
             rand,
@@ -269,7 +256,7 @@ where
 
             btp.reset();
 
-            let ind_ack = Signal::new();
+            let ind_ack = Notification::new();
 
             let events = Self::handle_events(server, &conn, &ind_ack, btp);
             let indications = Self::handle_indications(server, &conn, ind_buf, &ind_ack, btp);
@@ -323,7 +310,7 @@ where
     async fn handle_events(
         server: &Server<'_>,
         conn: &GattConnection<'_, '_, DefaultPacketPool>,
-        ind_ack: &Signal<M, ()>,
+        ind_ack: &Notification,
         btp: &Btp,
     ) -> Result<(), Error> {
         fn to_bt_addr(addr: &BdAddr) -> BtAddr {
@@ -371,7 +358,7 @@ where
                                 if !subscribed {
                                     info!("GATT: Peer subscribed");
                                     subscribed = true;
-                                    ind_ack.signal(());
+                                    ind_ack.notify();
                                 }
                             } else if subscribed {
                                 info!("GATT: Peer unsubscribed");
@@ -383,7 +370,7 @@ where
                     }
                     AttClient::Confirmation(AttCfm::ConfirmIndication) => {
                         trace!("GATT: Confirm indication");
-                        ind_ack.signal(());
+                        ind_ack.notify();
                     }
                     _ => Self::accept(event).await?,
                 },
@@ -401,7 +388,7 @@ where
         server: &Server<'_>,
         conn: &GattConnection<'_, '_, DefaultPacketPool>,
         ind_buf: &mut [u8],
-        ind_ack: &Signal<M, ()>,
+        ind_ack: &Notification,
         btp: &Btp,
     ) -> Result<(), Error> {
         // Wait until `handle_events` indicates to us
@@ -454,9 +441,8 @@ where
     }
 }
 
-impl<M, R, C> GattPeripheral for TroubleBtpGattPeripheral<'_, M, R, C>
+impl<R, C> GattPeripheral for TroubleBtpGattPeripheral<'_, R, C>
 where
-    M: RawMutex,
     R: RngCore + Copy,
     C: Controller,
 {

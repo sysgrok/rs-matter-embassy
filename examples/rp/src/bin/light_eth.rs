@@ -25,7 +25,6 @@ use embassy_rp::peripherals::{DMA_CH0, DMA_CH1, SPI0};
 use embassy_rp::spi::{Async as SpiAsync, Config as SpiConfig, Spi};
 use embassy_rp::{bind_interrupts, dma};
 
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_time::Delay;
 
 use embedded_alloc::LlffHeap;
@@ -132,8 +131,7 @@ async fn main(spawner: Spawner) {
     );
 
     // Create the crypto provider, using the ROSC RNG peripheral (which is a TRNG) as the source of randomness for a reseeding CSPRNG.
-    let crypto =
-        default_crypto::<NoopRawMutex, _>(reseeding_csprng(RoscRng, 1000).unwrap(), DAC_PRIVKEY);
+    let crypto = default_crypto(reseeding_csprng(RoscRng, 1000).unwrap(), DAC_PRIVKEY);
 
     let mut weak_rand = crypto.weak_rand().unwrap();
 

@@ -5,13 +5,14 @@ use core::fmt::Write;
 use core::future::poll_fn;
 
 use embassy_futures::select::select;
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+
 use embassy_time::{Duration, Instant, Timer};
 
 use openthread::{
     Channels, OpenThread, OtError, OtResources, OtSrpResources, OtUdpResources, RamSettings,
     RamSettingsChange, SettingsKey, SharedRamSettings, SrpConf, SrpService,
 };
+
 use rs_matter_stack::matter::crypto::Crypto;
 use rs_matter_stack::matter::dm::ChangeNotify;
 use rs_matter_stack::matter::transport::network::mdns::Service;
@@ -38,6 +39,7 @@ use crate::matter::transport::network::MAX_RX_PACKET_SIZE;
 use crate::matter::utils::init::zeroed;
 use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::storage::Vec;
+use crate::matter::utils::sync::blocking::raw::MatterRawMutex;
 use crate::stack::persist::{KvBlobStore, SharedKvBlobStore, VENDOR_KEYS_START};
 
 /// Re-export the `openthread` crate
@@ -544,7 +546,7 @@ const OT_SRP_ECDSA_KEY: u16 = VENDOR_KEYS_START;
 /// A struct for implementing persistance of `openthread` settings - volatitle and
 /// non-volatile (for selected keys)
 pub struct OtPersist<'a, 'd, S> {
-    settings: SharedRamSettings<'d, NoopRawMutex, fn(RamSettingsChange) -> bool>,
+    settings: SharedRamSettings<'d, MatterRawMutex, fn(RamSettingsChange) -> bool>,
     store: &'a SharedKvBlobStore<'a, S>,
 }
 
@@ -579,7 +581,7 @@ where
     /// Return a reference to the `SharedRamSettings` instance to be used with `openthread`
     pub const fn settings(
         &self,
-    ) -> &SharedRamSettings<'d, NoopRawMutex, fn(RamSettingsChange) -> bool> {
+    ) -> &SharedRamSettings<'d, MatterRawMutex, fn(RamSettingsChange) -> bool> {
         &self.settings
     }
 

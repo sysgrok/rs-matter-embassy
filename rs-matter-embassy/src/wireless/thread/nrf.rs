@@ -137,8 +137,8 @@ unsafe impl Binding<interrupt::typelevel::EGU0_SWI0, Egu0InterruptHandler>
 
 struct RustRadioState {
     irq_enabled: AtomicBool,
-    enable: Signal<CriticalSectionRawMutex, bool>,
-    state: Signal<CriticalSectionRawMutex, bool>,
+    enable: Signal<bool, CriticalSectionRawMutex>,
+    state: Signal<bool, CriticalSectionRawMutex>,
 }
 
 impl RustRadioState {

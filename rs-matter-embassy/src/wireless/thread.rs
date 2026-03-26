@@ -1,7 +1,6 @@
 use core::pin::pin;
 
 use embassy_futures::select::select3;
-use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 
 use openthread::{OpenThread, Radio};
 
@@ -170,7 +169,7 @@ pub struct EmbassyThread<'a, T, S, R> {
     ieee_eui64: [u8; 8],
     store: &'a SharedKvBlobStore<'a, S>,
     context: &'a OtNetContext,
-    ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
+    ble_context: &'a TroubleBtpGattContext,
     use_ble_random_addr: bool,
     rand: R,
 }
@@ -211,7 +210,7 @@ where
         ieee_eui64: [u8; 8],
         store: &'a SharedKvBlobStore<'a, S>,
         context: &'a OtNetContext,
-        ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
+        ble_context: &'a TroubleBtpGattContext,
         use_ble_random_addr: bool,
     ) -> Self {
         Self {
@@ -294,7 +293,7 @@ where
 
 /// A network context for the `EmbassyThread` type.
 pub struct OtNetContext {
-    resources: IfMutex<NoopRawMutex, OtMatterResources>,
+    resources: IfMutex<OtMatterResources>,
 }
 
 impl OtNetContext {
@@ -396,7 +395,7 @@ struct ThreadCoexDriverTaskImpl<'a, A, S, C> {
     rand: C,
     store: &'a SharedKvBlobStore<'a, S>,
     context: &'a OtNetContext,
-    ble_context: &'a TroubleBtpGattContext<CriticalSectionRawMutex>,
+    ble_context: &'a TroubleBtpGattContext,
     task: A,
     use_ble_random_addr: bool,
 }
