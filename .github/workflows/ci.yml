@@ -10,9 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-# Until latest nightly is able to compile `embassy-rp`'s inline assembly that contains `.macro` defs again
-#  rust_toolchain: nightly
-  rust_toolchain: nightly-2025-08-12
+  rust_toolchain: nightly
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
