@@ -52,7 +52,6 @@ esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "e15
 #esp-println = { path = "../../../esp-hal/esp-println" }
 #esp-bootloader-esp-idf = { path = "../../../esp-hal/esp-bootloader-esp-idf" }
 #esp-metadata-generated = { path = "../../../esp-hal/esp-metadata-generated" }
-trouble-host = { git = "https://github.com/embassy-rs/trouble" }
 
 [profile.dev]
 # Rust debug is too slow.

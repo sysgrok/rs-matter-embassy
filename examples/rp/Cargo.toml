@@ -32,27 +32,15 @@ rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", bran
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
 openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
 #openthread = { version = "0.1", path = "../../../openthread/openthread" }
-embassy-executor = { git = "https://github.com/embassy-rs/embassy" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy" }
-embassy-rp = { git = "https://github.com/embassy-rs/embassy" }
-embassy-futures = { git = "https://github.com/embassy-rs/embassy" }
-embassy-sync = { git = "https://github.com/embassy-rs/embassy" }
-cyw43 = { git = "https://github.com/embassy-rs/embassy" }
-cyw43-pio = { git = "https://github.com/embassy-rs/embassy" }
-embassy-net-wiznet = { git = "https://github.com/embassy-rs/embassy" }
-embassy-time-driver = { git = "https://github.com/embassy-rs/embassy" }
-#embassy-net = { git = "https://github.com/embassy-rs/embassy" }
-embassy-net-driver = { git = "https://github.com/embassy-rs/embassy" }
-embassy-net-driver-channel = { git = "https://github.com/embassy-rs/embassy" }
 
 [features]
 skip-cyw43-firmware = []
 
 [dependencies]
-embassy-executor = { version = "0.9", default-features = false, features = ["arch-cortex-m", "executor-thread", "defmt"] }
+embassy-executor = { version = "0.10", default-features = false, features = ["platform-cortex-m", "executor-thread", "defmt"] }
 embassy-time = { version = "0.5", default-features = false, features = ["defmt", "defmt-timestamp-uptime-ms"] }
-embassy-rp = { version = "0.9", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
-embassy-futures = "0.1.1"
+embassy-rp = { version = "0.10", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
+embassy-futures = "0.1.2"
 embassy-sync = { version = "0.7", features = ["defmt"] }
 defmt = "0.3"
 embedded-alloc = "0.6"
@@ -60,11 +48,11 @@ rs-matter-embassy = { path = "../../rs-matter-embassy", features = ["embassy-net
 
 # Wireless examples
 bt-hci = { version = "0.8", default-features = false, features = ["defmt"] }
-cyw43 = { version = "0.6", features = ["firmware-logs", "defmt", "bluetooth"] }
-cyw43-pio = "0.9"
+cyw43 = { version = "0.7", features = ["firmware-logs", "defmt", "bluetooth"] }
+cyw43-pio = "0.10"
 
 # W5500 Ethernet examples
-embassy-net-wiznet = { version = "0.2", features = ["defmt"] }
+embassy-net-wiznet = { version = "0.3", features = ["defmt"] }
 embedded-hal-bus = { version = "0.1", features = ["async"] }
 rand_core = "0.9"
 

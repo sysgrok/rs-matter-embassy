@@ -175,10 +175,10 @@ esp-radio = { version = "0.17", optional = true, features = ["ble"] }
 esp-hal = { version = "1", optional = true, features = ["unstable"] }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the RPi Pico W MCU
-cyw43 = { version = "0.6", optional = true, features = ["firmware-logs", "bluetooth"] }
-cyw43-pio = { version = "0.9", optional = true }
-embassy-rp = { version = "0.9", optional = true, features = ["unstable-pac", "rp2040"] }
-embassy-net-driver-channel = { version = "0.3", optional = true }
+cyw43 = { version = "0.7", optional = true, features = ["firmware-logs", "bluetooth"] }
+cyw43-pio = { version = "0.10", optional = true }
+embassy-rp = { version = "0.10", optional = true, features = ["unstable-pac", "rp2040"] }
+embassy-net-driver-channel = { version = "0.4", optional = true }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for Nordic silicon
 embassy-nrf = { version = "0.9", optional = true, features = ["time-driver-rtc1", "time", "nrf52840"], default-features = false }
