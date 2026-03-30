@@ -18,6 +18,7 @@ use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
 use crate::matter::transport::network::{MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE};
 use crate::matter::utils::sync::blocking::Mutex;
+use crate::matter::utils::sync::DynBase;
 use crate::stack::nal::noop::NoopNet;
 use crate::stack::nal::NetStack;
 
@@ -86,6 +87,8 @@ impl<'d> EnetNetif<'d> {
         }
     }
 }
+
+impl DynBase for EnetNetif<'_> {}
 
 impl NetifDiag for EnetNetif<'_> {
     fn netifs(&self, f: &mut dyn FnMut(&NetifInfo) -> Result<(), Error>) -> Result<(), Error> {

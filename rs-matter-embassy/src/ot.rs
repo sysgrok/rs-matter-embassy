@@ -40,6 +40,7 @@ use crate::matter::utils::init::zeroed;
 use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::storage::Vec;
 use crate::matter::utils::sync::blocking::raw::MatterRawMutex;
+use crate::matter::utils::sync::DynBase;
 use crate::stack::persist::{KvBlobStore, SharedKvBlobStore, VENDOR_KEYS_START};
 
 /// Re-export the `openthread` crate
@@ -164,6 +165,8 @@ impl<'d> OtNetif<'d> {
         Self(ot)
     }
 }
+
+impl DynBase for OtNetif<'_> {}
 
 impl NetifDiag for OtNetif<'_> {
     fn netifs(&self, f: &mut dyn FnMut(&NetifInfo) -> Result<(), Error>) -> Result<(), Error> {
@@ -317,6 +320,8 @@ impl WirelessDiag for OtNetCtl<'_> {
         Ok(status.role.is_connected())
     }
 }
+
+impl DynBase for OtNetCtl<'_> {}
 
 // TODO
 impl ThreadDiag for OtNetCtl<'_> {

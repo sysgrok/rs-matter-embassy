@@ -1,6 +1,7 @@
 use bt_hci::controller::ExternalController;
 
 use esp_radio::ble::controller::BleConnector;
+
 use openthread::esp::EspRadio;
 
 use rs_matter_stack::matter::error::Error;

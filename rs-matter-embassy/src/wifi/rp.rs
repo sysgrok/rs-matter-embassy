@@ -15,7 +15,7 @@ use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::{Error, ErrorCode};
 use crate::matter::tlv::Nullable;
 use crate::matter::utils::sync::blocking::Mutex;
-use crate::matter::utils::sync::IfMutex;
+use crate::matter::utils::sync::{DynBase, IfMutex};
 
 /// An adaptor from the `cyw43` Wifi controller API to the `rs-matter` Wifi controller API
 pub struct Cyw43WifiController<'a>(IfMutex<Control<'a>>, Mutex<Cell<bool>>);
@@ -29,6 +29,8 @@ impl<'a> Cyw43WifiController<'a> {
         Self(IfMutex::new(controller), Mutex::new(Cell::new(false)))
     }
 }
+
+impl DynBase for Cyw43WifiController<'_> {}
 
 impl NetCtl for Cyw43WifiController<'_> {
     fn net_type(&self) -> NetworkType {

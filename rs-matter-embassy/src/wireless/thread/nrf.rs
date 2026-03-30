@@ -16,6 +16,7 @@ use embassy_nrf::Peri;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
 pub use nrf_802154::{Egu0InterruptHandler, LpTimerInterruptHandler};
+
 use nrf_mpsl::MultiprotocolServiceLayer;
 
 use nrf_sdc::mpsl::{

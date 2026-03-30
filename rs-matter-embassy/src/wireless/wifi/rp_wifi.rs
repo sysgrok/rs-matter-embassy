@@ -4,9 +4,12 @@ use bt_hci::controller::ExternalController;
 
 use cyw43::{Aligned, Control, A4};
 use cyw43_pio::PioSpi;
+
 use embassy_futures::select::select;
 use embassy_futures::select::Either::{First, Second};
+
 use embassy_net_driver_channel::Device;
+
 use embassy_rp::dma::{self, Channel};
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::interrupt::typelevel::{Binding, DMA_IRQ_0, PIO0_IRQ_0};
