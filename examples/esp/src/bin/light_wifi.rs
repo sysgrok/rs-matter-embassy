@@ -36,9 +36,9 @@ use rs_matter_embassy::matter::dm::devices::test::{
 };
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, EpClMatcher, Node};
+use rs_matter_embassy::matter::persist::DummyKvBlobStore;
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices};
-use rs_matter_embassy::stack::persist::DummyKvBlobStore;
 use rs_matter_embassy::stack::rand::reseeding_csprng;
 use rs_matter_embassy::wireless::esp::EspWifiDriver;
 use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiMatterStack};
@@ -143,13 +143,14 @@ async fn main(_s: Spawner) {
             Async(desc::DescHandler::new(Dataver::new_rand(&mut weak_rand)).adapt()),
         );
 
-    // Create the persister & load any previously saved state
-    // `EmbassyPersist`+`EmbassyKvBlobStore` saves to a user-supplied NOR Flash region
-    // However, for this demo and for simplicity, we use a dummy persister that does nothing
-    let persist = stack
-        .create_persist_with_comm_window(&crypto, DummyKvBlobStore)
-        .await
-        .unwrap();
+    // Create a KV BLOB store and load any previously saved state of `rs-matter`
+    // `SeqMapKvBlobStore` saves to a user-supplied NOR Flash region
+    // However, for this demo and for simplicity, we use a dummy KV BLOB store that does nothing
+    let mut kv = DummyKvBlobStore;
+    stack.startup(&crypto, &mut kv).await.unwrap();
+
+    // Wrap the KV BLOB store as a shared reference, so that it can be used both by `rs-matter` and the user
+    let kv = stack.create_shared_kv(kv).unwrap();
 
     // Run the Matter stack with our handler
     // Using `pin!` is completely optional, but reduces the size of the final future
@@ -163,12 +164,12 @@ async fn main(_s: Spawner) {
             true, // Use a random BLE address
             stack,
         ),
-        // The Matter stack needs a persister to store its state
-        &persist,
         // The crypto provider
         &crypto,
         // Our `AsyncHandler` + `AsyncMetadata` impl
         (NODE, handler),
+        // The Matter stack needs a blob store to store its state
+        &kv,
         // No user future to run
         (),
     ));

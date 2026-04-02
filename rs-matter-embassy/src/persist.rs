@@ -1,33 +1,31 @@
-//! Persistence: `EmbassyPersist` - an implementation of the `Persist` trait that uses the `sequential_storage::map` API
+//! Persistence: `SeqMapKvBlobStore` - an implementation of the `KvBlobStore` trait that uses the `sequential_storage::map` API
 
 use core::ops::Range;
 
 use embedded_storage_async::nor_flash::MultiwriteNorFlash;
 
 use rs_matter_stack::matter::error::Error;
-use rs_matter_stack::persist::{KvBlobStore, MatterPersist};
+use rs_matter_stack::matter::persist::KvBlobStore;
 
 use sequential_storage::cache::NoCache;
 
 use crate::error::to_persist_error;
 use crate::fmt::Bytes;
 
-pub type EmbassyPersist<'a, S, N> = MatterPersist<'a, EmbassyKvBlobStore<S>, N>;
-
 /// A `KvBlobStore`` implementation that uses the `sequential_storage::map` API
 /// on top of NOR Flash.
-pub struct EmbassyKvBlobStore<S> {
+pub struct SeqMapKvBlobStore<S> {
     flash: S,
     flash_range: Range<u32>,
     cache: NoCache,
 }
 
-impl<S> EmbassyKvBlobStore<S>
+impl<S> SeqMapKvBlobStore<S>
 where
     S: MultiwriteNorFlash,
 {
     /// Create a new KV blob store instance.
-    pub fn new(flash: S, flash_range: Range<u32>) -> Self {
+    pub const fn new(flash: S, flash_range: Range<u32>) -> Self {
         Self {
             flash,
             flash_range,
@@ -35,10 +33,7 @@ where
         }
     }
 
-    async fn load<F>(&mut self, key: u16, buf: &mut [u8], cb: F) -> Result<(), Error>
-    where
-        F: FnOnce(Option<&[u8]>) -> Result<(), Error>,
-    {
+    async fn load(&mut self, key: u16, buf: &mut [u8]) -> Result<Option<usize>, Error> {
         let data: Option<&[u8]> = sequential_storage::map::fetch_item(
             &mut self.flash,
             self.flash_range.clone(),
@@ -48,8 +43,6 @@ where
         )
         .await
         .map_err(to_persist_error)?;
-
-        cb(data)?;
 
         debug!(
             "Blob {}: loaded {:?} bytes",
@@ -63,35 +56,26 @@ where
             data.map(Bytes)
         );
 
-        Ok(())
+        Ok(data.map(|data| data.len()))
     }
 
-    async fn store<F>(&mut self, key: u16, buf: &mut [u8], cb: F) -> Result<(), Error>
-    where
-        F: FnOnce(&mut [u8]) -> Result<usize, Error>,
-    {
-        // Not ideal, but both `rs-matter-stack` and `sequential-storage` need a buffer.
-        let (matter_buf, seqs_buf) = buf.split_at_mut(buf.len() / 2);
-
-        let len = cb(matter_buf)?;
-        let data = &matter_buf[..len];
-
+    async fn store(&mut self, key: u16, data: &[u8], buf: &mut [u8]) -> Result<(), Error> {
         sequential_storage::map::store_item(
             &mut self.flash,
             self.flash_range.clone(),
             &mut self.cache,
-            seqs_buf,
+            buf,
             &key,
             &data,
         )
         .await
         .map_err(to_persist_error)?;
 
-        debug!("Blob {}: stored {} bytes", key, len);
+        debug!("Blob {}: stored {} bytes", key, data.len());
         trace!(
             "Blob {} store details: stored {} bytes, data: {:?}",
             key,
-            len,
+            data.len(),
             data
         );
 
@@ -115,25 +99,19 @@ where
     }
 }
 
-impl<S> KvBlobStore for EmbassyKvBlobStore<S>
+impl<S> KvBlobStore for SeqMapKvBlobStore<S>
 where
     S: MultiwriteNorFlash,
 {
-    async fn load<F>(&mut self, key: u16, buf: &mut [u8], f: F) -> Result<(), Error>
-    where
-        F: FnOnce(Option<&[u8]>) -> Result<(), Error>,
-    {
-        EmbassyKvBlobStore::load(self, key, buf, f).await
+    async fn load(&mut self, key: u16, buf: &mut [u8]) -> Result<Option<usize>, Error> {
+        SeqMapKvBlobStore::load(self, key, buf).await
     }
 
-    async fn store<F>(&mut self, key: u16, buf: &mut [u8], f: F) -> Result<(), Error>
-    where
-        F: FnOnce(&mut [u8]) -> Result<usize, Error>,
-    {
-        EmbassyKvBlobStore::store(self, key, buf, f).await
+    async fn store(&mut self, key: u16, data: &[u8], buf: &mut [u8]) -> Result<(), Error> {
+        SeqMapKvBlobStore::store(self, key, data, buf).await
     }
 
     async fn remove(&mut self, key: u16, buf: &mut [u8]) -> Result<(), Error> {
-        EmbassyKvBlobStore::remove(self, key, buf).await
+        SeqMapKvBlobStore::remove(self, key, buf).await
     }
 }
