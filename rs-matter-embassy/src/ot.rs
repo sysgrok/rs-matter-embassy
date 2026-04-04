@@ -16,7 +16,7 @@ use openthread::{
 
 use rs_matter_stack::matter::crypto::Crypto;
 use rs_matter_stack::matter::dm::ChangeNotify;
-use rs_matter_stack::matter::persist::KvBlobStoreInstance;
+use rs_matter_stack::matter::persist::KvBlobStoreAccess;
 use rs_matter_stack::matter::transport::network::mdns::Service;
 use rs_matter_stack::matter::Matter;
 use rs_matter_stack::mdns::Mdns;
@@ -592,59 +592,57 @@ where
     }
 
     /// Load (a selected subset of) the settings from the `KvBlobStore` non-volatile storage
-    pub async fn load(&self) -> Result<(), Error> {
-        let mut kvb = self.store.get().await;
-        let (mut kv, buf) = kvb.split();
+    pub fn load(&self) -> Result<(), Error> {
+        self.store.access(|kv, buf| {
+            if let Some(len) = kv.load(OT_SRP_ECDSA_KEY, buf)? {
+                let data = &buf[..len];
 
-        if let Some(len) = kv.load(OT_SRP_ECDSA_KEY, buf).await? {
-            let data = &buf[..len];
+                self.settings.with(|settings| {
+                    let mut offset = 0;
 
-            self.settings.with(|settings| {
-                let mut offset = 0;
+                    while offset < data.len() {
+                        let key = u16::from_le_bytes([data[offset], data[offset + 1]]);
+                        offset += 2;
 
-                while offset < data.len() {
-                    let key = u16::from_le_bytes([data[offset], data[offset + 1]]);
-                    offset += 2;
+                        let value = &data[offset..];
 
-                    let value = &data[offset..];
+                        unwrap!(settings.add(key, value));
 
-                    unwrap!(settings.add(key, value));
+                        offset += value.len();
+                    }
+                });
+            }
 
-                    offset += value.len();
-                }
-            });
-        }
-
-        Ok(())
+            Ok(())
+        })
     }
 
     /// Store (a selected subset of) the settings to the `KvBlobStore` non-volatile storage
-    pub async fn store(&self) -> Result<(), Error> {
-        let mut kvb = self.store.get().await;
-        let (mut kv, buf) = kvb.split();
+    pub fn store(&self) -> Result<(), Error> {
+        self.store.access(|kv, buf| {
+            let offset = self.settings.with(|settings| {
+                let mut offset = 0;
 
-        let offset = self.settings.with(|settings| {
-            let mut offset = 0;
+                for (key, value) in settings
+                    .iter()
+                    .filter(|(key, _)| *key == SettingsKey::SrpEcdsaKey as u16)
+                {
+                    assert!(value.len() + 2 <= buf.len() - offset);
 
-            for (key, value) in settings
-                .iter()
-                .filter(|(key, _)| *key == SettingsKey::SrpEcdsaKey as u16)
-            {
-                assert!(value.len() + 2 <= buf.len() - offset);
+                    buf[offset..offset + 2].copy_from_slice(&key.to_le_bytes());
+                    offset += 2;
 
-                buf[offset..offset + 2].copy_from_slice(&key.to_le_bytes());
-                offset += 2;
+                    buf[offset..offset + value.len()].copy_from_slice(value);
+                    offset += value.len();
+                }
 
-                buf[offset..offset + value.len()].copy_from_slice(value);
-                offset += value.len();
-            }
+                offset
+            });
 
-            offset
-        });
+            let (data, buf) = buf.split_at_mut(offset);
 
-        let (data, buf) = buf.split_at_mut(offset);
-
-        kv.store(OT_SRP_ECDSA_KEY, data, buf).await
+            kv.store(OT_SRP_ECDSA_KEY, data, buf)
+        })
     }
 
     /// Run the `OtPersist` instance by waiting for changes in the settings and persisting them
@@ -655,7 +653,7 @@ where
         loop {
             wait_changed().await;
 
-            self.store().await?;
+            self.store()?;
         }
     }
 }

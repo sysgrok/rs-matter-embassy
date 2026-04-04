@@ -103,15 +103,15 @@ impl<S> KvBlobStore for SeqMapKvBlobStore<S>
 where
     S: MultiwriteNorFlash,
 {
-    async fn load(&mut self, key: u16, buf: &mut [u8]) -> Result<Option<usize>, Error> {
-        SeqMapKvBlobStore::load(self, key, buf).await
+    fn load(&mut self, key: u16, buf: &mut [u8]) -> Result<Option<usize>, Error> {
+        embassy_futures::block_on(SeqMapKvBlobStore::load(self, key, buf))
     }
 
-    async fn store(&mut self, key: u16, data: &[u8], buf: &mut [u8]) -> Result<(), Error> {
-        SeqMapKvBlobStore::store(self, key, data, buf).await
+    fn store(&mut self, key: u16, data: &[u8], buf: &mut [u8]) -> Result<(), Error> {
+        embassy_futures::block_on(SeqMapKvBlobStore::store(self, key, data, buf))
     }
 
-    async fn remove(&mut self, key: u16, buf: &mut [u8]) -> Result<(), Error> {
-        SeqMapKvBlobStore::remove(self, key, buf).await
+    fn remove(&mut self, key: u16, buf: &mut [u8]) -> Result<(), Error> {
+        embassy_futures::block_on(SeqMapKvBlobStore::remove(self, key, buf))
     }
 }

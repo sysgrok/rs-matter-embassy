@@ -349,7 +349,7 @@ where
         let resources = &mut *resources;
 
         let persister = OtPersist::new(&mut resources.settings_buf, self.store);
-        persister.load().await?;
+        persister.load()?;
 
         let mut settings = persister.settings();
         let mut rand = RngAdaptor::new(self.rand);
@@ -416,7 +416,7 @@ where
         let resources = &mut *resources;
 
         let persister = OtPersist::new(&mut resources.settings_buf, self.store);
-        persister.load().await?;
+        persister.load()?;
 
         let mut settings = persister.settings();
         let mut rand = RngAdaptor::new(self.rand);
