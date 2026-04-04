@@ -594,9 +594,7 @@ where
     /// Load (a selected subset of) the settings from the `KvBlobStore` non-volatile storage
     pub fn load(&self) -> Result<(), Error> {
         self.store.access(|kv, buf| {
-            if let Some(len) = kv.load(OT_SRP_ECDSA_KEY, buf)? {
-                let data = &buf[..len];
-
+            if let Some(data) = kv.load(OT_SRP_ECDSA_KEY, buf)? {
                 self.settings.with(|settings| {
                     let mut offset = 0;
 

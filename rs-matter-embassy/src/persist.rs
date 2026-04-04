@@ -33,7 +33,7 @@ where
         }
     }
 
-    async fn load(&mut self, key: u16, buf: &mut [u8]) -> Result<Option<usize>, Error> {
+    async fn load<'a>(&mut self, key: u16, buf: &'a mut [u8]) -> Result<Option<&'a [u8]>, Error> {
         let data: Option<&[u8]> = sequential_storage::map::fetch_item(
             &mut self.flash,
             self.flash_range.clone(),
@@ -56,7 +56,7 @@ where
             data.map(Bytes)
         );
 
-        Ok(data.map(|data| data.len()))
+        Ok(data)
     }
 
     async fn store(&mut self, key: u16, data: &[u8], buf: &mut [u8]) -> Result<(), Error> {
@@ -103,7 +103,7 @@ impl<S> KvBlobStore for SeqMapKvBlobStore<S>
 where
     S: MultiwriteNorFlash,
 {
-    fn load(&mut self, key: u16, buf: &mut [u8]) -> Result<Option<usize>, Error> {
+    fn load<'a>(&mut self, key: u16, buf: &'a mut [u8]) -> Result<Option<&'a [u8]>, Error> {
         embassy_futures::block_on(SeqMapKvBlobStore::load(self, key, buf))
     }
 
