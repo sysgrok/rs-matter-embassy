@@ -1,4 +1,5 @@
-//! An example utilizing the `EmbassyWifiMatterStack` struct.
+//! An example utilizing the `EmbassyWifiMatterStack` struct
+//! and additionally persisting the `rs-matter` state to the NOR Flash.
 //!
 //! As the name suggests, this Matter stack assembly uses Wifi as the main transport,
 //! and thus BLE for commissioning.
@@ -20,17 +21,19 @@ use core::pin::pin;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_executor::Spawner;
 
+use embassy_futures::select::{select, Either};
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
 use esp_bootloader_esp_idf::partitions::{
     read_partition_table, DataPartitionSubType, PartitionType, PARTITION_TABLE_MAX_LEN,
 };
+use esp_hal::gpio::{Input, InputConfig, Pull};
 use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 use esp_metadata_generated::memory_range;
-
 use esp_storage::FlashStorage;
-use log::info;
+
+use log::{info, warn};
 
 use rs_matter_embassy::epoch::epoch;
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
@@ -42,8 +45,10 @@ use rs_matter_embassy::matter::dm::devices::test::{
 };
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, EpClMatcher, Node};
+use rs_matter_embassy::matter::error::Error;
 use rs_matter_embassy::matter::persist::KvBlobStore;
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
+use rs_matter_embassy::matter::utils::select::Coalesce;
 use rs_matter_embassy::matter::{clusters, devices};
 use rs_matter_embassy::persist::SeqMapKvBlobStore;
 use rs_matter_embassy::stack::rand::reseeding_csprng;
@@ -85,6 +90,8 @@ const HEAP_SIZE: usize = 140 * 1024;
 
 const RECLAIMED_RAM: usize =
     memory_range!("DRAM2_UNINIT").end - memory_range!("DRAM2_UNINIT").start;
+
+const RESET_SECS: u64 = 3;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -154,33 +161,60 @@ async fn main(_s: Spawner) {
     let mut kv = get_persistent_store(peripherals.FLASH, stack.kv_store_buf().unwrap());
     stack.startup(&crypto, &mut kv).await.unwrap();
 
-    // Wrap the KV BLOB store as a shared reference, so that it can be used both by `rs-matter` and the user
-    let kv = stack.create_shared_kv(kv).unwrap();
+    if stack.is_commissioned() {
+        info!(
+            "To reset, press and hold the Boot Mode pin (GPIO9) for {} or more seconds",
+            RESET_SECS
+        );
+    }
 
-    // Run the Matter stack with our handler
-    // Using `pin!` is completely optional, but reduces the size of the final future
-    //
-    // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
-    let matter = pin!(stack.run_coex(
-        // The Matter stack needs to instantiate an `embassy-net` `Driver` and `Controller`
-        EmbassyWifi::new(
-            EspWifiDriver::new(peripherals.WIFI, peripherals.BT),
-            weak_rand,
-            true, // Use a random BLE address
-            stack,
-        ),
-        // The crypto provider
-        &crypto,
-        // Our `AsyncHandler` + `AsyncMetadata` impl
-        (NODE, handler),
-        // The Matter stack needs a blob store to store its state
-        &kv,
-        // No user future to run
-        (),
-    ));
+    {
+        // Wrap the KV BLOB store as a shared reference, so that it can be used both by `rs-matter` and the user
+        let kv = stack.create_shared_kv(&mut kv).unwrap();
 
-    // Run Matter
-    matter.await.unwrap();
+        // Run the Matter stack with our handler
+        // Using `pin!` is completely optional, but reduces the size of the final future
+        //
+        // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
+        let mut matter = pin!(stack.run_coex(
+            // The Matter stack needs to instantiate an `embassy-net` `Driver` and `Controller`
+            EmbassyWifi::new(
+                EspWifiDriver::new(peripherals.WIFI, peripherals.BT),
+                weak_rand,
+                true, // Use a random BLE address
+                stack,
+            ),
+            // The crypto provider
+            &crypto,
+            // Our `AsyncHandler` + `AsyncMetadata` impl
+            (NODE, handler),
+            // The Matter stack needs a blob store to store its state
+            &kv,
+            // No user future to run
+            (),
+        ));
+
+        // Run Matter and also wait for a reset signal
+        let mut wait_reset = pin!(wait_pin_low(Input::new(
+            peripherals.GPIO9,
+            InputConfig::default().with_pull(Pull::Down)
+        )));
+
+        select(&mut matter, &mut wait_reset)
+            .coalesce()
+            .await
+            .unwrap();
+    }
+
+    // If we get here, with no errors, this means the user is willing to reset the storage
+    // by holding the BOOT pin low 3 or more seconds
+    warn!("Resetting storage");
+
+    stack.reset(kv).await.unwrap();
+
+    warn!("Rebooting...");
+
+    esp_hal::system::software_reset()
 }
 
 /// Endpoint 0 (the root endpoint) always runs
@@ -229,4 +263,32 @@ fn get_persistent_store<'d>(
     );
 
     SeqMapKvBlobStore::new(BlockingAsync::new(flash), start..end)
+}
+
+async fn wait_pin_low(mut pin: Input<'_>) -> Result<(), Error> {
+    loop {
+        pin.wait_for_low().await;
+
+        // Debounce
+        embassy_time::Timer::after_millis(50).await;
+
+        if pin.is_low() {
+            warn!(
+                "Detected Boot Mode pin low, keep it low for {} more seconds to reset the storage",
+                RESET_SECS
+            );
+
+            let result = select(
+                pin.wait_for_high(),
+                embassy_time::Timer::after_secs(RESET_SECS),
+            )
+            .await;
+
+            if matches!(result, Either::Second(())) {
+                break;
+            }
+        }
+    }
+
+    Ok(())
 }
