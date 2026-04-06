@@ -20,3 +20,5 @@ build-std = ["core", "alloc", "panic_abort"]
 [env]
 DEFMT_LOG="info"
 ESP_LOG="info"
+# Uncomment and change this if you change the partition table offset (relevant for the light_wifi_persistent example)
+#ESP_BOOTLOADER_ESP_IDF_CONFIG_PARTITION_TABLE_OFFSET="0x8000"

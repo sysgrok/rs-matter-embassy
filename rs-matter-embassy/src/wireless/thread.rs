@@ -3,6 +3,8 @@ use core::pin::pin;
 use embassy_futures::select::select3;
 
 use openthread::{OpenThread, Radio};
+use rs_matter_stack::matter::persist::KvBlobStore;
+use rs_matter_stack::persist::MatterSharedKvBlobStore;
 
 use crate::ble::{ControllerRef, TroubleBtpGattContext, TroubleBtpGattPeripheral};
 use crate::matter::crypto::{CryptoRngCore, RngCore};
@@ -14,7 +16,6 @@ use crate::matter::utils::sync::IfMutex;
 use crate::ot::{to_matter_err, OtNetCtl, OtNetStack, OtPersist};
 use crate::ot::{OtMatterResources, OtMdns, OtNetif};
 use crate::stack::network::{Embedding, Network};
-use crate::stack::persist::{KvBlobStore, SharedKvBlobStore};
 use crate::stack::rand::RngAdaptor;
 use crate::stack::wireless::{self, Gatt, GattTask};
 
@@ -164,17 +165,17 @@ where
 }
 
 /// A `Wireless` trait implementation for `openthread`'s Thread stack.
-pub struct EmbassyThread<'a, T, S, R> {
+pub struct EmbassyThread<'a, 'd, T, S, R> {
     driver: T,
     ieee_eui64: [u8; 8],
-    store: &'a SharedKvBlobStore<'a, S>,
+    store: &'a MatterSharedKvBlobStore<'d, S>,
     context: &'a OtNetContext,
     ble_context: &'a TroubleBtpGattContext,
     use_ble_random_addr: bool,
     rand: R,
 }
 
-impl<'a, T, S, R> EmbassyThread<'a, T, S, R>
+impl<'a, 'd, T, S, R> EmbassyThread<'a, 'd, T, S, R>
 where
     T: ThreadDriver,
     S: KvBlobStore,
@@ -185,7 +186,7 @@ where
         driver: T,
         rand: R,
         ieee_eui64: [u8; 8],
-        store: &'a SharedKvBlobStore<'a, S>,
+        store: &'a MatterSharedKvBlobStore<'d, S>,
         stack: &'a EmbassyThreadMatterStack<'a, B, E>,
         use_ble_random_addr: bool,
     ) -> Self
@@ -208,7 +209,7 @@ where
         driver: T,
         rand: R,
         ieee_eui64: [u8; 8],
-        store: &'a SharedKvBlobStore<'a, S>,
+        store: &'a MatterSharedKvBlobStore<'d, S>,
         context: &'a OtNetContext,
         ble_context: &'a TroubleBtpGattContext,
         use_ble_random_addr: bool,
@@ -225,7 +226,7 @@ where
     }
 }
 
-impl<T, S, R> wireless::Thread for EmbassyThread<'_, T, S, R>
+impl<T, S, R> wireless::Thread for EmbassyThread<'_, '_, T, S, R>
 where
     T: ThreadDriver,
     S: KvBlobStore,
@@ -247,7 +248,7 @@ where
     }
 }
 
-impl<T, S, R> wireless::ThreadCoex for EmbassyThread<'_, T, S, R>
+impl<T, S, R> wireless::ThreadCoex for EmbassyThread<'_, '_, T, S, R>
 where
     T: ThreadCoexDriver,
     S: KvBlobStore,
@@ -271,7 +272,7 @@ where
     }
 }
 
-impl<T, S, R> Gatt for EmbassyThread<'_, T, S, R>
+impl<T, S, R> Gatt for EmbassyThread<'_, '_, T, S, R>
 where
     T: BleDriver,
     S: KvBlobStore,
@@ -326,15 +327,15 @@ impl Embedding for OtNetContext {
     }
 }
 
-struct ThreadDriverTaskImpl<'a, A, S, C> {
+struct ThreadDriverTaskImpl<'a, 'd, A, S, C> {
     ieee_eui64: [u8; 8],
     rand: C,
-    store: &'a SharedKvBlobStore<'a, S>,
+    store: &'a MatterSharedKvBlobStore<'d, S>,
     context: &'a OtNetContext,
     task: A,
 }
 
-impl<A, S, C> ThreadDriverTask for ThreadDriverTaskImpl<'_, A, S, C>
+impl<A, S, C> ThreadDriverTask for ThreadDriverTaskImpl<'_, '_, A, S, C>
 where
     A: wireless::ThreadTask,
     S: KvBlobStore,
@@ -348,7 +349,7 @@ where
         let resources = &mut *resources;
 
         let persister = OtPersist::new(&mut resources.settings_buf, self.store);
-        persister.load().await?;
+        persister.load()?;
 
         let mut settings = persister.settings();
         let mut rand = RngAdaptor::new(self.rand);
@@ -390,17 +391,17 @@ where
     }
 }
 
-struct ThreadCoexDriverTaskImpl<'a, A, S, C> {
+struct ThreadCoexDriverTaskImpl<'a, 'd, A, S, C> {
     ieee_eui64: [u8; 8],
     rand: C,
-    store: &'a SharedKvBlobStore<'a, S>,
+    store: &'a MatterSharedKvBlobStore<'d, S>,
     context: &'a OtNetContext,
     ble_context: &'a TroubleBtpGattContext,
     task: A,
     use_ble_random_addr: bool,
 }
 
-impl<A, S, C> ThreadCoexDriverTask for ThreadCoexDriverTaskImpl<'_, A, S, C>
+impl<A, S, C> ThreadCoexDriverTask for ThreadCoexDriverTaskImpl<'_, '_, A, S, C>
 where
     A: wireless::ThreadCoexTask,
     S: KvBlobStore,
@@ -415,7 +416,7 @@ where
         let resources = &mut *resources;
 
         let persister = OtPersist::new(&mut resources.settings_buf, self.store);
-        persister.load().await?;
+        persister.load()?;
 
         let mut settings = persister.settings();
         let mut rand = RngAdaptor::new(self.rand);

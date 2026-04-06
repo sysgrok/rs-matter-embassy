@@ -1,6 +1,7 @@
 //! Network interface: `OtNetif` - a `Netif` trait implementation for `openthread`
 //! mDNS impl: `OtMdns` - an mDNS trait implementation for `openthread` using Thread SRP
 
+use core::borrow::BorrowMut;
 use core::fmt::Write;
 use core::future::poll_fn;
 
@@ -15,6 +16,7 @@ use openthread::{
 
 use rs_matter_stack::matter::crypto::Crypto;
 use rs_matter_stack::matter::dm::ChangeNotify;
+use rs_matter_stack::matter::persist::KvBlobStoreAccess;
 use rs_matter_stack::matter::transport::network::mdns::Service;
 use rs_matter_stack::matter::Matter;
 use rs_matter_stack::mdns::Mdns;
@@ -35,13 +37,13 @@ use crate::matter::dm::clusters::wifi_diag::WirelessDiag;
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
 use crate::matter::error::ErrorCode;
+use crate::matter::persist::{KvBlobStore, SharedKvBlobStore, VENDOR_KEYS_START};
 use crate::matter::transport::network::MAX_RX_PACKET_SIZE;
 use crate::matter::utils::init::zeroed;
 use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::storage::Vec;
 use crate::matter::utils::sync::blocking::raw::MatterRawMutex;
 use crate::matter::utils::sync::DynBase;
-use crate::stack::persist::{KvBlobStore, SharedKvBlobStore, VENDOR_KEYS_START};
 
 /// Re-export the `openthread` crate
 pub mod openthread {
@@ -429,12 +431,7 @@ impl<'d> OtMdns<'d> {
     }
 
     /// Run the `OtMdns` instance by listening to the mDNS services and registering them with the SRP server
-    pub async fn run<C: Crypto>(
-        &self,
-        matter: &Matter<'_>,
-        crypto: C,
-        notify: &dyn ChangeNotify,
-    ) -> Result<(), OtError> {
+    pub async fn run(&self, matter: &Matter<'_>, notify: &dyn ChangeNotify) -> Result<(), OtError> {
         loop {
             // TODO: Not very efficient to remove and re-add everything
 
@@ -484,35 +481,38 @@ impl<'d> OtMdns<'d> {
 
             info!("Registered SRP host {}", hostname);
 
-            unwrap!(matter.mdns_services(&crypto, notify, |matter_service| {
-                Service::call_with(
-                    &matter_service,
-                    matter.dev_det(),
-                    matter.port(),
-                    |service| {
-                        unwrap!(self.ot.srp_add_service(&SrpService {
-                            name: service.service_protocol,
-                            instance_name: service.name,
-                            port: service.port,
-                            subtype_labels: service.service_subtypes.iter().cloned(),
-                            txt_entries: service
-                                .txt_kvs
-                                .iter()
-                                .cloned()
-                                .filter(|(k, _)| !k.is_empty())
-                                .map(|(k, v)| (k, v.as_bytes())),
-                            priority: 0,
-                            weight: 0,
-                            lease_secs: 0,
-                            key_lease_secs: 0,
-                        })); // TODO
+            unwrap!(matter.mdns_services(
+                |e, c, a| notify.notify(e, c, a),
+                |matter_service| {
+                    Service::call_with(
+                        &matter_service,
+                        matter.dev_det(),
+                        matter.port(),
+                        |service| {
+                            unwrap!(self.ot.srp_add_service(&SrpService {
+                                name: service.service_protocol,
+                                instance_name: service.name,
+                                port: service.port,
+                                subtype_labels: service.service_subtypes.iter().cloned(),
+                                txt_entries: service
+                                    .txt_kvs
+                                    .iter()
+                                    .cloned()
+                                    .filter(|(k, _)| !k.is_empty())
+                                    .map(|(k, v)| (k, v.as_bytes())),
+                                priority: 0,
+                                weight: 0,
+                                lease_secs: 0,
+                                key_lease_secs: 0,
+                            })); // TODO
 
-                        info!("Added service {:?}", matter_service);
+                            info!("Added service {:?}", matter_service);
 
-                        Ok(())
-                    },
-                )
-            }));
+                            Ok(())
+                        },
+                    )
+                }
+            ));
 
             matter.wait_mdns().await;
         }
@@ -523,7 +523,7 @@ impl Mdns for OtMdns<'_> {
     async fn run<C, U>(
         &mut self,
         matter: &Matter<'_>,
-        crypto: C,
+        _crypto: C,
         notify: &dyn ChangeNotify,
         _udp: U,
         _mac: &[u8],
@@ -535,7 +535,7 @@ impl Mdns for OtMdns<'_> {
         C: Crypto,
         U: UdpBind,
     {
-        OtMdns::run(self, matter, crypto, notify)
+        OtMdns::run(self, matter, notify)
             .await
             .map_err(to_matter_err)
     }
@@ -550,21 +550,22 @@ const OT_SRP_ECDSA_KEY: u16 = VENDOR_KEYS_START;
 
 /// A struct for implementing persistance of `openthread` settings - volatitle and
 /// non-volatile (for selected keys)
-pub struct OtPersist<'a, 'd, S> {
+pub struct OtPersist<'a, 'd, S, T> {
     settings: SharedRamSettings<'d, MatterRawMutex, fn(RamSettingsChange) -> bool>,
-    store: &'a SharedKvBlobStore<'a, S>,
+    store: &'a SharedKvBlobStore<S, T>,
 }
 
-impl<'a, 'd, S> OtPersist<'a, 'd, S>
+impl<'a, 'd, S, T> OtPersist<'a, 'd, S, T>
 where
     S: KvBlobStore,
+    T: BorrowMut<[u8]>,
 {
     /// Create a new `OtPersist` instance
     ///
     /// # Arguments
     /// - `settings_buf`: A mutable reference to a buffer for storing `openthread` settings before they are persisted
     /// - `store`: A reference to the `KvBlobStore` instance used for persisting a subset of the settings to non-volatile storage
-    pub const fn new(settings_buf: &'d mut [u8], store: &'a SharedKvBlobStore<'a, S>) -> Self {
+    pub const fn new(settings_buf: &'d mut [u8], store: &'a SharedKvBlobStore<S, T>) -> Self {
         Self {
             settings: SharedRamSettings::new(RamSettings::new_with_signal_change(
                 settings_buf,
@@ -591,11 +592,9 @@ where
     }
 
     /// Load (a selected subset of) the settings from the `KvBlobStore` non-volatile storage
-    pub async fn load(&self) -> Result<(), Error> {
-        let (mut kv, mut buf) = self.store.get().await;
-
-        kv.load(OT_SRP_ECDSA_KEY, &mut buf, |data| {
-            if let Some(data) = data {
+    pub fn load(&self) -> Result<(), Error> {
+        self.store.access(|kv, buf| {
+            if let Some(data) = kv.load(OT_SRP_ECDSA_KEY, buf)? {
                 self.settings.with(|settings| {
                     let mut offset = 0;
 
@@ -609,20 +608,17 @@ where
 
                         offset += value.len();
                     }
-                })
+                });
             }
 
             Ok(())
         })
-        .await
     }
 
     /// Store (a selected subset of) the settings to the `KvBlobStore` non-volatile storage
-    pub async fn store(&self) -> Result<(), Error> {
-        let (mut kv, mut buf) = self.store.get().await;
-
-        kv.store(OT_SRP_ECDSA_KEY, &mut buf, |buf| {
-            self.settings.with(|settings| {
+    pub fn store(&self) -> Result<(), Error> {
+        self.store.access(|kv, buf| {
+            let offset = self.settings.with(|settings| {
                 let mut offset = 0;
 
                 for (key, value) in settings
@@ -638,10 +634,13 @@ where
                     offset += value.len();
                 }
 
-                Ok(offset)
-            })
+                offset
+            });
+
+            let (data, buf) = buf.split_at_mut(offset);
+
+            kv.store(OT_SRP_ECDSA_KEY, data, buf)
         })
-        .await
     }
 
     /// Run the `OtPersist` instance by waiting for changes in the settings and persisting them
@@ -652,7 +651,7 @@ where
         loop {
             wait_changed().await;
 
-            self.store().await?;
+            self.store()?;
         }
     }
 }
