@@ -35,11 +35,9 @@ required-features = ["thread"]
 harness = false
 
 [patch.crates-io]
-#rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
-rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "inband-persistence" }
+rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
 #rs-matter = { path = "../../../rs-matter/rs-matter" }
-#rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", branch = "next" }
-rs-matter-stack = { git = "https://github.com/ivmarkov/rs-matter-stack.git", branch = "inband-persistence" }
+rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", branch = "next" }
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
 openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
 #openthread = { path = "../../../openthread/openthread" }
