@@ -86,7 +86,7 @@ static RADIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 ///
 /// If - for your platform - this size is not enough, increase it until
 /// the program runs without panics during the stack initialization.
-const BUMP_SIZE: usize = 20500;
+const BUMP_SIZE: usize = 21320 + 4 + 2976;
 
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();
