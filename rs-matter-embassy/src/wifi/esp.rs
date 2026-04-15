@@ -102,6 +102,20 @@ impl NetCtl for EspWifiController<'_> {
 
         info!("Wifi connect request for SSID {}", ssid);
 
+        // If already connected, disconnect first to ensure a clean state.
+        // Calling connect_async() while already connected can hang forever
+        // because the ESP WiFi driver may not generate any StationConnected
+        // or StationDisconnected events, leaving the event subscriber loop
+        // waiting indefinitely.
+        if ctl.is_connected() {
+            info!("Wifi already connected, disconnecting first");
+            let _ = ctl.disconnect_async().await;
+
+            self.1.lock(|connected| {
+                connected.set(false);
+            });
+        }
+
         ctl.set_config(&Config::Station(
             StationConfig::default()
                 .with_ssid(ssid)
