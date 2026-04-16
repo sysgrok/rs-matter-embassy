@@ -15,7 +15,6 @@ use openthread::{
 };
 
 use rs_matter_stack::matter::crypto::Crypto;
-use rs_matter_stack::matter::dm::ChangeNotify;
 use rs_matter_stack::matter::persist::KvBlobStoreAccess;
 use rs_matter_stack::matter::transport::network::mdns::Service;
 use rs_matter_stack::matter::Matter;
@@ -431,7 +430,7 @@ impl<'d> OtMdns<'d> {
     }
 
     /// Run the `OtMdns` instance by listening to the mDNS services and registering them with the SRP server
-    pub async fn run(&self, matter: &Matter<'_>, notify: &dyn ChangeNotify) -> Result<(), OtError> {
+    pub async fn run(&self, matter: &Matter<'_>) -> Result<(), OtError> {
         loop {
             // TODO: Not very efficient to remove and re-add everything
 
@@ -481,38 +480,35 @@ impl<'d> OtMdns<'d> {
 
             info!("Registered SRP host {}", hostname);
 
-            unwrap!(matter.mdns_services(
-                |e, c, a| notify.notify(e, c, a),
-                |matter_service| {
-                    Service::call_with(
-                        &matter_service,
-                        matter.dev_det(),
-                        matter.port(),
-                        |service| {
-                            unwrap!(self.ot.srp_add_service(&SrpService {
-                                name: service.service_protocol,
-                                instance_name: service.name,
-                                port: service.port,
-                                subtype_labels: service.service_subtypes.iter().cloned(),
-                                txt_entries: service
-                                    .txt_kvs
-                                    .iter()
-                                    .cloned()
-                                    .filter(|(k, _)| !k.is_empty())
-                                    .map(|(k, v)| (k, v.as_bytes())),
-                                priority: 0,
-                                weight: 0,
-                                lease_secs: 0,
-                                key_lease_secs: 0,
-                            })); // TODO
+            unwrap!(matter.mdns_services(|matter_service| {
+                Service::call_with(
+                    &matter_service,
+                    matter.dev_det(),
+                    matter.port(),
+                    |service| {
+                        unwrap!(self.ot.srp_add_service(&SrpService {
+                            name: service.service_protocol,
+                            instance_name: service.name,
+                            port: service.port,
+                            subtype_labels: service.service_subtypes.iter().cloned(),
+                            txt_entries: service
+                                .txt_kvs
+                                .iter()
+                                .cloned()
+                                .filter(|(k, _)| !k.is_empty())
+                                .map(|(k, v)| (k, v.as_bytes())),
+                            priority: 0,
+                            weight: 0,
+                            lease_secs: 0,
+                            key_lease_secs: 0,
+                        })); // TODO
 
-                            info!("Added service {:?}", matter_service);
+                        info!("Added service {:?}", matter_service);
 
-                            Ok(())
-                        },
-                    )
-                }
-            ));
+                        Ok(())
+                    },
+                )
+            }));
 
             matter.wait_mdns().await;
         }
@@ -524,7 +520,6 @@ impl Mdns for OtMdns<'_> {
         &mut self,
         matter: &Matter<'_>,
         _crypto: C,
-        notify: &dyn ChangeNotify,
         _udp: U,
         _mac: &[u8],
         _ipv4: core::net::Ipv4Addr,
@@ -535,9 +530,7 @@ impl Mdns for OtMdns<'_> {
         C: Crypto,
         U: UdpBind,
     {
-        OtMdns::run(self, matter, notify)
-            .await
-            .map_err(to_matter_err)
+        OtMdns::run(self, matter).await.map_err(to_matter_err)
     }
 }
 
