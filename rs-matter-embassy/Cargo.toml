@@ -32,6 +32,15 @@ max-subscriptions-3 = ["rs-matter-stack/max-subscriptions-3"] # default
 max-subscriptions-2 = ["rs-matter-stack/max-subscriptions-2"]
 max-subscriptions-1 = ["rs-matter-stack/max-subscriptions-1"]
 
+# Events ring-bffers' size
+events-ringbuf-size-0 = ["rs-matter-stack/events-ringbuf-size-0"] # default, i.e. events will not be emitted
+events-ringbuf-size-64 = ["rs-matter-stack/events-ringbuf-size-64"]
+events-ringbuf-size-128 = ["rs-matter-stack/events-ringbuf-size-128"]
+events-ringbuf-size-256 = ["rs-matter-stack/events-ringbuf-size-256"]
+events-ringbuf-size-512 = ["rs-matter-stack/events-ringbuf-size-512"]
+events-ringbuf-size-1024 = ["rs-matter-stack/events-ringbuf-size-1024"]
+events-ringbuf-size-2048 = ["rs-matter-stack/events-ringbuf-size-2048"]
+
 # Number of IM buffers
 max-im-buffers-64 = ["rs-matter-stack/max-im-buffers-64"]
 max-im-buffers-32 = ["rs-matter-stack/max-im-buffers-32"]

@@ -213,7 +213,6 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 
 /// The Matter Light device Node
 const NODE: Node = Node {
-    id: 0,
     endpoints: &[
         EmbassyEthMatterStack::<0, ()>::root_endpoint(),
         Endpoint {
