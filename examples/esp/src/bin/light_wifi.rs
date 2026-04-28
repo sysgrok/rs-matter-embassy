@@ -29,8 +29,8 @@ use log::info;
 use rs_matter_embassy::epoch::epoch;
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
-use rs_matter_embassy::matter::dm::clusters::on_off::test::TestOnOffDeviceLogic;
-use rs_matter_embassy::matter::dm::clusters::on_off::{self, OnOffHooks};
+use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
+use rs_matter_embassy::matter::dm::clusters::app::on_off::{self, OnOffHooks};
 use rs_matter_embassy::matter::dm::devices::test::{
     DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
 };
