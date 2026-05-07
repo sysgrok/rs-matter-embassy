@@ -16,7 +16,6 @@ use openthread::{
 
 use rs_matter_stack::matter::crypto::Crypto;
 use rs_matter_stack::matter::persist::KvBlobStoreAccess;
-use rs_matter_stack::matter::transport::network::mdns::Service;
 use rs_matter_stack::matter::Matter;
 use rs_matter_stack::mdns::Mdns;
 use rs_matter_stack::nal::noop::NoopNet;
@@ -58,6 +57,7 @@ const OT_MAX_SRP_RECORDS: usize = 4;
 const OT_SRP_BUF_SZ: usize = 512;
 
 const OT_SETTINGS_BUF_SZ: usize = 1024;
+const OT_MDNS_BUF_SZ: usize = 256;
 
 /// A struct that holds all the resources required by the OpenThread stack,
 /// as used by Matter.
@@ -70,6 +70,8 @@ pub struct OtMatterResources {
     pub srp: OtSrpResources<OT_MAX_SRP_RECORDS, OT_SRP_BUF_SZ>,
     /// The OpenThread `RamSettings` buffer
     pub settings_buf: [u8; OT_SETTINGS_BUF_SZ],
+    /// A small buffer for mDNS operations
+    pub mdns_buf: [u8; OT_MDNS_BUF_SZ],
 }
 
 impl OtMatterResources {
@@ -80,6 +82,7 @@ impl OtMatterResources {
             udp: OtUdpResources::new(),
             srp: OtSrpResources::new(),
             settings_buf: [0; OT_SETTINGS_BUF_SZ],
+            mdns_buf: [0; OT_MDNS_BUF_SZ],
         }
     }
 
@@ -90,6 +93,7 @@ impl OtMatterResources {
             udp: OtUdpResources::new(),
             srp: OtSrpResources::new(),
             settings_buf <- zeroed(),
+            mdns_buf <- zeroed(),
         })
     }
 }
@@ -419,18 +423,19 @@ impl ThreadDiag for OtNetCtl<'_> {
 }
 
 /// An mDNS trait implementation for `openthread` using Thread SRP
-pub struct OtMdns<'d> {
+pub struct OtMdns<'a, 'd> {
     ot: OpenThread<'d>,
+    buf: &'a mut [u8],
 }
 
-impl<'d> OtMdns<'d> {
+impl<'a, 'd> OtMdns<'a, 'd> {
     /// Create a new `OtMdns` instance
-    pub const fn new(ot: OpenThread<'d>) -> Self {
-        Self { ot }
+    pub const fn new(ot: OpenThread<'d>, buf: &'a mut [u8]) -> Self {
+        Self { ot, buf }
     }
 
     /// Run the `OtMdns` instance by listening to the mDNS services and registering them with the SRP server
-    pub async fn run(&self, matter: &Matter<'_>) -> Result<(), OtError> {
+    pub async fn run(&mut self, matter: &Matter<'_>) -> Result<(), OtError> {
         loop {
             // TODO: Not very efficient to remove and re-add everything
 
@@ -480,34 +485,34 @@ impl<'d> OtMdns<'d> {
 
             info!("Registered SRP host {}", hostname);
 
+            let buf = &mut *self.buf;
+
             unwrap!(matter.mdns_services(|matter_service| {
-                Service::call_with(
-                    &matter_service,
-                    matter.dev_det(),
-                    matter.port(),
-                    |service| {
-                        unwrap!(self.ot.srp_add_service(&SrpService {
-                            name: service.service_protocol,
-                            instance_name: service.name,
-                            port: service.port,
-                            subtype_labels: service.service_subtypes.iter().cloned(),
-                            txt_entries: service
-                                .txt_kvs
-                                .iter()
-                                .cloned()
-                                .filter(|(k, _)| !k.is_empty())
-                                .map(|(k, v)| (k, v.as_bytes())),
-                            priority: 0,
-                            weight: 0,
-                            lease_secs: 0,
-                            key_lease_secs: 0,
-                        })); // TODO
+                let (service, _) = matter_service.service(matter.dev_det(), matter.port(), buf)?;
+                let service = core::mem::ManuallyDrop::new(service);
 
-                        info!("Added service {:?}", matter_service);
+                // TODO:
+                // Remove `ManuallyDrop` by removing the `'a` lifetime from the signature of the function below:
+                // pub fn srp_add_service<'a, SI, TI>(&self, service: &'a SrpService<'a, SI, TI>)
+                //                                                      ^- remove this lifetime
 
-                        Ok(())
-                    },
-                )
+                let srp_service = core::mem::ManuallyDrop::new(SrpService {
+                    name: service.service_protocol,
+                    instance_name: service.name,
+                    port: service.port,
+                    subtype_labels: service.service_subtypes.clone(),
+                    txt_entries: service.txt_kvs.clone().map(|(k, v)| (k, v.as_bytes())),
+                    priority: 0,
+                    weight: 0,
+                    lease_secs: 0,
+                    key_lease_secs: 0,
+                });
+
+                unwrap!(self.ot.srp_add_service(&srp_service)); // TODO
+
+                info!("Added service {:?}", matter_service);
+
+                Ok(())
             }));
 
             matter.wait_mdns().await;
@@ -515,7 +520,7 @@ impl<'d> OtMdns<'d> {
     }
 }
 
-impl Mdns for OtMdns<'_> {
+impl Mdns for OtMdns<'_, '_> {
     async fn run<C, U>(
         &mut self,
         matter: &Matter<'_>,

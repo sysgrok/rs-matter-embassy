@@ -11,11 +11,11 @@ use crate::enet::{
 use crate::matter::crypto::RngCore;
 use crate::matter::dm::clusters::gen_diag::InterfaceTypeEnum;
 use crate::matter::error::Error;
+use crate::matter::transport::network::mdns::builtin::BuiltinMdnsResponder;
 use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::select::Coalesce;
 use crate::matter::utils::sync::IfMutex;
 use crate::stack::eth::{Eth, Ethernet, EthernetTask};
-use crate::stack::mdns::BuiltinMdns;
 use crate::stack::network::{Embedding, Network};
 use crate::stack::MatterStack;
 
@@ -201,7 +201,10 @@ where
                 D: embassy_net::driver::Driver,
             {
                 let mut resources = self.context.resources.lock().await;
+                let mut mdns = self.context.mdns.lock().await;
+
                 let resources = &mut *resources;
+                let mdns = &mut *mdns;
                 let buffers = &self.context.buffers;
 
                 let mut seed = [0; core::mem::size_of::<u64>()];
@@ -213,7 +216,7 @@ where
                 let net_stack = EnetStack::new(stack, buffers);
                 let netif = EnetNetif::new(stack, InterfaceTypeEnum::Ethernet);
 
-                let mut main = pin!(self.task.run(&net_stack, &netif, BuiltinMdns));
+                let mut main = pin!(self.task.run(&net_stack, &netif, mdns));
                 let mut run = pin!(async {
                     runner.run().await;
                     #[allow(unreachable_code)]
@@ -238,6 +241,7 @@ where
 pub struct EmbassyNetContext {
     pub(crate) buffers: EnetMatterUdpBuffers,
     pub(crate) resources: IfMutex<EnetMatterStackResources>,
+    pub(crate) mdns: IfMutex<BuiltinMdnsResponder>,
 }
 
 impl EmbassyNetContext {
@@ -246,6 +250,7 @@ impl EmbassyNetContext {
         Self {
             buffers: EnetMatterUdpBuffers::new(),
             resources: IfMutex::new(EnetMatterStackResources::new()),
+            mdns: IfMutex::new(BuiltinMdnsResponder::new()),
         }
     }
 
@@ -256,6 +261,7 @@ impl EmbassyNetContext {
             buffers: EnetMatterUdpBuffers::new(),
             // Note: below will break if `HostResources` stops being a bunch of `MaybeUninit`s
             resources <- IfMutex::init(unsafe { MaybeUninit::<EnetMatterStackResources>::uninit().assume_init() }),
+            mdns <- IfMutex::init(BuiltinMdnsResponder::init()),
         })
     }
 }
