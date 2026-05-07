@@ -2,8 +2,6 @@ use core::pin::pin;
 
 use embassy_futures::select::select;
 
-use rs_matter_stack::mdns::BuiltinMdns;
-
 use crate::ble::{ControllerRef, TroubleBtpGattContext, TroubleBtpGattPeripheral};
 use crate::enet::{create_enet_stack, EnetNetif, EnetStack};
 use crate::eth::EmbassyNetContext;
@@ -294,7 +292,10 @@ where
         C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
     {
         let mut resources = self.context.resources.lock().await;
+        let mut mdns = self.context.mdns.lock().await;
+
         let resources = &mut *resources;
+        let mdns = &mut *mdns;
         let buffers = &self.context.buffers;
 
         let mut seed = [0; core::mem::size_of::<u64>()];
@@ -305,7 +306,7 @@ where
         let net_stack = EnetStack::new(stack, buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
 
-        let mut main = pin!(self.task.run(&net_stack, &netif, &net_ctl, BuiltinMdns));
+        let mut main = pin!(self.task.run(&net_stack, &netif, &net_ctl, mdns));
         let mut run = pin!(async {
             runner.run().await;
             #[allow(unreachable_code)]
@@ -336,7 +337,10 @@ where
         B: trouble_host::Controller,
     {
         let mut resources = self.context.resources.lock().await;
+        let mut mdns = self.context.mdns.lock().await;
+
         let resources = &mut *resources;
+        let mdns = &mut *mdns;
         let buffers = &self.context.buffers;
 
         let mut seed = [0; core::mem::size_of::<u64>()];
@@ -353,10 +357,9 @@ where
             self.ble_context,
         );
 
-        let mut main =
-            pin!(self
-                .task
-                .run(&net_stack, &netif, &net_ctl, BuiltinMdns, &mut peripheral));
+        let mut main = pin!(self
+            .task
+            .run(&net_stack, &netif, &net_ctl, mdns, &mut peripheral));
         let mut run = pin!(async {
             runner.run().await;
             #[allow(unreachable_code)]

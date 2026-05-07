@@ -206,7 +206,7 @@ async fn main(_s: Spawner) {
         // The Matter stack needs access to the netif so as to detect network going up/down
         OtNetif::new(ot.clone()),
         // The Matter stack needs an mDNS instance to run
-        OtMdns::new(ot.clone()),
+        OtMdns::new(ot.clone(), &mut ot_resources.mdns_buf),
         // The crypto provider
         &crypto,
         // Our `AsyncHandler` + `AsyncMetadata` impl

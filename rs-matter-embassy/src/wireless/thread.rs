@@ -367,7 +367,7 @@ where
         let net_ctl = OtNetCtl::new(ot.clone());
         let net_stack = OtNetStack::new(ot.clone());
         let netif = OtNetif::new(ot.clone());
-        let mut mdns = OtMdns::new(ot.clone());
+        let mut mdns = OtMdns::new(ot.clone(), &mut resources.mdns_buf);
 
         let mut main = pin!(self.task.run(&net_stack, &netif, &net_ctl, &mut mdns));
         let mut radio = pin!(async {
@@ -434,7 +434,7 @@ where
         let net_ctl = OtNetCtl::new(ot.clone());
         let net_stack = OtNetStack::new(ot.clone());
         let netif = OtNetif::new(ot.clone());
-        let mut mdns = OtMdns::new(ot.clone());
+        let mut mdns = OtMdns::new(ot.clone(), &mut resources.mdns_buf);
         let mut peripheral = TroubleBtpGattPeripheral::new(
             ble_ctl,
             self.use_ble_random_addr.then_some(self.rand),
