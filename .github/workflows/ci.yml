@@ -32,7 +32,7 @@ jobs:
         run: rustup target add thumbv6m-none-eabi
 
       - name: Install libdbus
-        run: sudo apt-get install -y libdbus-1-dev
+        run: sudo apt-get update -y; sudo apt-get install -y libdbus-1-dev
 
       - name: Install libavahi-client
         run: sudo apt-get install -y libavahi-client-dev
