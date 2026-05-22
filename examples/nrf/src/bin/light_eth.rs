@@ -27,7 +27,6 @@ use embedded_alloc::LlffHeap;
 
 use defmt::{info, unwrap};
 
-use rs_matter_embassy::epoch::epoch;
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, RngCore};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::app::on_off::{self, OnOffHooks};
@@ -146,7 +145,6 @@ async fn main(_s: Spawner) {
             discriminator,
         },
         &TEST_DEV_ATT,
-        epoch,
     ));
 
     let (radio_proxy, radio_runner) = ProxyRadio::<NRF_RADIO_CAPS>::new(mk_static!(

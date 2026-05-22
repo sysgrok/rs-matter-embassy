@@ -26,6 +26,9 @@ You need one of:
 * **Apple**:
   * Apple TV or other Apple Matter Controller
   * An iPhone with the Apple Home app
+* **Samsung**
+  * A recent TV hich can act as a SmartThings controller, or the Samsung / Aeotec SmarthThings standalone hub
+  * The SmartThings app on your phone
 
 Once you build and flash the firmware, follow the instructions in the phone app.
 
