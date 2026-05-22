@@ -25,7 +25,6 @@ use esp_radio::ieee802154::Ieee802154;
 
 use log::info;
 
-use rs_matter_embassy::epoch::epoch;
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, RngCore};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::app::on_off::{self, OnOffHooks};
@@ -72,7 +71,7 @@ macro_rules! mk_static {
 ///
 /// If - for your platform - this size is not enough, increase it until
 /// the program runs without panics during the stack initialization.
-const BUMP_SIZE: usize = 18500;
+const BUMP_SIZE: usize = 20000;
 
 /// Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
 #[cfg(not(feature = "esp32"))]
@@ -133,7 +132,6 @@ async fn main(_s: Spawner) {
             discriminator,
         },
         &TEST_DEV_ATT,
-        epoch,
     ));
 
     let mut ot_rng = RngAdaptor::new(crypto.rand().unwrap());

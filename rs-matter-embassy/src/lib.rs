@@ -14,7 +14,6 @@ pub(crate) mod fmt;
 pub mod ble;
 #[cfg(feature = "embassy-net")]
 pub mod enet;
-pub mod epoch;
 pub mod error;
 #[cfg(feature = "embassy-net")]
 pub mod eth;

@@ -31,7 +31,6 @@ use embedded_alloc::LlffHeap;
 
 use embedded_hal_bus::spi::ExclusiveDevice;
 
-use rs_matter_embassy::epoch::epoch;
 use rs_matter_embassy::eth::{EmbassyEthMatterStack, EmbassyEthernet, PreexistingEthDriver};
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
@@ -127,7 +126,7 @@ async fn main(spawner: Spawner) {
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
     let stack = mk_static!(EmbassyEthMatterStack<BUMP_SIZE, ()>).init_with(
-        EmbassyEthMatterStack::init(&TEST_DEV_DET, TEST_DEV_COMM, &TEST_DEV_ATT, epoch),
+        EmbassyEthMatterStack::init(&TEST_DEV_DET, TEST_DEV_COMM, &TEST_DEV_ATT),
     );
 
     // Create the crypto provider, using the ROSC RNG peripheral (which is a TRNG) as the source of randomness for a reseeding CSPRNG.
