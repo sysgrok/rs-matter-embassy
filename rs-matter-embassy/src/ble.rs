@@ -186,7 +186,10 @@ where
             let address: [u8; 6] = loop {
                 let addr = rand.next_u64() & 0x3f_ff_ff_ff_ff_ff;
                 if addr != 0 && addr != 0x3f_ff_ff_ff_ff_ff {
-                    break (addr | 0xc0_00_00_00_00_00).to_be_bytes()[2..]
+                    // A BLE BD_ADDR is little-endian, so its most-significant byte -- the
+                    // one that must carry the 0b11 static-random type bits -- is the last of
+                    // the six. Emit little-endian so the 0xc0 lands on address[5].
+                    break (addr | 0xc0_00_00_00_00_00).to_le_bytes()[..6]
                         .try_into()
                         .unwrap();
                 }
