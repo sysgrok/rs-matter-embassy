@@ -40,7 +40,7 @@ rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
 rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", branch = "next" }
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
 #openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
-openthread = { git = "https://github.com/esp-rs/openthread.git", rev = "f16a2d662e4f03465b1962ffac1b432b20a44134" }
+openthread = { git = "https://github.com/esp-rs/openthread.git", branch = "fix-native-lib" }
 #openthread = { path = "../../../openthread/openthread" }
 esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
 esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }

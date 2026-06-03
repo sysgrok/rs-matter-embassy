@@ -34,7 +34,7 @@ rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
 rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", branch = "next" }
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
 #openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
-openthread = { git = "https://github.com/esp-rs/openthread.git", rev = "f16a2d662e4f03465b1962ffac1b432b20a44134" }
+openthread = { git = "https://github.com/esp-rs/openthread.git", branch = "fix-native-lib" }
 #openthread = { version = "0.1", path = "../../../openthread/openthread" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "43df6b8b0affeacd9cb4094a3ab4f81576554887" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "43df6b8b0affeacd9cb4094a3ab4f81576554887" }
