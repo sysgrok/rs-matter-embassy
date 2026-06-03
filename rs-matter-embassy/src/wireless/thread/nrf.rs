@@ -13,7 +13,7 @@ use embassy_nrf::peripherals::{
 use embassy_nrf::radio::InterruptHandler;
 use embassy_nrf::Peri;
 
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync_07::blocking_mutex::raw::CriticalSectionRawMutex;
 
 pub use nrf_802154::{Egu0InterruptHandler, LpTimerInterruptHandler};
 
@@ -98,12 +98,14 @@ impl Handler<interrupt::typelevel::CLOCK_POWER> for NrfThreadClockInterruptHandl
     }
 }
 
+#[derive(Copy, Clone)]
 struct NrfThreadRustRadioInterrupts;
 unsafe impl Binding<<RADIO as Ieee802154Peripheral>::Interrupt, InterruptHandler<RADIO>>
     for NrfThreadRustRadioInterrupts
 {
 }
 
+#[derive(Copy, Clone)]
 struct NrfBleControllerInterrupts;
 unsafe impl<T> Binding<T, NrfBleLowPrioInterruptHandler> for NrfBleControllerInterrupts where
     T: interrupt::typelevel::Interrupt
@@ -126,6 +128,7 @@ unsafe impl Binding<interrupt::typelevel::CLOCK_POWER, NrfBleClockInterruptHandl
 {
 }
 
+#[derive(Copy, Clone)]
 struct NrfThreadMpslRadioInterrupts;
 unsafe impl Binding<interrupt::typelevel::RTC2, LpTimerInterruptHandler>
     for NrfThreadMpslRadioInterrupts

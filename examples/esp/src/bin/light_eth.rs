@@ -43,6 +43,8 @@ use rs_matter_embassy::matter::{clusters, devices};
 use rs_matter_embassy::stack::rand::reseeding_csprng;
 use rs_matter_embassy::stack::utils::futures::IntoFaillble;
 
+use tinyrlibc as _;
+
 extern crate alloc;
 
 macro_rules! mk_static {
@@ -113,9 +115,17 @@ async fn main(_s: Spawner) {
     );
 
     // Configure and start the Wifi first
+    let station_config = Config::Station(
+        StationConfig::default()
+            .with_ssid(WIFI_SSID)
+            .with_password(WIFI_PASS.into()),
+    );
     let wifi = peripherals.WIFI;
-    let (controller, wifi_interface) =
-        esp_radio::wifi::new(wifi, esp_radio::wifi::ControllerConfig::default()).unwrap();
+    let (controller, wifi_interface) = esp_radio::wifi::new(
+        wifi,
+        esp_radio::wifi::ControllerConfig::default().with_initial_config(station_config),
+    )
+    .unwrap();
 
     // Create the crypto provider, using the `esp-hal` TRNG as the source of randomness for a reseeding CSPRNG.
     let crypto = default_crypto(
@@ -187,6 +197,7 @@ async fn main(_s: Spawner) {
 
 async fn connection(mut controller: WifiController<'_>) {
     info!("start connection task");
+
     loop {
         if controller.is_connected() {
             // wait until we're no longer connected
@@ -195,15 +206,6 @@ async fn connection(mut controller: WifiController<'_>) {
                 .await
                 .unwrap();
             embassy_time::Timer::after(embassy_time::Duration::from_millis(5000)).await
-        }
-        if !controller.is_started() {
-            info!("Starting wifi");
-            let client_config = Config::Station(
-                StationConfig::default()
-                    .with_ssid(WIFI_SSID)
-                    .with_password(WIFI_PASS.into()),
-            );
-            controller.set_config(&client_config).unwrap();
         }
         info!("About to connect...");
 

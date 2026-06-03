@@ -54,6 +54,8 @@ use rs_matter_embassy::stack::rand::reseeding_csprng;
 use rs_matter_embassy::wireless::esp::EspWifiDriver;
 use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiMatterStack};
 
+use tinyrlibc as _;
+
 extern crate alloc;
 
 macro_rules! mk_static {

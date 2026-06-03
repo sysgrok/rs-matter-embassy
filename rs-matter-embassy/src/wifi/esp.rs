@@ -43,12 +43,10 @@ impl NetCtl for EspWifiController<'_> {
 
         let mut ctl = self.0.lock().await;
 
-        if !ctl.is_started() {
-            // Start Wifi in client mode for scanning
-            ctl.set_config(&Config::Station(StationConfig::default()))
-                .map_err(to_ctl_err)?;
-            info!("Wifi configuration updated for scanning");
-        }
+        // Start Wifi in client mode for scanning
+        ctl.set_config(&Config::Station(StationConfig::default()))
+            .map_err(to_ctl_err)?;
+        info!("Wifi configuration updated for scanning");
 
         let mut scan_config = ScanConfig::default();
         if let Some(network) = network {

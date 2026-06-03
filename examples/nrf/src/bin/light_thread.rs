@@ -175,9 +175,9 @@ async fn main(_s: Spawner) {
     // The NRF radio needs to run in a high priority executor
     // because it is lacking hardware MAC-filtering and ACK caps,
     // hence these are emulated in software, so low latency is crucial
-    unwrap!(RADIO_EXECUTOR
+    RADIO_EXECUTOR
         .start(interrupt::EGU1_SWI1)
-        .spawn(run_radio(thread_radio_runner)));
+        .spawn(unwrap!(run_radio(thread_radio_runner)));
 
     // Our "light" on-off cluster.
     // It will toggle the light state every 5 seconds

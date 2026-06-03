@@ -40,9 +40,9 @@ embassy-executor = { version = "0.10", default-features = false, features = ["pl
 embassy-time = { version = "0.5", default-features = false, features = ["defmt", "defmt-timestamp-uptime-ms"] }
 embassy-rp = { version = "0.10", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
 embassy-futures = "0.1.2"
-embassy-sync = { version = "0.7", features = ["defmt"] }
-defmt = "0.3"
-embedded-alloc = "0.6"
+embassy-sync = { version = "0.8", features = ["defmt"] }
+defmt = "1"
+embedded-alloc = "0.7"
 rs-matter-embassy = { path = "../../rs-matter-embassy", features = ["embassy-net", "rp", "defmt"] }
 
 # Wireless examples
