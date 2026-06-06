@@ -128,6 +128,11 @@ impl<'d> RpWifiDriver<'d> {
 }
 
 impl super::WifiDriver for RpWifiDriver<'_> {
+    type NetCtl<'a>
+        = crate::wifi::rp::Cyw43WifiController<'a>
+    where
+        Self: 'a;
+
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
         A: super::WifiDriverTask,
