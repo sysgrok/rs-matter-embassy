@@ -177,11 +177,13 @@ mbedtls = ["rs-matter-stack/mbedtls"]
 
 [dependencies]
 log = { version = "0.4", default-features = false, optional = true }
-defmt = { version = "0.3", optional = true, features = ["ip_in_core"] }
-heapless = "0.8"
+defmt = { version = "1", optional = true, features = ["ip_in_core"] }
+heapless = "0.9"
+heapless_08 = { package = "heapless", version = "0.8" } # For embassy-net 0.8
 enumset = { version = "1", default-features = false }
 embassy-futures = "0.1"
-embassy-sync = "0.7"
+embassy-sync = "0.8"
+embassy-sync-07 = { package = "embassy-sync", version = "0.7" } # For trouble-host, until its next release fixes the e-sync re-export issues
 embassy-time = "0.5"
 embedded-io = "0.7"
 scopeguard = { version = "1", default-features = false }
@@ -203,8 +205,8 @@ openthread = { version = "0.1", optional = true, features = ["udp", "srp", "edge
 rand_core = "0.9"
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the `esp32*` chips family
-esp-radio = { version = "0.17", optional = true, features = ["ble"] }
-esp-hal = { version = "1", optional = true, features = ["unstable"] }
+esp-radio = { version = "0.18", optional = true, features = ["ble"] }
+esp-hal = { version = "~1.1", optional = true, features = ["unstable"] }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the RPi Pico W MCU
 cyw43 = { version = "0.7", optional = true, features = ["firmware-logs", "bluetooth"] }
@@ -213,7 +215,7 @@ embassy-rp = { version = "0.10", optional = true, features = ["unstable-pac", "r
 embassy-net-driver-channel = { version = "0.4", optional = true }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for Nordic silicon
-embassy-nrf = { version = "0.9", optional = true, features = ["time-driver-rtc1", "time", "nrf52840"], default-features = false }
+embassy-nrf = { version = "0.10", optional = true, features = ["time-driver-rtc1", "time", "nrf52840"], default-features = false }
 nrf-sdc = { version = "0.4", default-features = false, optional = true, features = ["peripheral", "nrf52840"] }
 nrf-mpsl = { version = "0.3", default-features = false, optional = true, features = ["nrf52840", "critical-section-impl"] }
 nrf-802154 = { version = "0.1", default-features = false, optional = true, features = ["nrf52840", "openthread"] }

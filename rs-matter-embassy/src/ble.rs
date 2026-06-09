@@ -15,6 +15,7 @@ use bt_hci::data::{AclPacket, IsoPacket, SyncPacket};
 use bt_hci::ControllerToHostPacket;
 
 use embassy_futures::select::select;
+use embassy_sync_07 as embassy_sync;
 
 use embedded_io::ErrorType;
 

@@ -41,15 +41,6 @@ rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", bran
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
 openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
 #openthread = { path = "../../../openthread/openthread" }
-esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
-esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
-esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
-esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
-esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
-esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
-esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
-esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
-esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "e156b5453a8adc123b7a8b6aa08e0698ec87dfe8" }
 #esp-radio = { path = "../../../esp-hal/esp-radio" }
 #esp-backtrace = { path = "../../../esp-hal/esp-backtrace" }
 #esp-hal = { path = "../../../esp-hal/esp-hal" }
@@ -84,21 +75,21 @@ thread = ["rs-matter-embassy/openthread"]
 
 [dependencies]
 log = "0.4"
-embassy-executor = "0.9"
-embassy-embedded-hal = "0.3"
-esp-backtrace = { version = "0.18.1", features = ["panic-handler", "println"] }
-esp-hal = { version = "1", features = ["log-04", "unstable", "exception-handler"] }
-esp-rtos = { version = "0.2", features = ["esp-radio", "embassy"] }
-esp-alloc = { version = "0.9" }
-esp-println = { version = "0.16", features = ["log-04"] }
-esp-radio = { version = "0.17", features = ["ble", "log-04", "unstable"] }
-esp-storage = "0.8"
-esp-bootloader-esp-idf = { version = "0.4", features = ["log-04"] }
-esp-metadata-generated = "0.3"
-rs-matter-embassy = { path = "../../rs-matter-embassy", features = ["esp", "log"] }
-tinyrlibc = { version = "0.5", default-features = false, features = ["utoa", "strtoul"] }
+embassy-executor = "0.10"
+embassy-embedded-hal = "0.6"
+esp-backtrace = { version = "0.19", features = ["panic-handler", "println"] }
+esp-hal = { version = "~1.1", features = ["log-04", "unstable", "exception-handler"] }
+esp-rtos = { version = "0.3", features = ["esp-radio", "embassy"] }
+esp-alloc = { version = "0.10" }
+esp-println = { version = "0.17", features = ["log-04"] }
+esp-radio = { version = "0.18", features = ["ble", "log-04", "unstable"] }
+esp-storage = "0.9"
+esp-bootloader-esp-idf = { version = "0.5", features = ["log-04"] }
+esp-metadata-generated = "0.4"
+rs-matter-embassy = { path = "../../rs-matter-embassy", features = ["esp", "log", "mbedtls"] }
+tinyrlibc = { version = "0.5", default-features = false, features = ["memchr", "utoa", "strtoul"] }
 embassy-futures = "0.1"
 embassy-time = "0.5"
-embassy-sync = "0.7"
+embassy-sync = "0.8"
 static_cell = "2"
 portable-atomic = "1"

@@ -173,7 +173,7 @@ pub fn create_enet_config<D: Driver>(driver: &D) -> Config {
     config.ipv6 = ConfigV6::Static(StaticConfigV6 {
         address: Ipv6Cidr::new(create_link_local_ipv6(&mac), 10),
         gateway: None,
-        dns_servers: heapless::Vec::new(),
+        dns_servers: heapless_08::Vec::new(),
     });
 
     config
