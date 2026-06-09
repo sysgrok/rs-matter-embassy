@@ -232,6 +232,17 @@ where
     S: KvBlobStore,
     R: CryptoRngCore + Copy,
 {
+    // The Thread controller this driver produces. The operational task receives
+    // `&OtNetCtl` (the driver passes `&net_ctl`), so the chain net-ctl type — and
+    // hence this associated type — is `&'a OtNetCtl`. Naming it here lets the
+    // commissioning and operational handler chains share one `WirelessNetCtl`
+    // type (single monomorphization). `&OtNetCtl` satisfies the bounds via the
+    // blanket `impl Trait for &T` impls.
+    type NetCtl<'a>
+        = &'a OtNetCtl<'a>
+    where
+        Self: 'a;
+
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
         A: wireless::ThreadTask,

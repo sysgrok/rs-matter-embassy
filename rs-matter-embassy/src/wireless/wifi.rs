@@ -80,6 +80,13 @@ where
 
 /// A trait for running a task within a context where the Wifi radio is initialized and operable
 pub trait WifiDriver {
+    /// The concrete Wifi network controller type this driver produces. Surfaced
+    /// as an associated type so the `Wifi` driver wrapper can name it for the
+    /// single-monomorphization handler chain (`WirelessNetCtl<Self::NetCtl<'_>>`).
+    type NetCtl<'a>: NetCtl + WifiDiag + NetChangeNotif
+    where
+        Self: 'a;
+
     /// Setup the Wifi driver and controller and run the given task with these
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -90,6 +97,11 @@ impl<T> WifiDriver for &mut T
 where
     T: WifiDriver,
 {
+    type NetCtl<'a>
+        = T::NetCtl<'a>
+    where
+        Self: 'a;
+
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
         A: WifiDriverTask,
@@ -134,6 +146,13 @@ where
     D: embassy_net::driver::Driver,
     C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
 {
+    // The operational task receives `&self.1` (a `&C`), so the chain net-ctl type
+    // is `&'a C`. `&C` satisfies the diag/net-ctl bounds via the blanket impls.
+    type NetCtl<'a>
+        = &'a C
+    where
+        Self: 'a;
+
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
         A: WifiDriverTask,
@@ -221,6 +240,13 @@ where
     T: WifiDriver,
     R: RngCore + Copy,
 {
+    // Forward the concrete controller type from the underlying Wifi driver, so the
+    // commissioning and operational handler chains share one net-ctl type.
+    type NetCtl<'a>
+        = <T as WifiDriver>::NetCtl<'a>
+    where
+        Self: 'a;
+
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
         A: wireless::WifiTask,
