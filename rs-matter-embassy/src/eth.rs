@@ -11,7 +11,7 @@ use crate::enet::{
 use crate::matter::crypto::RngCore;
 use crate::matter::dm::clusters::gen_diag::InterfaceTypeEnum;
 use crate::matter::error::Error;
-use crate::matter::transport::network::mdns::builtin::BuiltinMdnsResponder;
+use crate::matter::transport::network::mdns::builtin::BuiltinMdns;
 use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::select::Coalesce;
 use crate::matter::utils::sync::IfMutex;
@@ -241,7 +241,7 @@ where
 pub struct EmbassyNetContext {
     pub(crate) buffers: EnetMatterUdpBuffers,
     pub(crate) resources: IfMutex<EnetMatterStackResources>,
-    pub(crate) mdns: IfMutex<BuiltinMdnsResponder>,
+    pub(crate) mdns: IfMutex<BuiltinMdns>,
 }
 
 impl EmbassyNetContext {
@@ -250,7 +250,7 @@ impl EmbassyNetContext {
         Self {
             buffers: EnetMatterUdpBuffers::new(),
             resources: IfMutex::new(EnetMatterStackResources::new()),
-            mdns: IfMutex::new(BuiltinMdnsResponder::new()),
+            mdns: IfMutex::new(BuiltinMdns::new()),
         }
     }
 
@@ -261,7 +261,7 @@ impl EmbassyNetContext {
             buffers: EnetMatterUdpBuffers::new(),
             // Note: below will break if `HostResources` stops being a bunch of `MaybeUninit`s
             resources <- IfMutex::init(unsafe { MaybeUninit::<EnetMatterStackResources>::uninit().assume_init() }),
-            mdns <- IfMutex::init(BuiltinMdnsResponder::init()),
+            mdns <- IfMutex::init(BuiltinMdns::init()),
         })
     }
 }
