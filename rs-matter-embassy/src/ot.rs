@@ -434,6 +434,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
     }
 
     /// Run the `OtMdns` instance by listening to the mDNS services and registering them with the SRP server
+    // TODO: Support the resolve and browse loops as well.
     pub async fn run(&mut self, matter: &Matter<'_>) -> Result<(), OtError> {
         loop {
             // TODO: Not very efficient to remove and re-add everything
@@ -457,25 +458,24 @@ impl<'a, 'd> OtMdns<'a, 'd> {
                 "Unreachable"
             );
 
-            // If the device was restarted, this call will make sure that
-            // the SRP records are removed from the SRP server
-            let _ = self.ot.srp_set_conf(&SrpConf {
-                host_name: hostname.as_str(),
-                ..Default::default()
-            });
+            // Reset the SRP client's local registration state before
+            // (re-)registering below.
+            //
+            // We use an *immediate* clear (`otSrpClientClearHostAndServices`)
+            // rather than a graceful, server-side removal. A graceful removal
+            // (`srp_remove_all(false)`) schedules an unregister update to the SRP
+            // server and only completes once the server acks the host into the
+            // `REMOVED` state. But right after (re-)attaching, the host we just
+            // configured was never actually registered with the server this run,
+            // so that ack never arrives and `srp_is_empty()` would spin forever.
+            // An immediate clear resets the local client state synchronously
+            // (host name + service slots), which is all we need: re-registering
+            // with the same (persisted) ECDSA key overwrites any record a prior
+            // boot left on the server, and stale server records otherwise expire
+            // by lease.
+            self.ot.srp_remove_all(true)?;
 
-            let _ = self.ot.srp_remove_all(false);
-
-            // TODO: Something is still not quite right with the SRP
-            // We seem to get stuck here
-            while !self.ot.srp_is_empty()? {
-                debug!("Waiting for SRP records to be removed...");
-                select(
-                    Timer::after(Duration::from_secs(1)),
-                    self.ot.srp_wait_changed(),
-                )
-                .await;
-            }
+            debug_assert!(self.ot.srp_is_empty()?);
 
             self.ot.srp_set_conf(&SrpConf {
                 host_name: hostname.as_str(),
@@ -514,7 +514,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
                 Ok(())
             }));
 
-            matter.wait_mdns().await;
+            matter.transport().wait_mdns().await;
         }
     }
 }

@@ -49,7 +49,7 @@ embassy-futures = "0.1.1"
 embassy-sync = { version = "0.8", features = ["defmt"] }
 defmt = "1"
 embedded-alloc = "0.7"
-rs-matter-embassy = { path = "../../rs-matter-embassy", features = ["nrf", "openthread", "defmt", "mbedtls"] }
+rs-matter-embassy = { path = "../../rs-matter-embassy", features = ["nrf", "openthread", "defmt", "mbedtls", "openthread-heap-int-8192"] }
 tinyrlibc = { version = "0.5", default-features = false, features = ["alloc", "strstr", "strcmp", "strncmp", "isupper", "memchr", "utoa", "strtoul"] }
 
 cortex-m = "0.7.6"

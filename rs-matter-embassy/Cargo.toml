@@ -175,6 +175,27 @@ defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "embassy-net
 rustcrypto = ["rs-matter-stack/rustcrypto"]
 mbedtls = ["rs-matter-stack/mbedtls"]
 
+# OpenThread heap-configuration passthroughs (see the `openthread` crate).
+# OpenThread keeps one fixed-size internal heap buffer, shared by its own code
+# and (by default) MbedTLS — which can run out of memory when MbedTLS is shared
+# with `rs-matter` (e.g. Matter + Thread coexistence). These re-export
+# OpenThread's `heap-*` features. Only effective with the `openthread` (Thread)
+# backend.
+#   - `openthread-heap-ext-ot`: redirect OpenThread's own heap to the global
+#     allocator (consumer must provide `otPlatCAlloc`/`otPlatFree`).
+#   - `openthread-heap-ext-mbedtls`: redirect MbedTLS to the global allocator.
+#   - `openthread-heap-int-<N>`: resize the internal buffer (largest wins).
+openthread-heap-ext-ot = ["openthread?/heap-ext-ot"]
+openthread-heap-ext-mbedtls = ["openthread?/heap-ext-mbedtls"]
+openthread-heap-int-4096 = ["openthread?/heap-int-4096"]
+openthread-heap-int-6144 = ["openthread?/heap-int-6144"]
+openthread-heap-int-8192 = ["openthread?/heap-int-8192"]
+openthread-heap-int-12288 = ["openthread?/heap-int-12288"]
+openthread-heap-int-16384 = ["openthread?/heap-int-16384"]
+openthread-heap-int-32768 = ["openthread?/heap-int-32768"]
+openthread-heap-int-49152 = ["openthread?/heap-int-49152"]
+openthread-heap-int-65536 = ["openthread?/heap-int-65536"]
+
 [dependencies]
 log = { version = "0.4", default-features = false, optional = true }
 defmt = { version = "1", optional = true, features = ["ip_in_core"] }
@@ -200,7 +221,7 @@ edge-nal-embassy = { version = "0.8", optional = true, features = ["proto-ipv4",
 trouble-host = { version = "0.6", features = ["gatt"] }
 bt-hci = "0.8"
 
-openthread = { version = "0.1", optional = true, features = ["udp", "srp", "edge-nal", "force-generate-bindings"] }
+openthread = { version = "0.1", optional = true, features = ["udp", "srp", "dns-client", "edge-nal", "force-generate-bindings"] }
 
 rand_core = "0.9"
 
