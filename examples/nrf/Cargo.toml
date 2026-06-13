@@ -33,8 +33,8 @@ rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
 #rs-matter = { path = "../../../rs-matter/rs-matter" }
 rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", branch = "next" }
 #rs-matter-stack = { path = "../../../rs-matter-stack" }
-openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
-#openthread = { version = "0.1", path = "../../../openthread/openthread" }
+#openthread = { git = "https://github.com/sysgrok/openthread.git", branch = "next" }
+openthread = { version = "0.1", path = "../../../openthread/openthread" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "08620f00fa54e1423c4d54d2da073fb819602d27" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "08620f00fa54e1423c4d54d2da073fb819602d27" }
 #nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
