@@ -3,14 +3,15 @@
 
 use core::fmt::Write;
 use core::future::poll_fn;
+use core::net::IpAddr;
 
-use embassy_futures::select::select;
+use embassy_futures::select::{select, select3};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_time::{Duration, Instant, Timer};
 
 use openthread::{
-    Channels, OpenThread, OtError, OtResources, OtSrpResources, OtUdpResources, RamSettings,
-    RamSettingsChange, SettingsKey, SharedRamSettings, SrpConf, SrpService,
+    Channels, DnsResponse, OpenThread, OtError, OtResources, OtSrpResources, OtUdpResources,
+    RamSettings, RamSettingsChange, SettingsKey, SharedRamSettings, SrpConf, SrpService,
 };
 
 use rs_matter_stack::matter::crypto::Crypto;
@@ -35,9 +36,11 @@ use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
 use crate::matter::error::ErrorCode;
 use crate::matter::persist::VENDOR_KEYS_START;
-use crate::matter::transport::network::MAX_RX_PACKET_SIZE;
+use crate::matter::transport::network::mdns::{DottedName, MdnsRemoteService};
+use crate::matter::transport::network::{MatterRemoteService, MAX_RX_PACKET_SIZE};
 use crate::matter::utils::init::zeroed;
 use crate::matter::utils::init::{init, Init};
+use crate::matter::utils::select::Coalesce;
 use crate::matter::utils::storage::Vec;
 use crate::matter::utils::sync::DynBase;
 
@@ -55,7 +58,24 @@ const OT_MAX_SRP_RECORDS: usize = 4;
 const OT_SRP_BUF_SZ: usize = 512;
 
 const OT_SETTINGS_BUF_SZ: usize = 1024;
-const OT_MDNS_BUF_SZ: usize = 256;
+/// Scratch buffer for all three `OtMdns` loops, which run concurrently and so
+/// each carve out a disjoint sub-slice (see `OtMdns::run`):
+/// - register: [`MDNS_REGISTER_BUF_SZ`] (builds the local service description)
+/// - resolve:  host name + TXT
+/// - browse:   instance label + host name + TXT
+const OT_MDNS_BUF_SZ: usize = MDNS_REGISTER_BUF_SZ + MDNS_RESOLVE_BUF_SZ + MDNS_BROWSE_BUF_SZ;
+
+/// `buf` region for the register (respond) loop.
+const MDNS_REGISTER_BUF_SZ: usize = 256;
+/// `buf` region for the resolve loop: `host name | TXT`.
+const MDNS_RESOLVE_HOST_SZ: usize = 64;
+const MDNS_RESOLVE_TXT_SZ: usize = 128;
+const MDNS_RESOLVE_BUF_SZ: usize = MDNS_RESOLVE_HOST_SZ + MDNS_RESOLVE_TXT_SZ;
+/// `buf` region for the browse loop: `instance label | host name | TXT`.
+const MDNS_BROWSE_LABEL_SZ: usize = 64;
+const MDNS_BROWSE_HOST_SZ: usize = 64;
+const MDNS_BROWSE_TXT_SZ: usize = 128;
+const MDNS_BROWSE_BUF_SZ: usize = MDNS_BROWSE_LABEL_SZ + MDNS_BROWSE_HOST_SZ + MDNS_BROWSE_TXT_SZ;
 
 /// A struct that holds all the resources required by the OpenThread stack,
 /// as used by Matter.
@@ -432,13 +452,53 @@ impl<'a, 'd> OtMdns<'a, 'd> {
         Self { ot, buf }
     }
 
-    /// Run the `OtMdns` instance by listening to the mDNS services and registering them with the SRP server
-    // TODO: Support the resolve and browse loops as well.
+    /// Run the `OtMdns` instance.
+    ///
+    /// This concurrently drives the three mDNS use cases that Matter needs, all
+    /// on top of OpenThread's SRP client + DNS client (which talk to the SRP /
+    /// DNS-SD server on the Thread Border Router):
+    /// - **respond**: register this node's own Matter service(s) via SRP, so other
+    ///   nodes can discover/resolve it;
+    /// - **resolve**: resolve a specific remote Matter service (operational or
+    ///   commissionable) to an address, on demand;
+    /// - **browse**: enumerate commissionable nodes matching a filter, on demand.
+    ///
+    /// The resolve/browse requests are placed by `rs-matter` into a shared
+    /// rendezvous (see `Transport::wait_mdns_resolve_request` /
+    /// `wait_mdns_browse_request`); the answers are deposited back via
+    /// `try_deposit_mdns_resolve` / `try_deposit_mdns_browse`.
     pub async fn run(&mut self, matter: &Matter<'_>) -> Result<(), OtError> {
+        // Split borrows up front so the three loops don't alias `self`: the
+        // register loop owns the scratch `buf`, the resolve/browse loops each get
+        // a cheap `OpenThread` clone, and each owns a disjoint sub-slice of the
+        // single shared `buf` (no per-loop on-stack scratch).
+        let (register_buf, rest) = self.buf.split_at_mut(MDNS_REGISTER_BUF_SZ);
+        let (resolve_buf, browse_buf) = rest.split_at_mut(MDNS_RESOLVE_BUF_SZ);
+
+        let register = Self::run_register(self.ot.clone(), register_buf, matter);
+        let resolve = Self::run_resolve(self.ot.clone(), resolve_buf, matter);
+        let browse = Self::run_browse(self.ot.clone(), browse_buf, matter);
+
+        let mut register = core::pin::pin!(register);
+        let mut resolve = core::pin::pin!(resolve);
+        let mut browse = core::pin::pin!(browse);
+
+        select3(&mut register, &mut resolve, &mut browse)
+            .coalesce()
+            .await
+    }
+
+    /// The **respond** loop: (re-)register this node's own Matter mDNS service(s)
+    /// with the SRP server whenever they change.
+    async fn run_register(
+        ot: OpenThread<'_>,
+        buf: &mut [u8],
+        matter: &Matter<'_>,
+    ) -> Result<(), OtError> {
         loop {
             // TODO: Not very efficient to remove and re-add everything
 
-            let ieee_eui64 = self.ot.ieee_eui64();
+            let ieee_eui64 = ot.ieee_eui64();
 
             let mut hostname = heapless::String::<16>::new();
             unwrap!(
@@ -472,18 +532,18 @@ impl<'a, 'd> OtMdns<'a, 'd> {
             // with the same (persisted) ECDSA key overwrites any record a prior
             // boot left on the server, and stale server records otherwise expire
             // by lease.
-            self.ot.srp_remove_all(true)?;
+            ot.srp_remove_all(true)?;
 
-            debug_assert!(self.ot.srp_is_empty()?);
+            debug_assert!(ot.srp_is_empty()?);
 
-            self.ot.srp_set_conf(&SrpConf {
+            ot.srp_set_conf(&SrpConf {
                 host_name: hostname.as_str(),
                 ..Default::default()
             })?;
 
             info!("Registered SRP host {}", hostname);
 
-            let buf = &mut *self.buf;
+            let buf = &mut *buf;
 
             unwrap!(matter.mdns_services(|matter_service| {
                 let (service, _) = matter_service.service(matter.dev_det(), matter.port(), buf)?;
@@ -506,7 +566,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
                     key_lease_secs: 0,
                 });
 
-                unwrap!(self.ot.srp_add_service(&srp_service)); // TODO
+                unwrap!(ot.srp_add_service(&srp_service)); // TODO
 
                 info!("Added service {:?}", matter_service);
 
@@ -514,6 +574,207 @@ impl<'a, 'd> OtMdns<'a, 'd> {
             }));
 
             matter.transport().wait_mdns().await;
+        }
+    }
+
+    /// The **resolve** loop: wait for `rs-matter` to request resolution of a
+    /// specific remote Matter service, resolve it via the OpenThread DNS client,
+    /// and deposit the answer back.
+    async fn run_resolve(
+        ot: OpenThread<'_>,
+        buf: &mut [u8],
+        matter: &Matter<'_>,
+    ) -> Result<(), OtError> {
+        // Partition the resolve region into `host name | TXT` scratch.
+        let (host_buf, txt_buf) = buf.split_at_mut(MDNS_RESOLVE_HOST_SZ);
+
+        loop {
+            let service = matter.transport().wait_mdns_resolve_request().await;
+
+            // The instance label and DNS-SD service type to query. OpenThread's
+            // DNS client is a unicast resolver against the BR's DNS-SD server,
+            // which serves the Thread domain `default.service.arpa` (NOT mDNS
+            // `local`).
+            let mut label = heapless::String::<33>::new();
+            let service_name = match service {
+                MatterRemoteService::Operational {
+                    compressed_fabric_id,
+                    node_id,
+                } => {
+                    let _ = write!(label, "{compressed_fabric_id:016X}-{node_id:016X}");
+                    "_matter._tcp.default.service.arpa"
+                }
+                MatterRemoteService::Commissionable { id } => {
+                    let _ = write!(label, "{id:016X}");
+                    "_matterc._udp.default.service.arpa"
+                }
+            };
+
+            // The deposited instance name must match what `rs-matter` expects,
+            // i.e. the mDNS `.local` form (see `MatterRemoteService::instance_name`),
+            // NOT the `default.service.arpa` name we actually queried.
+            let mut instance_name = heapless::String::<128>::new();
+            service.instance_name(&mut instance_name);
+
+            let result = ot
+                .dns_resolve_service_and_host_address(
+                    label.as_str(),
+                    service_name,
+                    None,
+                    |response| {
+                        let DnsResponse::Service(response) = response else {
+                            return;
+                        };
+
+                        let Ok(info) = response.service_info(&mut *host_buf, &mut *txt_buf) else {
+                            return;
+                        };
+
+                        let Some(addr) = info.host_address else {
+                            // No address resolved; nothing useful to deposit.
+                            return;
+                        };
+
+                        matter
+                            .transport()
+                            .try_deposit_mdns_resolve(&MdnsRemoteService {
+                                instance_name: DottedName(instance_name.as_str()),
+                                port: Some(info.port),
+                                addrs: core::iter::once(IpAddr::V6(addr)),
+                                txt: TxtEntries::new(info.txt_data.unwrap_or(&[])),
+                            });
+                    },
+                )
+                .await;
+
+            if let Err(e) = result {
+                warn!("mDNS resolve query failed: {:?}", e);
+            }
+        }
+    }
+
+    /// The **browse** loop: wait for `rs-matter` to request a commissionable
+    /// browse, enumerate matching nodes via the OpenThread DNS client, and
+    /// deposit the answers back.
+    async fn run_browse(
+        ot: OpenThread<'_>,
+        buf: &mut [u8],
+        matter: &Matter<'_>,
+    ) -> Result<(), OtError> {
+        // Partition the browse region into `instance label | host name | TXT`.
+        let (label_buf, rest) = buf.split_at_mut(MDNS_BROWSE_LABEL_SZ);
+        let (host_buf, txt_buf) = rest.split_at_mut(MDNS_BROWSE_HOST_SZ);
+
+        loop {
+            let filter = matter.transport().wait_mdns_browse_request().await;
+
+            // Build the (sub)type browse name in OpenThread's DNS-SD domain.
+            // `CommissionableFilter::service_type(.., false)` yields e.g.
+            // `_matterc._udp` or `_L1234._sub._matterc._udp`; append the domain.
+            let mut service_type = heapless::String::<64>::new();
+            filter.service_type(&mut service_type, false);
+            let mut service_name = heapless::String::<96>::new();
+            let _ = write!(service_name, "{service_type}.default.service.arpa");
+
+            let result = ot
+                .dns_browse(service_name.as_str(), None, |response| {
+                    let DnsResponse::Browse(response) = response else {
+                        return;
+                    };
+
+                    let mut index = 0;
+                    loop {
+                        let label = match response.service_instance(index, &mut *label_buf) {
+                            Ok(Some(label)) => label,
+                            _ => break,
+                        };
+
+                        index += 1;
+
+                        let Ok(info) = response.service_info(label, &mut *host_buf, &mut *txt_buf)
+                        else {
+                            continue;
+                        };
+
+                        let Some(addr) = info.host_address else {
+                            continue;
+                        };
+
+                        // The deposited instance name only needs a valid leading
+                        // hex-id label + the commissionable service-type suffix in
+                        // the `.local` form (the browse deposit matches on the id
+                        // label and the TXT records, not the domain).
+                        let mut instance_name = heapless::String::<96>::new();
+                        let _ = write!(instance_name, "{label}._matterc._udp.local");
+
+                        matter
+                            .transport()
+                            .try_deposit_mdns_browse(&MdnsRemoteService {
+                                instance_name: DottedName(instance_name.as_str()),
+                                port: Some(info.port),
+                                addrs: core::iter::once(IpAddr::V6(addr)),
+                                txt: TxtEntries::new(info.txt_data.unwrap_or(&[])),
+                            });
+                    }
+                })
+                .await;
+
+            if let Err(e) = result {
+                warn!("mDNS browse query failed: {:?}", e);
+            }
+        }
+    }
+}
+
+/// An iterator over DNS-SD TXT record data (a sequence of length-prefixed
+/// `key` or `key=value` entries) yielding `(key, value)` string pairs.
+///
+/// Entries that are not valid UTF-8 are skipped. An entry with no `=` yields an
+/// empty value. This is the parse-side counterpart to how Matter TXT records are
+/// published, and feeds `rs-matter`'s `MdnsRemoteService` TXT consumers.
+#[derive(Clone)]
+struct TxtEntries<'a> {
+    data: &'a [u8],
+}
+
+impl<'a> TxtEntries<'a> {
+    const fn new(data: &'a [u8]) -> Self {
+        Self { data }
+    }
+}
+
+impl<'a> Iterator for TxtEntries<'a> {
+    type Item = (&'a str, &'a str);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.data.is_empty() {
+                return None;
+            }
+
+            let len = self.data[0] as usize;
+            let rest = &self.data[1..];
+
+            if len > rest.len() {
+                // Malformed: length runs past the buffer. Stop iterating.
+                self.data = &[];
+                return None;
+            }
+
+            let (entry, next) = rest.split_at(len);
+            self.data = next;
+
+            let Ok(entry) = core::str::from_utf8(entry) else {
+                // Skip non-UTF-8 entries.
+                continue;
+            };
+
+            let (key, value) = match entry.split_once('=') {
+                Some((k, v)) => (k, v),
+                None => (entry, ""),
+            };
+
+            return Some((key, value));
         }
     }
 }
