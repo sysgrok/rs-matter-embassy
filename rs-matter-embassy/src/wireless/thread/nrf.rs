@@ -13,7 +13,7 @@ use embassy_nrf::peripherals::{
 use embassy_nrf::radio::InterruptHandler;
 use embassy_nrf::Peri;
 
-use embassy_sync_07::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
 pub use nrf_802154::{Egu0InterruptHandler, LpTimerInterruptHandler};
 
