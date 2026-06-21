@@ -157,11 +157,10 @@ async fn main(_spawner: Spawner) {
     // Create a KV BLOB store and load any previously saved state of `rs-matter`
     // `SeqMapKvBlobStore` saves to a user-supplied NOR Flash region
     // However, for this demo and for simplicity, we use a dummy KV BLOB store that does nothing
-    let mut kv = DummyKvBlobStore;
-    stack.startup(&crypto, &mut kv).await.unwrap();
+    let mut store = DummyKvBlobStore;
+    stack.startup(&crypto, &mut store).await.unwrap();
 
-    // Wrap the KV BLOB store as a shared reference, so that it can be used both by `rs-matter` and the user
-    let kv = stack.create_shared_kv(kv).unwrap();
+    let kv = stack.matter().kv(store);
 
     // Run the Matter stack with our handler
     // Using `pin!` is completely optional, but reduces the size of the final future
@@ -183,7 +182,7 @@ async fn main(_spawner: Spawner) {
         // Our `AsyncHandler` + `AsyncMetadata` impl
         (NODE, handler),
         // The Matter stack needs a blob store to store its state
-        &kv,
+        kv,
         // No user future to run
         (),
     ));

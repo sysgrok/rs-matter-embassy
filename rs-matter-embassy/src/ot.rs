@@ -1,7 +1,6 @@
 //! Network interface: `OtNetif` - a `Netif` trait implementation for `openthread`
 //! mDNS impl: `OtMdns` - an mDNS trait implementation for `openthread` using Thread SRP
 
-use core::borrow::BorrowMut;
 use core::fmt::Write;
 use core::future::poll_fn;
 
@@ -35,7 +34,7 @@ use crate::matter::dm::clusters::wifi_diag::WirelessDiag;
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
 use crate::matter::error::ErrorCode;
-use crate::matter::persist::{KvBlobStore, SharedKvBlobStore, VENDOR_KEYS_START};
+use crate::matter::persist::VENDOR_KEYS_START;
 use crate::matter::transport::network::MAX_RX_PACKET_SIZE;
 use crate::matter::utils::init::zeroed;
 use crate::matter::utils::init::{init, Init};
@@ -547,22 +546,21 @@ const OT_SRP_ECDSA_KEY: u16 = VENDOR_KEYS_START;
 
 /// A struct for implementing persistance of `openthread` settings - volatitle and
 /// non-volatile (for selected keys)
-pub struct OtPersist<'a, 'd, S, T> {
+pub struct OtPersist<'d, K> {
     settings: SharedRamSettings<'d, NoopRawMutex, fn(RamSettingsChange) -> bool>,
-    store: &'a SharedKvBlobStore<S, T>,
+    kv: K,
 }
 
-impl<'a, 'd, S, T> OtPersist<'a, 'd, S, T>
+impl<'d, K> OtPersist<'d, K>
 where
-    S: KvBlobStore,
-    T: BorrowMut<[u8]>,
+    K: KvBlobStoreAccess,
 {
     /// Create a new `OtPersist` instance
     ///
     /// # Arguments
     /// - `settings_buf`: A mutable reference to a buffer for storing `openthread` settings before they are persisted
-    /// - `store`: A reference to the `KvBlobStore` instance used for persisting a subset of the settings to non-volatile storage
-    pub const fn new(settings_buf: &'d mut [u8], store: &'a SharedKvBlobStore<S, T>) -> Self {
+    /// - `kv`: A key-value blob store access used for persisting a subset of the settings to non-volatile storage
+    pub const fn new(settings_buf: &'d mut [u8], kv: K) -> Self {
         Self {
             settings: SharedRamSettings::new(RamSettings::new_with_signal_change(
                 settings_buf,
@@ -577,7 +575,7 @@ where
                     _ => false,
                 },
             )),
-            store,
+            kv,
         }
     }
 
@@ -590,7 +588,7 @@ where
 
     /// Load (a selected subset of) the settings from the `KvBlobStore` non-volatile storage
     pub fn load(&self) -> Result<(), Error> {
-        self.store.access(|kv, buf| {
+        self.kv.access(|kv, buf| {
             if let Some(data) = kv.load(OT_SRP_ECDSA_KEY, buf)? {
                 self.settings.with(|settings| {
                     let mut offset = 0;
@@ -614,7 +612,7 @@ where
 
     /// Store (a selected subset of) the settings to the `KvBlobStore` non-volatile storage
     pub fn store(&self) -> Result<(), Error> {
-        self.store.access(|kv, buf| {
+        self.kv.access(|kv, buf| {
             let offset = self.settings.with(|settings| {
                 let mut offset = 0;
 

@@ -159,8 +159,13 @@ async fn main(_s: Spawner) {
         );
 
     // Create a KV BLOB store and load any previously saved state of `rs-matter`
-    let mut kv = get_persistent_store(peripherals.FLASH, stack.kv_store_buf().unwrap());
-    stack.startup(&crypto, &mut kv).await.unwrap();
+    // `get_persistent_store` only needs a small scratch buffer to parse the
+    // partition table, so we give it a local one of the required size.
+    let mut pt_buf = [0u8; PARTITION_TABLE_MAX_LEN];
+    let mut store = get_persistent_store(peripherals.FLASH, &mut pt_buf[..]);
+    stack.startup(&crypto, &mut store).await.unwrap();
+
+    let kv = stack.matter().kv(store);
 
     if stack.is_commissioned() {
         info!(
@@ -170,13 +175,12 @@ async fn main(_s: Spawner) {
     }
 
     {
-        // Wrap the KV BLOB store as a shared reference, so that it can be used both by `rs-matter` and the user
-        let kv = stack.create_shared_kv(&mut kv).unwrap();
-
         // Run the Matter stack with our handler
         // Using `pin!` is completely optional, but reduces the size of the final future
         //
         // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
+        // We lend the store by `&mut` so the owned `kv` survives this scope and can
+        // be reused for the factory reset below (the blanket `&mut T: KvBlobStore`).
         let mut matter = pin!(stack.run_coex(
             // The Matter stack needs to instantiate an `embassy-net` `Driver` and `Controller`
             EmbassyWifi::new(
@@ -211,7 +215,7 @@ async fn main(_s: Spawner) {
     // by holding the BOOT pin low 3 or more seconds
     warn!("Resetting storage");
 
-    stack.reset(kv).await.unwrap();
+    stack.matter().reset_persist(kv).await.unwrap();
 
     warn!("Rebooting...");
 
