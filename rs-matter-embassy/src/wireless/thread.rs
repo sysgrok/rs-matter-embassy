@@ -4,8 +4,7 @@ use embassy_futures::select::select3;
 
 use openthread::{OpenThread, Radio};
 
-use rs_matter_stack::matter::persist::KvBlobStore;
-use rs_matter_stack::persist::MatterSharedKvBlobStore;
+use rs_matter_stack::matter::persist::KvBlobStoreAccess;
 
 use crate::ble::{ControllerRef, TroubleBtpGattContext, TroubleBtpGattPeripheral};
 use crate::matter::crypto::{CryptoRngCore, RngCore};
@@ -166,20 +165,20 @@ where
 }
 
 /// A `Wireless` trait implementation for `openthread`'s Thread stack.
-pub struct EmbassyThread<'a, 'd, T, S, R> {
+pub struct EmbassyThread<'a, T, K, R> {
     driver: T,
     ieee_eui64: [u8; 8],
-    store: &'a MatterSharedKvBlobStore<'d, S>,
+    kv: K,
     context: &'a OtNetContext,
     ble_context: &'a TroubleBtpGattContext,
     use_ble_random_addr: bool,
     rand: R,
 }
 
-impl<'a, 'd, T, S, R> EmbassyThread<'a, 'd, T, S, R>
+impl<'a, T, K, R> EmbassyThread<'a, T, K, R>
 where
     T: ThreadDriver,
-    S: KvBlobStore,
+    K: KvBlobStoreAccess,
     R: CryptoRngCore + Copy,
 {
     /// Create a new instance of the `EmbassyThread` type.
@@ -187,7 +186,7 @@ where
         driver: T,
         rand: R,
         ieee_eui64: [u8; 8],
-        store: &'a MatterSharedKvBlobStore<'d, S>,
+        kv: K,
         stack: &'a EmbassyThreadMatterStack<'a, B, E>,
         use_ble_random_addr: bool,
     ) -> Self
@@ -198,7 +197,7 @@ where
             driver,
             rand,
             ieee_eui64,
-            store,
+            kv,
             stack.network().embedding().net_context(),
             stack.network().embedding().ble_context(),
             use_ble_random_addr,
@@ -210,7 +209,7 @@ where
         driver: T,
         rand: R,
         ieee_eui64: [u8; 8],
-        store: &'a MatterSharedKvBlobStore<'d, S>,
+        kv: K,
         context: &'a OtNetContext,
         ble_context: &'a TroubleBtpGattContext,
         use_ble_random_addr: bool,
@@ -218,7 +217,7 @@ where
         Self {
             driver,
             ieee_eui64,
-            store,
+            kv,
             context,
             ble_context,
             rand,
@@ -227,10 +226,10 @@ where
     }
 }
 
-impl<T, S, R> wireless::Thread for EmbassyThread<'_, '_, T, S, R>
+impl<T, K, R> wireless::Thread for EmbassyThread<'_, T, K, R>
 where
     T: ThreadDriver,
-    S: KvBlobStore,
+    K: KvBlobStoreAccess,
     R: CryptoRngCore + Copy,
 {
     // The Thread controller this driver produces. The operational task receives
@@ -252,7 +251,7 @@ where
             .run(ThreadDriverTaskImpl {
                 ieee_eui64: self.ieee_eui64,
                 rand: self.rand,
-                store: self.store,
+                kv: &self.kv,
                 context: self.context,
                 task,
             })
@@ -260,10 +259,10 @@ where
     }
 }
 
-impl<T, S, R> wireless::ThreadCoex for EmbassyThread<'_, '_, T, S, R>
+impl<T, K, R> wireless::ThreadCoex for EmbassyThread<'_, T, K, R>
 where
     T: ThreadCoexDriver,
-    S: KvBlobStore,
+    K: KvBlobStoreAccess,
     R: CryptoRngCore + Copy,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
@@ -274,7 +273,7 @@ where
             .run(ThreadCoexDriverTaskImpl {
                 ieee_eui64: self.ieee_eui64,
                 rand: self.rand,
-                store: self.store,
+                kv: &self.kv,
                 context: self.context,
                 ble_context: self.ble_context,
                 use_ble_random_addr: self.use_ble_random_addr,
@@ -284,10 +283,10 @@ where
     }
 }
 
-impl<T, S, R> Gatt for EmbassyThread<'_, '_, T, S, R>
+impl<T, K, R> Gatt for EmbassyThread<'_, T, K, R>
 where
     T: BleDriver,
-    S: KvBlobStore,
+    K: KvBlobStoreAccess,
     R: RngCore + Copy,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
@@ -339,18 +338,18 @@ impl Embedding for OtNetContext {
     }
 }
 
-struct ThreadDriverTaskImpl<'a, 'd, A, S, C> {
+struct ThreadDriverTaskImpl<'a, A, K, C> {
     ieee_eui64: [u8; 8],
     rand: C,
-    store: &'a MatterSharedKvBlobStore<'d, S>,
+    kv: K,
     context: &'a OtNetContext,
     task: A,
 }
 
-impl<A, S, C> ThreadDriverTask for ThreadDriverTaskImpl<'_, '_, A, S, C>
+impl<A, K, C> ThreadDriverTask for ThreadDriverTaskImpl<'_, A, K, C>
 where
     A: wireless::ThreadTask,
-    S: KvBlobStore,
+    K: KvBlobStoreAccess,
     C: CryptoRngCore + Copy,
 {
     async fn run<R>(&mut self, radio: R) -> Result<(), Error>
@@ -360,7 +359,7 @@ where
         let mut resources = self.context.resources.lock().await;
         let resources = &mut *resources;
 
-        let persister = OtPersist::new(&mut resources.settings_buf, self.store);
+        let persister = OtPersist::new(&mut resources.settings_buf, &self.kv);
         persister.load()?;
 
         let mut settings = persister.settings();
@@ -403,20 +402,20 @@ where
     }
 }
 
-struct ThreadCoexDriverTaskImpl<'a, 'd, A, S, C> {
+struct ThreadCoexDriverTaskImpl<'a, A, K, C> {
     ieee_eui64: [u8; 8],
     rand: C,
-    store: &'a MatterSharedKvBlobStore<'d, S>,
+    kv: K,
     context: &'a OtNetContext,
     ble_context: &'a TroubleBtpGattContext,
     task: A,
     use_ble_random_addr: bool,
 }
 
-impl<A, S, C> ThreadCoexDriverTask for ThreadCoexDriverTaskImpl<'_, '_, A, S, C>
+impl<A, K, C> ThreadCoexDriverTask for ThreadCoexDriverTaskImpl<'_, A, K, C>
 where
     A: wireless::ThreadCoexTask,
-    S: KvBlobStore,
+    K: KvBlobStoreAccess,
     C: CryptoRngCore + Copy,
 {
     async fn run<R, B>(&mut self, radio: R, ble_ctl: B) -> Result<(), Error>
@@ -427,7 +426,7 @@ where
         let mut resources = self.context.resources.lock().await;
         let resources = &mut *resources;
 
-        let persister = OtPersist::new(&mut resources.settings_buf, self.store);
+        let persister = OtPersist::new(&mut resources.settings_buf, &self.kv);
         persister.load()?;
 
         let mut settings = persister.settings();
