@@ -642,6 +642,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
                                 port: Some(info.port),
                                 addrs: core::iter::once(IpAddr::V6(addr)),
                                 txt: TxtEntries::new(info.txt_data.unwrap_or(&[])),
+                                scope_id: 0,
                             });
                     },
                 )
@@ -714,6 +715,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
                                 port: Some(info.port),
                                 addrs: core::iter::once(IpAddr::V6(addr)),
                                 txt: TxtEntries::new(info.txt_data.unwrap_or(&[])),
+                                scope_id: 0,
                             });
                     }
                 })
