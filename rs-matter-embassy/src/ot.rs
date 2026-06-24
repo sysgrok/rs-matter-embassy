@@ -134,7 +134,7 @@ impl<'d> OtNetStack<'d> {
 
 impl<'d> NetStack for OtNetStack<'d> {
     type UdpBind<'t>
-        = &'t OpenThread<'d>
+        = edge_nal_openthread::OtUdpStack<'d>
     where
         Self: 't;
 
@@ -159,7 +159,7 @@ impl<'d> NetStack for OtNetStack<'d> {
         Self: 't;
 
     fn udp_bind(&self) -> Option<Self::UdpBind<'_>> {
-        Some(&self.0)
+        Some(edge_nal_openthread::OtUdpStack::new(self.0.clone()))
     }
 
     fn udp_connect(&self) -> Option<Self::UdpConnect<'_>> {
@@ -642,6 +642,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
                                 port: Some(info.port),
                                 addrs: core::iter::once(IpAddr::V6(addr)),
                                 txt: TxtEntries::new(info.txt_data.unwrap_or(&[])),
+                                scope_id: 0,
                             });
                     },
                 )
@@ -714,6 +715,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
                                 port: Some(info.port),
                                 addrs: core::iter::once(IpAddr::V6(addr)),
                                 txt: TxtEntries::new(info.txt_data.unwrap_or(&[])),
+                                scope_id: 0,
                             });
                     }
                 })

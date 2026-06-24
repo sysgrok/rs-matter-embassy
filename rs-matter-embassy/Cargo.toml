@@ -170,8 +170,9 @@ embassy-net = ["dep:embassy-net", "edge-nal-embassy", "openthread?/embassy-net-d
 esp = ["esp-radio", "esp-hal", "openthread?/esp-radio"]
 rp = ["cyw43", "cyw43-pio", "embassy-rp", "embassy-net-driver-channel"]
 nrf = ["embassy-nrf", "nrf-sdc", "nrf-mpsl", "nrf-802154", "portable-atomic", "openthread?/embassy-nrf"]
-log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host/log", "cyw43?/log"]
-defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host/defmt", "cyw43?/defmt", "cyw43-pio?/defmt"]
+openthread = ["dep:openthread", "dep:edge-nal-openthread"]
+log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "edge-nal-openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host/log", "cyw43?/log"]
+defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "edge-nal-openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host/defmt", "cyw43?/defmt", "cyw43-pio?/defmt"]
 rustcrypto = ["rs-matter-stack/rustcrypto"]
 mbedtls = ["rs-matter-stack/mbedtls"]
 
@@ -200,7 +201,6 @@ openthread-heap-int-65536 = ["openthread?/heap-int-65536"]
 log = { version = "0.4", default-features = false, optional = true }
 defmt = { version = "1", optional = true, features = ["ip_in_core"] }
 heapless = "0.9"
-heapless_08 = { package = "heapless", version = "0.8" } # For embassy-net 0.8
 enumset = { version = "1", default-features = false }
 embassy-futures = "0.1"
 embassy-sync = "0.8"
@@ -215,13 +215,14 @@ rand = { version = "0.8", default-features = false }
 embedded-storage-async = "0.4.1"
 sequential-storage = "3"
 
-embassy-net = { version = "0.8", optional = true }
+embassy-net = { version = "0.9", optional = true }
 edge-nal-embassy = { version = "0.8", optional = true, features = ["proto-ipv4", "proto-ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
+edge-nal-openthread = { version = "0.1", optional = true, default-features = false }
 
 trouble-host = { version = "0.6", features = ["gatt"] }
 bt-hci = "0.8"
 
-openthread = { version = "0.1", optional = true, features = ["udp", "srp", "dns-client", "edge-nal", "force-generate-bindings"] }
+openthread = { version = "0.1", optional = true, features = ["udp", "srp", "dns-client", "force-generate-bindings"] }
 
 rand_core = "0.9"
 
