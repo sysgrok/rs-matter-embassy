@@ -134,7 +134,7 @@ impl<'d> OtNetStack<'d> {
 
 impl<'d> NetStack for OtNetStack<'d> {
     type UdpBind<'t>
-        = &'t OpenThread<'d>
+        = edge_nal_openthread::OtUdpStack<'d>
     where
         Self: 't;
 
@@ -159,7 +159,7 @@ impl<'d> NetStack for OtNetStack<'d> {
         Self: 't;
 
     fn udp_bind(&self) -> Option<Self::UdpBind<'_>> {
-        Some(&self.0)
+        Some(edge_nal_openthread::OtUdpStack::new(self.0.clone()))
     }
 
     fn udp_connect(&self) -> Option<Self::UdpConnect<'_>> {
