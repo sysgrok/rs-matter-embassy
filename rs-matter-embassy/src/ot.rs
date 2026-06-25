@@ -18,8 +18,7 @@ use rs_matter_stack::matter::crypto::Crypto;
 use rs_matter_stack::matter::persist::KvBlobStoreAccess;
 use rs_matter_stack::matter::Matter;
 use rs_matter_stack::mdns::Mdns;
-use rs_matter_stack::nal::noop::NoopNet;
-use rs_matter_stack::nal::{NetStack, UdpBind};
+use rs_matter_stack::nal::{NetStack, NoopNet, UdpBind};
 
 use crate::fmt::Bytes;
 

@@ -216,13 +216,13 @@ embedded-storage-async = "0.4.1"
 sequential-storage = "3"
 
 embassy-net = { version = "0.9", optional = true }
-edge-nal-embassy = { version = "0.8", optional = true, features = ["proto-ipv4", "proto-ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
+edge-nal-embassy = { version = "0.9", optional = true, features = ["proto-ipv4", "proto-ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
 edge-nal-openthread = { version = "0.1", optional = true, default-features = false }
 
 trouble-host = { version = "0.6", features = ["gatt"] }
 bt-hci = "0.8"
 
-openthread = { version = "0.1", optional = true, features = ["udp", "srp", "dns-client", "force-generate-bindings"] }
+openthread = { version = "0.2", optional = true, features = ["udp", "srp", "dns-client", "force-generate-bindings"] }
 
 rand_core = "0.9"
 

@@ -35,24 +35,6 @@ required-features = ["thread"]
 harness = false
 
 [patch.crates-io]
-rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
-#rs-matter = { path = "../../../rs-matter/rs-matter" }
-rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", branch = "next" }
-#rs-matter-stack = { path = "../../../rs-matter-stack" }
-openthread = { git = "https://github.com/esp-rs/openthread" }
-#openthread = { path = "../../../openthread/openthread" }
-# The new edge-net (with `edge-nal-openthread` and embassy-net 0.9) is not released yet.
-edge-nal = { git = "https://github.com/sysgrok/edge-net" }
-edge-nal-embassy = { git = "https://github.com/sysgrok/edge-net" }
-edge-nal-openthread = { git = "https://github.com/sysgrok/edge-net" }
-#esp-radio = { path = "../../../esp-hal/esp-radio" }
-#esp-backtrace = { path = "../../../esp-hal/esp-backtrace" }
-#esp-hal = { path = "../../../esp-hal/esp-hal" }
-#esp-rtos = { path = "../../../esp-hal/esp-rtos" }
-#esp-alloc = { path = "../../../esp-hal/esp-alloc" }
-#esp-println = { path = "../../../esp-hal/esp-println" }
-#esp-bootloader-esp-idf = { path = "../../../esp-hal/esp-bootloader-esp-idf" }
-#esp-metadata-generated = { path = "../../../esp-hal/esp-metadata-generated" }
 
 [profile.dev]
 # Rust debug is too slow.
@@ -90,7 +72,7 @@ esp-radio = { version = "0.18", features = ["ble", "log-04", "unstable"] }
 esp-storage = "0.9"
 esp-bootloader-esp-idf = { version = "0.5", features = ["log-04"] }
 esp-metadata-generated = "0.4"
-rs-matter-embassy = { path = "../../rs-matter-embassy", features = ["esp", "log", "mbedtls"] }
+rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", features = ["esp", "log", "mbedtls"] }
 tinyrlibc = { version = "0.5", default-features = false, features = ["memchr", "utoa", "strtoul"] }
 embassy-futures = "0.1"
 embassy-time = "0.5"

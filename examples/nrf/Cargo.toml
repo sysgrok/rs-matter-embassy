@@ -29,21 +29,9 @@ incremental = false
 overflow-checks = false
 
 [patch.crates-io]
-rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
-#rs-matter = { path = "../../../rs-matter/rs-matter" }
-rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", branch = "next" }
-#rs-matter-stack = { path = "../../../rs-matter-stack" }
-openthread = { git = "https://github.com/esp-rs/openthread" }
-#openthread = { version = "0.1", path = "../../../openthread/openthread" }
-# The new edge-net (with `edge-nal-openthread` and embassy-net 0.9) is not released yet.
-edge-nal = { git = "https://github.com/sysgrok/edge-net" }
-edge-nal-embassy = { git = "https://github.com/sysgrok/edge-net" }
-edge-nal-openthread = { git = "https://github.com/sysgrok/edge-net" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "08620f00fa54e1423c4d54d2da073fb819602d27" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "08620f00fa54e1423c4d54d2da073fb819602d27" }
-#nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
-nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "update-deps" }
-#nrf-802154 = { path = "../../../nrf-802154/nrf-802154" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 
 [dependencies]
 embassy-executor = { version = "0.10", default-features = false, features = ["platform-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
@@ -53,7 +41,7 @@ embassy-futures = "0.1.1"
 embassy-sync = { version = "0.8", features = ["defmt"] }
 defmt = "1"
 embedded-alloc = "0.7"
-rs-matter-embassy = { path = "../../rs-matter-embassy", features = ["nrf", "openthread", "defmt", "mbedtls", "openthread-heap-int-8192"] }
+rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", features = ["nrf", "openthread", "defmt", "mbedtls", "openthread-heap-int-8192"] }
 tinyrlibc = { version = "0.5", default-features = false, features = ["alloc", "strstr", "strcmp", "strncmp", "isupper", "memchr", "utoa", "strtoul"] }
 
 cortex-m = "0.7.6"

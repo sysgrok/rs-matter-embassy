@@ -25,16 +25,6 @@ incremental = false
 overflow-checks = false
 
 [patch.crates-io]
-rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" }
-#rs-matter = { path = "../../../rs-matter/rs-matter" }
-rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack.git", branch = "next" }
-#rs-matter-stack = { path = "../../../rs-matter-stack" }
-openthread = { git = "https://github.com/esp-rs/openthread" }
-#openthread = { version = "0.1", path = "../../../openthread/openthread" }
-# The new edge-net (with `edge-nal-openthread` and embassy-net 0.9) is not released yet.
-edge-nal = { git = "https://github.com/sysgrok/edge-net" }
-edge-nal-embassy = { git = "https://github.com/sysgrok/edge-net" }
-edge-nal-openthread = { git = "https://github.com/sysgrok/edge-net" }
 
 [features]
 skip-cyw43-firmware = []

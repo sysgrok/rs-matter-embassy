@@ -19,8 +19,7 @@ use crate::matter::error::Error;
 use crate::matter::transport::network::{MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE};
 use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::sync::DynBase;
-use crate::stack::nal::noop::NoopNet;
-use crate::stack::nal::NetStack;
+use crate::stack::nal::{NetStack, NoopNet};
 
 /// Re-export the `edge-nal-embassy` crate
 pub use edge_nal_embassy::*;
