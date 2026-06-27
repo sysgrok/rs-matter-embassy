@@ -1,5 +1,6 @@
-//! This build script copies the `memory.x` file from the crate root into
-//! a directory where the linker can always find it at build time.
+//! This build script copies the chip-specific `memory.x` file (`memory-rp2040.x`
+//! or `memory-rp235x.x`, depending on the selected chip feature) from the crate
+//! root into a directory where the linker can always find it at build time.
 //! For many projects this is optional, as the linker always searches the
 //! project root directory -- wherever `Cargo.toml` is. However, if you
 //! are using a workspace or have a more complicated build setup, this
@@ -14,12 +15,22 @@ use std::io::Write;
 use std::path::PathBuf;
 
 fn main() {
-    // Put `memory.x` in our output directory and ensure it's
+    // The RP2040 and RP235x have different memory layouts and boot mechanisms,
+    // so the linker setup is chosen based on the selected chip feature.
+    let rp235x = env::var_os("CARGO_FEATURE_RP235XA").is_some()
+        || env::var_os("CARGO_FEATURE_RP235XB").is_some();
+
+    // Put the chip-specific `memory.x` in our output directory and ensure it's
     // on the linker search path.
+    let memory_x: &[u8] = if rp235x {
+        include_bytes!("memory-rp235x.x")
+    } else {
+        include_bytes!("memory-rp2040.x")
+    };
     let out = &PathBuf::from(env::var_os("OUT_DIR").unwrap());
     File::create(out.join("memory.x"))
         .unwrap()
-        .write_all(include_bytes!("memory.x"))
+        .write_all(memory_x)
         .unwrap();
     println!("cargo:rustc-link-search={}", out.display());
 
@@ -27,14 +38,19 @@ fn main() {
     download_cyw43_firmware();
 
     // By default, Cargo will re-run a build script whenever
-    // any file in the project changes. By specifying `memory.x`
-    // here, we ensure the build script is only re-run when
-    // `memory.x` is changed.
-    println!("cargo:rerun-if-changed=memory.x");
+    // any file in the project changes. By specifying the `memory.x`
+    // files here, we ensure the build script is only re-run when
+    // they are changed.
+    println!("cargo:rerun-if-changed=memory-rp2040.x");
+    println!("cargo:rerun-if-changed=memory-rp235x.x");
 
     println!("cargo:rustc-link-arg-bins=--nmagic");
     println!("cargo:rustc-link-arg-bins=-Tlink.x");
-    println!("cargo:rustc-link-arg-bins=-Tlink-rp.x");
+    // On the RP2040 `embassy-rp` provides the boot2 stage via `link-rp.x`; on the
+    // RP235x the boot blocks come from `memory-rp235x.x` instead.
+    if !rp235x {
+        println!("cargo:rustc-link-arg-bins=-Tlink-rp.x");
+    }
     println!("cargo:rustc-link-arg-bins=-Tdefmt.x");
 }
 

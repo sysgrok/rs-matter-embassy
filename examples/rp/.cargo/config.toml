@@ -1,8 +1,13 @@
+# Default target is the RP2040. For the RP2350 (Pico 2 / Pico 2 W) build with
+# `--target thumbv8m.main-none-eabihf` and one of the `rp235xa` / `rp235xb` features.
 [build]
 target = "thumbv6m-none-eabi"
 
-[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+[target.thumbv6m-none-eabi]
 runner = "probe-rs run --chip RP2040 --always-print-stacktrace --catch-reset --catch-hardfault"
+
+[target.thumbv8m.main-none-eabihf]
+runner = "probe-rs run --chip RP235x --always-print-stacktrace --catch-reset --catch-hardfault"
 
 [unstable]
 #build-std-features = ["panic_immediate_abort"]

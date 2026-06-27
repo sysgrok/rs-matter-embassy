@@ -183,8 +183,24 @@ jobs:
             dir: examples/rp
             triple: thumbv6m-none-eabi
             config: defmtlogs-optz-ltofat-nimble
-            flags: "--no-default-features --features nimble"
+            flags: "--no-default-features --features nimble,rp2040"
             reports: "rpz_light_eth:light_eth rpz_light_wifi:light_wifi"
+          # The RP2350 (Pico 2 / Pico 2 W) is a Cortex-M33, hence the explicit
+          # `--target`; `rp235xa` replaces the default `rp2040` chip feature.
+          - name: rp2350
+            backend: trouble
+            dir: examples/rp
+            triple: thumbv8m.main-none-eabihf
+            config: defmtlogs-optz-ltofat
+            flags: "--no-default-features --features trouble,rp235xa --target thumbv8m.main-none-eabihf"
+            reports: "rp2z_light_eth:light_eth rp2z_light_wifi:light_wifi"
+          - name: rp2350
+            backend: nimble
+            dir: examples/rp
+            triple: thumbv8m.main-none-eabihf
+            config: defmtlogs-optz-ltofat-nimble
+            flags: "--no-default-features --features nimble,rp235xa --target thumbv8m.main-none-eabihf"
+            reports: "rp2z_light_eth:light_eth rp2z_light_wifi:light_wifi"
     env:
       WIFI_SSID: "ssid"
       WIFI_PASS: "pass"

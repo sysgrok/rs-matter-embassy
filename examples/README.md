@@ -41,7 +41,7 @@ Upon successful commissioning, you should end up with a Light device which you c
 
 ## How to build and flash
 
-### rPI Pico and Pico W
+### rPI Pico and Pico W (RP2040)
 
 (The stock Pico only supports Ethernet using the `light_eth` example and W5500)
 
@@ -51,6 +51,21 @@ cargo +nightly build
 
 # Replace `light_wifi` with `light_eth` below to flash the Ethernet example
 probe-rs run --chip rp2040 target/thumbv6m-none-eabi/debug/light_wifi
+```
+
+### rPI Pico 2 and Pico 2 W (RP2350)
+
+(The stock Pico 2 only supports Ethernet using the `light_eth` example and W5500)
+
+The RP2350 uses a different core and target, so select the matching chip feature
+and target (use `rp235xb` instead of `rp235xa` for the QFN-80 RP2350B):
+
+```sh
+cd rp
+cargo +nightly build --no-default-features --features rp235xa --target thumbv8m.main-none-eabihf
+
+# Replace `light_wifi` with `light_eth` below to flash the Ethernet example
+probe-rs run --chip RP235x target/thumbv8m.main-none-eabihf/debug/light_wifi
 ```
 
 ### Espressif MCUs
