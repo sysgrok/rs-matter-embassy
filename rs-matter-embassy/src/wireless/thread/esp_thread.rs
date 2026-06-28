@@ -12,6 +12,7 @@ use crate::wireless::SLOTS;
 pub struct EspThreadDriver<'d> {
     radio_peripheral: esp_hal::peripherals::IEEE802154<'d>,
     bt_peripheral: esp_hal::peripherals::BT<'d>,
+    rx_queue_size: Option<usize>,
 }
 
 impl<'d> EspThreadDriver<'d> {
@@ -26,7 +27,17 @@ impl<'d> EspThreadDriver<'d> {
         Self {
             radio_peripheral,
             bt_peripheral,
+            rx_queue_size: None,
         }
+    }
+
+    /// Override the esp-radio 802.15.4 receive-queue depth (frames buffered
+    /// before drops). Defaults to the `openthread` crate's default; raise it
+    /// (e.g. 200) for bursty Matter commissioning / SRP load.
+    #[must_use]
+    pub fn with_rx_queue_size(mut self, rx_queue_size: usize) -> Self {
+        self.rx_queue_size = Some(rx_queue_size);
+        self
     }
 }
 
@@ -38,6 +49,10 @@ impl super::ThreadDriver for EspThreadDriver<'_> {
         let radio = EspRadio::new(openthread::esp::Ieee802154::new(
             self.radio_peripheral.reborrow(),
         ));
+        let radio = match self.rx_queue_size {
+            Some(rx_queue_size) => radio.with_rx_queue_size(rx_queue_size),
+            None => radio,
+        };
 
         task.run(radio).await
     }
@@ -56,6 +71,10 @@ impl super::ThreadCoexDriver for EspThreadDriver<'_> {
         let radio = EspRadio::new(openthread::esp::Ieee802154::new(
             self.radio_peripheral.reborrow(),
         ));
+        let radio = match self.rx_queue_size {
+            Some(rx_queue_size) => radio.with_rx_queue_size(rx_queue_size),
+            None => radio,
+        };
 
         task.run(radio, ble_controller).await
     }
