@@ -171,6 +171,10 @@ esp = ["esp-radio", "esp-hal", "openthread?/esp-radio"]
 rp = ["cyw43", "cyw43-pio", "embassy-rp", "embassy-net-driver-channel"]
 nrf = ["embassy-nrf", "nrf-sdc", "nrf-mpsl", "nrf-802154", "portable-atomic", "openthread?/embassy-nrf"]
 openthread = ["dep:openthread", "dep:edge-nal-openthread"]
+# Build OpenThread as a Full Thread Device (router-capable) rather than the
+# default Minimal Thread Device. Enables the route-table diagnostics and the
+# router-eligible (REED) routing-role refinement in the `ThreadDiag` impl.
+openthread-ftd = ["openthread?/ftd"]
 log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "edge-nal-openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host/log", "cyw43?/log"]
 defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "edge-nal-openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host/defmt", "cyw43?/defmt", "cyw43-pio?/defmt"]
 rustcrypto = ["rs-matter-stack/rustcrypto"]
