@@ -49,7 +49,7 @@ impl NetCtl for EspWifiController<'_> {
         info!("Wifi configuration updated for scanning");
 
         let mut scan_config = ScanConfig::default();
-        if let Some(network) = network {
+        if let Some(network) = network.filter(|n| !n.is_empty()) {
             scan_config = scan_config.with_ssid(core::str::from_utf8(network).unwrap_or("???"));
         }
 
