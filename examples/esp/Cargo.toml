@@ -34,8 +34,6 @@ name = "light_thread_coex"
 required-features = ["thread"]
 harness = false
 
-[patch.crates-io]
-
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization
@@ -47,6 +45,21 @@ debug = 2
 debug-assertions = false
 opt-level = "s"
 overflow-checks = false
+
+[patch.crates-io]
+rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" } # Only necessary so that we can see if we have too many Ipv6 re-sends over Thread
+mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
+openthread = { git = "https://github.com/esp-rs/openthread" }
+openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
+esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
+esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
+esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
+esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
+esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
+esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
 
 [features]
 default = ["esp32c6"]

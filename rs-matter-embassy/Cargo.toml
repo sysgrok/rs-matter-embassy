@@ -178,7 +178,7 @@ openthread-ftd = ["openthread?/ftd"]
 log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "edge-nal-openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host/log", "cyw43?/log"]
 defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "edge-nal-openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host/defmt", "cyw43?/defmt", "cyw43-pio?/defmt"]
 rustcrypto = ["rs-matter-stack/rustcrypto"]
-mbedtls = ["rs-matter-stack/mbedtls"]
+mbedtls = ["rs-matter-stack/mbedtls", "openthread?/mbedtls-rs-sys"]
 
 # OpenThread heap-configuration passthroughs (see the `openthread` crate).
 # OpenThread keeps one fixed-size internal heap buffer, shared by its own code
@@ -226,7 +226,7 @@ edge-nal-openthread = { version = "0.1", optional = true, default-features = fal
 trouble-host = { version = "0.6", features = ["gatt"] }
 bt-hci = "0.8"
 
-openthread = { version = "0.2", optional = true, features = ["udp", "srp", "dns-client", "force-generate-bindings"] }
+openthread = { version = "0.2", optional = true, default-features = false, features = ["matter"] }
 
 rand_core = "0.9"
 

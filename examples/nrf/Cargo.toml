@@ -29,13 +29,13 @@ incremental = false
 overflow-checks = false
 
 [patch.crates-io]
+rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" } # Only necessary so that we can see if we have too many Ipv6 re-sends over Thread
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "08620f00fa54e1423c4d54d2da073fb819602d27" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "08620f00fa54e1423c4d54d2da073fb819602d27" }
 nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
-# Build against the local openthread `metrics` branch, which carries the Thread
-# diagnostics getters used by the `ThreadDiag` impl (not yet published to crates.io).
-openthread = { path = "/home/ivan/dev/openthread/openthread" }
-openthread-sys = { path = "/home/ivan/dev/openthread/openthread-sys" }
+mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
+openthread = { git = "https://github.com/esp-rs/openthread" }
+openthread-sys = { git = "https://github.com/esp-rs/openthread" }
 
 [dependencies]
 embassy-executor = { version = "0.10", default-features = false, features = ["platform-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }

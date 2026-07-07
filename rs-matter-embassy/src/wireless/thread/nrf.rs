@@ -28,8 +28,7 @@ use nrf_sdc::SoftdeviceController;
 
 use openthread::nrf::Ieee802154Peripheral;
 use openthread::nrf::NrfRadio;
-use openthread::sys::otRadioCaps;
-use openthread::{EmbassyTimeTimer, PhyRadioRunner, ProxyRadio, ProxyRadioResources, Radio};
+use openthread::{EmbassyTimeTimer, PhyRadioRunner, ProxyRadio, ProxyRadioResources};
 
 use portable_atomic::{AtomicBool, Ordering};
 
@@ -238,8 +237,6 @@ impl<'a, 'd> NrfThreadRustRadioRunner<'a, 'd> {
     }
 }
 
-const NRF_RADIO_CAPS: otRadioCaps = NrfRadio::CAPS.bits();
-
 /// An MPSL driver helper.
 struct MpslDriver<'d> {
     rtc0: Peri<'d, RTC0>,
@@ -441,7 +438,7 @@ impl<'d> IEEE802154Driver<'d> {
 pub struct NrfThreadRustRadioDriver<'d, R> {
     mpsl: MpslDriver<'d>,
     sdc: SdcDriver<'d>,
-    proxy: ProxyRadio<'d, NRF_RADIO_CAPS>,
+    proxy: ProxyRadio<'d>,
     rand: R,
 }
 

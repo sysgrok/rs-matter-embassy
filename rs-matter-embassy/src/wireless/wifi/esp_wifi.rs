@@ -39,7 +39,7 @@ impl super::WifiDriver for EspWifiDriver<'_> {
     where
         A: super::WifiDriverTask,
     {
-        let (mut controller, wifi_interface) = unwrap!(esp_radio::wifi::new(
+        let mut controller = unwrap!(esp_radio::wifi::WifiController::new(
             self.wifi_peripheral.reborrow(),
             esp_radio::wifi::ControllerConfig::default(),
         ));
@@ -47,8 +47,11 @@ impl super::WifiDriver for EspWifiDriver<'_> {
         // esp32c6-specific - need to boost the power to get a good signal
         unwrap!(controller.set_power_saving(esp_radio::wifi::PowerSaveMode::None));
 
-        task.run(wifi_interface.station, EspWifiController::new(controller))
-            .await
+        task.run(
+            esp_radio::wifi::Interface::station(),
+            EspWifiController::new(controller),
+        )
+        .await
     }
 }
 
@@ -62,7 +65,7 @@ impl super::WifiCoexDriver for EspWifiDriver<'_> {
             Default::default(),
         )));
 
-        let (mut controller, wifi_interface) = unwrap!(esp_radio::wifi::new(
+        let mut controller = unwrap!(esp_radio::wifi::WifiController::new(
             self.wifi_peripheral.reborrow(),
             esp_radio::wifi::ControllerConfig::default(),
         ));
@@ -71,7 +74,7 @@ impl super::WifiCoexDriver for EspWifiDriver<'_> {
         unwrap!(controller.set_power_saving(esp_radio::wifi::PowerSaveMode::None));
 
         task.run(
-            wifi_interface.station,
+            esp_radio::wifi::Interface::station(),
             EspWifiController::new(controller),
             ble_ctl,
         )
