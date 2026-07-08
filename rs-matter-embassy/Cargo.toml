@@ -20,6 +20,13 @@ default = ["rustcrypto"]
 
 # Sizing
 
+# Additional `embassy-net` sockets beyond the Matter, DHCP, and DNS sockets.
+# The default is 0 additional sockets. If multiple values are enabled, the largest wins.
+enet-extra-sockets-8 = []
+enet-extra-sockets-4 = []
+enet-extra-sockets-2 = []
+enet-extra-sockets-1 = []
+
 # Number of subscriptions
 max-subscriptions-32 = ["rs-matter-stack/max-subscriptions-32"]
 max-subscriptions-16 = ["rs-matter-stack/max-subscriptions-16"]
@@ -200,6 +207,7 @@ openthread-heap-int-65536 = ["openthread?/heap-int-65536"]
 [dependencies]
 log = { version = "0.4", default-features = false, optional = true }
 defmt = { version = "1", optional = true, features = ["ip_in_core"] }
+cfg-if = "1"
 heapless = "0.9"
 enumset = { version = "1", default-features = false }
 embassy-futures = "0.1"

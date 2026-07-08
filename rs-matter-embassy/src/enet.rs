@@ -4,6 +4,8 @@
 use core::cell::Cell;
 use core::net::Ipv6Addr;
 
+use cfg_if::cfg_if;
+
 use embassy_futures::select::select;
 
 use embassy_net::driver::{Driver, HardwareAddress as DriverHardwareAddress};
@@ -30,9 +32,26 @@ pub mod net {
 }
 
 /// The minimum number of sockets that should be configured in the `embassy-net` `StackResources`:
-/// The two UDP sockets used by the Matter stack, plus extra 2 for DHCP + DNS
-// TODO: Make it configurable with a feature
-pub const ENET_MIN_SOCKET_SET: usize = ENET_MAX_UDP_SOCKETS + 2;
+/// The UDP sockets used by the Matter stack, plus two sockets for DHCP + DNS, plus optional
+/// additional application sockets.
+pub const ENET_MIN_SOCKET_SET: usize =
+    ENET_MAX_UDP_SOCKETS + ENET_REQUIRED_EXTRA_SOCKET_SET + ENET_EXTRA_SOCKET_SET;
+
+const ENET_REQUIRED_EXTRA_SOCKET_SET: usize = 2;
+
+cfg_if! {
+    if #[cfg(feature = "enet-extra-sockets-8")] {
+        const ENET_EXTRA_SOCKET_SET: usize = 8;
+    } else if #[cfg(feature = "enet-extra-sockets-4")] {
+        const ENET_EXTRA_SOCKET_SET: usize = 4;
+    } else if #[cfg(feature = "enet-extra-sockets-2")] {
+        const ENET_EXTRA_SOCKET_SET: usize = 2;
+    } else if #[cfg(feature = "enet-extra-sockets-1")] {
+        const ENET_EXTRA_SOCKET_SET: usize = 1;
+    } else {
+        const ENET_EXTRA_SOCKET_SET: usize = 0;
+    }
+}
 
 /// A type alias for the `UdpBuffers` type configured with the minimum number of UDP socket buffers
 /// sufficient for the operation of the Matter stack
