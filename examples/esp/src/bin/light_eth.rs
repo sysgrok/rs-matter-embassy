@@ -121,11 +121,12 @@ async fn main(_s: Spawner) {
             .with_password(WIFI_PASS.into()),
     );
     let wifi = peripherals.WIFI;
-    let (controller, wifi_interface) = esp_radio::wifi::new(
+    let controller = esp_radio::wifi::WifiController::new(
         wifi,
         esp_radio::wifi::ControllerConfig::default().with_initial_config(station_config),
     )
     .unwrap();
+    let station = esp_radio::wifi::Interface::station();
 
     // Create the crypto provider, using the `esp-hal` TRNG as the source of randomness for a reseeding CSPRNG.
     let crypto = default_crypto(
@@ -172,11 +173,7 @@ async fn main(_s: Spawner) {
     // Using `pin!` is completely optional, but reduces the size of the final future
     let mut matter = pin!(stack.run(
         // The Matter stack needs the ethernet inteface to run
-        EmbassyEthernet::new(
-            PreexistingEthDriver::new(wifi_interface.station),
-            weak_rand,
-            stack,
-        ),
+        EmbassyEthernet::new(PreexistingEthDriver::new(station), weak_rand, stack,),
         // The crypto provider
         &crypto,
         // Our `AsyncHandler` + `AsyncMetadata` impl

@@ -42,10 +42,8 @@ use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::select::Coalesce;
 use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
 use rs_matter_embassy::ot::openthread::nrf::NrfRadio;
-use rs_matter_embassy::ot::openthread::sys::otRadioCaps;
 use rs_matter_embassy::ot::openthread::{
-    EmbassyTimeTimer, OpenThread, PhyRadioRunner, ProxyRadio, ProxyRadioResources, Radio,
-    RamSettings,
+    EmbassyTimeTimer, OpenThread, PhyRadioRunner, ProxyRadio, ProxyRadioResources, RamSettings,
 };
 use rs_matter_embassy::ot::{OtMatterResources, OtMdns, OtNetStack, OtNetif};
 use rs_matter_embassy::stack::eth::EthMatterStack;
@@ -92,8 +90,6 @@ const BUMP_SIZE: usize = 15500;
 static HEAP: LlffHeap = LlffHeap::empty();
 
 const THREAD_DATASET: &str = env!("THREAD_DATASET");
-
-const NRF_RADIO_CAPS: otRadioCaps = NrfRadio::CAPS.bits();
 
 /// We need a bigger log ring-buffer or else the device QR code printout is half-lost
 const LOG_RINGBUF_SIZE: usize = 2048;
@@ -147,10 +143,8 @@ async fn main(_s: Spawner) {
         &TEST_DEV_ATT,
     ));
 
-    let (radio_proxy, radio_runner) = ProxyRadio::<NRF_RADIO_CAPS>::new(mk_static!(
-        ProxyRadioResources,
-        ProxyRadioResources::new()
-    ));
+    let (radio_proxy, radio_runner) =
+        ProxyRadio::new(mk_static!(ProxyRadioResources, ProxyRadioResources::new()));
     let radio = NrfRadio::new(embassy_nrf::radio::ieee802154::Radio::new(p.RADIO, Irqs));
 
     // High-priority executor: EGU1_SWI1, priority level 6

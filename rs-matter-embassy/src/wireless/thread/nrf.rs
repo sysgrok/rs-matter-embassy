@@ -1,6 +1,6 @@
 use core::pin::pin;
 
-use embassy_futures::select::select;
+use embassy_futures::select::{select, Either};
 
 use embassy_nrf::interrupt;
 use embassy_nrf::interrupt::typelevel::Interrupt;
@@ -28,8 +28,7 @@ use nrf_sdc::SoftdeviceController;
 
 use openthread::nrf::Ieee802154Peripheral;
 use openthread::nrf::NrfRadio;
-use openthread::sys::otRadioCaps;
-use openthread::{EmbassyTimeTimer, PhyRadioRunner, ProxyRadio, ProxyRadioResources, Radio};
+use openthread::{EmbassyTimeTimer, PhyRadioRunner, ProxyRadio, ProxyRadioResources};
 
 use portable_atomic::{AtomicBool, Ordering};
 
@@ -238,8 +237,6 @@ impl<'a, 'd> NrfThreadRustRadioRunner<'a, 'd> {
     }
 }
 
-const NRF_RADIO_CAPS: otRadioCaps = NrfRadio::CAPS.bits();
-
 /// An MPSL driver helper.
 struct MpslDriver<'d> {
     rtc0: Peri<'d, RTC0>,
@@ -441,7 +438,7 @@ impl<'d> IEEE802154Driver<'d> {
 pub struct NrfThreadRustRadioDriver<'d, R> {
     mpsl: MpslDriver<'d>,
     sdc: SdcDriver<'d>,
-    proxy: ProxyRadio<'d, NRF_RADIO_CAPS>,
+    proxy: ProxyRadio<'d>,
     rand: R,
 }
 
@@ -565,7 +562,14 @@ where
 
         let controller = self.sdc.create_controller(&mpsl, &mut sdc_mem, &mut rand)?;
 
-        task.run(controller).await
+        // See the note in `ThreadDriver::run`: MPSL's low-priority processor must
+        // be driven for the radio timeslots to be serviced.
+        let mut mpsl_run = pin!(mpsl.run());
+        let mut task = pin!(task.run(controller));
+
+        let Either::Second(res) = select(&mut mpsl_run, &mut task).await;
+
+        res
     }
 }
 
@@ -672,7 +676,16 @@ impl<R> super::ThreadDriver for NrfThreadMpslRadioDriver<'_, R> {
 
         let radio = self.ieee802154.create_radio(&mpsl)?;
 
-        task.run(radio).await
+        // MPSL's low-priority work processor (`mpsl.run()` -> `mpsl_low_priority_process()`)
+        // MUST be driven, or the 802.15.4 timeslot session is never serviced: a
+        // scheduled TX never completes and RX never re-arms, so the radio wedges
+        // after the very first frame and Thread cannot attach.
+        let mut mpsl_run = pin!(mpsl.run());
+        let mut task = pin!(task.run(radio));
+
+        let Either::Second(res) = select(&mut mpsl_run, &mut task).await;
+
+        res
     }
 }
 
@@ -696,7 +709,14 @@ where
 
         let controller = self.sdc.create_controller(&mpsl, &mut sdc_mem, &mut rand)?;
 
-        task.run(controller).await
+        // See the note in `ThreadDriver::run`: MPSL's low-priority processor must
+        // be driven for the radio timeslots to be serviced.
+        let mut mpsl_run = pin!(mpsl.run());
+        let mut task = pin!(task.run(controller));
+
+        let Either::Second(res) = select(&mut mpsl_run, &mut task).await;
+
+        res
     }
 }
 
@@ -722,7 +742,14 @@ where
 
         let radio = self.ieee802154.create_radio(&mpsl)?;
 
-        task.run(radio, controller).await
+        // See the note in `ThreadDriver::run`: MPSL's low-priority processor must
+        // be driven for the radio timeslots to be serviced.
+        let mut mpsl_run = pin!(mpsl.run());
+        let mut task = pin!(task.run(radio, controller));
+
+        let Either::Second(res) = select(&mut mpsl_run, &mut task).await;
+
+        res
     }
 }
 

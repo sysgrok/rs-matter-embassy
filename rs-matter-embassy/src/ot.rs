@@ -345,98 +345,302 @@ impl WirelessDiag for OtNetCtl<'_> {
 
 impl DynBase for OtNetCtl<'_> {}
 
-// TODO
+impl OtNetCtl<'_> {
+    /// Whether the stack currently has a committed Active Operational Dataset.
+    ///
+    /// Most scalar diagnostics attributes are `null` (i.e. `None`) when the node
+    /// is not commissioned onto a Thread network. Per the Matter spec and the
+    /// connectedhomeip reference implementation, `RoutingRole` is the exception:
+    /// the stack reports a valid role even while disabled or detached.
+    fn is_commissioned(&self) -> bool {
+        self.0.is_commissioned()
+    }
+
+    /// Map the `Child` device role to the Matter routing role.
+    ///
+    /// A sleepy child (receiver off when idle) is a `SleepyEndDevice`. A child
+    /// that keeps its receiver on is an `EndDevice`, unless it is also
+    /// router-eligible, in which case it is a `REED` (Router-Eligible End
+    /// Device). Router eligibility is an FTD-only concept (`otThreadIsRouterEligible`),
+    /// so on a Minimal Thread Device the `REED` distinction never applies.
+    fn child_routing_role(&self) -> RoutingRoleEnum {
+        if !self.0.rx_on_when_idle() {
+            return RoutingRoleEnum::SleepyEndDevice;
+        }
+
+        #[cfg(feature = "openthread-ftd")]
+        if self.0.router_eligible() {
+            return RoutingRoleEnum::REED;
+        }
+
+        RoutingRoleEnum::EndDevice
+    }
+}
+
 impl ThreadDiag for OtNetCtl<'_> {
     fn channel(&self) -> Result<Option<u16>, Error> {
-        Ok(None)
+        Ok(self.is_commissioned().then(|| self.0.channel() as u16))
     }
 
     fn routing_role(&self) -> Result<Option<RoutingRoleEnum>, Error> {
-        Ok(None)
+        // Not null even when not commissioned: OpenThread reports a valid role.
+        let role = match self.0.device_role() {
+            openthread::DeviceRole::Disabled => RoutingRoleEnum::Unspecified,
+            openthread::DeviceRole::Detached => RoutingRoleEnum::Unassigned,
+            openthread::DeviceRole::Child => self.child_routing_role(),
+            openthread::DeviceRole::Router => RoutingRoleEnum::Router,
+            openthread::DeviceRole::Leader => RoutingRoleEnum::Leader,
+            openthread::DeviceRole::Other(_) => RoutingRoleEnum::Unspecified,
+        };
+
+        Ok(Some(role))
     }
 
     fn network_name(
         &self,
         f: &mut dyn FnMut(Option<&str>) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        f(None)
+        if self.is_commissioned() {
+            self.0.network_name(|name| f(Some(name)))
+        } else {
+            f(None)
+        }
     }
 
     fn pan_id(&self) -> Result<Option<u16>, Error> {
-        Ok(None)
+        Ok(self.is_commissioned().then(|| self.0.pan_id()))
     }
 
     fn extended_pan_id(&self) -> Result<Option<u64>, Error> {
-        let status = self.0.net_status();
-
-        Ok(status.ext_pan_id)
+        // `net_status()` already returns the extended PAN ID only when connected.
+        Ok(self.0.net_status().ext_pan_id)
     }
 
     fn mesh_local_prefix(
         &self,
         f: &mut dyn FnMut(Option<&[u8]>) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        f(None)
+        if self.is_commissioned() {
+            // Matter encodes the mesh-local prefix as a length-prefixed octstr:
+            // a leading bit-length byte (the prefix is always a /64) followed by
+            // the 8 prefix bytes.
+            let prefix = self.0.mesh_local_prefix();
+            let mut buf = [0u8; 9];
+            buf[0] = 64;
+            buf[1..].copy_from_slice(&prefix);
+            f(Some(&buf))
+        } else {
+            f(None)
+        }
     }
 
     fn neighbor_table(
         &self,
-        _f: &mut dyn FnMut(&NeighborTable) -> Result<(), Error>,
+        f: &mut dyn FnMut(&NeighborTable) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        Ok(())
+        let mut result = Ok(());
+
+        self.0.neighbor_table(|info| {
+            if result.is_err() {
+                return;
+            }
+
+            let entry = NeighborTable {
+                ext_address: info.ext_address,
+                age: info.age,
+                rloc16: info.rloc16,
+                link_frame_counter: info.link_frame_counter,
+                mle_frame_counter: info.mle_frame_counter,
+                lqi: info.link_quality_in,
+                average_rssi: info.average_rssi,
+                last_rssi: info.last_rssi,
+                frame_error_rate: info.frame_error_rate,
+                message_error_rate: info.message_error_rate,
+                rx_on_when_idle: info.rx_on_when_idle,
+                full_thread_device: info.full_thread_device,
+                full_network_data: info.full_network_data,
+                is_child: info.is_child,
+            };
+
+            result = f(&entry);
+        });
+
+        result
     }
 
     fn route_table(
         &self,
-        _f: &mut dyn FnMut(&RouteTable) -> Result<(), Error>,
+        f: &mut dyn FnMut(&RouteTable) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        Ok(())
+        // On a Full Thread Device (`openthread-ftd`), `OpenThread::route_table`
+        // iterates the full router table; on a Minimal Thread Device it yields a
+        // single entry for this node's parent (or none, if not attached). Either
+        // way an empty list is a valid response per the spec.
+        let mut result = Ok(());
+
+        self.0.route_table(|info| {
+            if result.is_err() {
+                return;
+            }
+
+            let entry = RouteTable {
+                ext_address: info.ext_address,
+                rloc16: info.rloc16,
+                router_id: info.router_id,
+                next_hop: info.next_hop,
+                path_cost: info.path_cost,
+                lqi_in: info.lqi_in,
+                lqi_out: info.lqi_out,
+                age: info.age,
+                allocated: info.allocated,
+                link_established: info.link_established,
+            };
+
+            result = f(&entry);
+        });
+
+        result
     }
 
     fn partition_id(&self) -> Result<Option<u32>, Error> {
-        Ok(None)
+        Ok(self.is_commissioned().then(|| self.0.partition_id()))
     }
 
     fn weighting(&self) -> Result<Option<u16>, Error> {
-        Ok(None)
+        Ok(self
+            .is_commissioned()
+            .then(|| self.0.leader_weight() as u16))
     }
 
     fn data_version(&self) -> Result<Option<u16>, Error> {
-        Ok(None)
+        Ok(self
+            .is_commissioned()
+            .then(|| self.0.net_data_version() as u16))
     }
 
     fn stable_data_version(&self) -> Result<Option<u16>, Error> {
-        Ok(None)
+        Ok(self
+            .is_commissioned()
+            .then(|| self.0.net_data_stable_version() as u16))
     }
 
     fn leader_router_id(&self) -> Result<Option<u8>, Error> {
-        Ok(None)
+        Ok(self.is_commissioned().then(|| self.0.leader_router_id()))
+    }
+
+    fn ext_address(&self) -> Result<Option<u64>, Error> {
+        Ok(self.is_commissioned().then(|| self.0.ext_address()))
+    }
+
+    fn rloc_16(&self) -> Result<Option<u16>, Error> {
+        Ok(self.is_commissioned().then(|| self.0.rloc16()))
     }
 
     fn security_policy(&self) -> Result<Option<SecurityPolicy>, Error> {
-        Ok(None)
+        let Some(diag) = self.0.active_dataset_diag() else {
+            return Ok(None);
+        };
+
+        Ok(diag.security_policy.map(|sp| SecurityPolicy {
+            rotation_time: sp.rotation_time,
+            flags: security_policy_flags(&sp),
+        }))
     }
 
     fn channel_page0_mask(
         &self,
         f: &mut dyn FnMut(Option<&[u8]>) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        f(None)
+        let mask = self
+            .0
+            .active_dataset_diag()
+            .and_then(|diag| diag.channel_mask);
+
+        if let Some(mask) = mask {
+            // Matter encodes the channel mask as an octstr where, within each
+            // byte, the most-significant bit is the lowest channel. This is the
+            // bit-reversal of OpenThread's `u32` mask (where bit 0 = channel 0),
+            // serialized big-endian.
+            let reversed = mask.reverse_bits();
+            f(Some(&reversed.to_be_bytes()))
+        } else {
+            f(None)
+        }
     }
 
     fn operational_dataset_components(
         &self,
         f: &mut dyn FnMut(Option<&OperationalDatasetComponents>) -> Result<(), Error>,
     ) -> Result<(), Error> {
-        f(None)
+        let Some(diag) = self.0.active_dataset_diag() else {
+            return f(None);
+        };
+
+        let c = diag.components;
+        let components = OperationalDatasetComponents {
+            active_timestamp_present: c.active_timestamp_present,
+            pending_timestamp_present: c.pending_timestamp_present,
+            master_key_present: c.network_key_present,
+            network_name_present: c.network_name_present,
+            extended_pan_id_present: c.extended_pan_id_present,
+            mesh_local_prefix_present: c.mesh_local_prefix_present,
+            delay_present: c.delay_present,
+            pan_id_present: c.pan_id_present,
+            channel_present: c.channel_present,
+            pskc_present: c.pskc_present,
+            security_policy_present: c.security_policy_present,
+            channel_mask_present: c.channel_mask_present,
+        };
+
+        f(Some(&components))
     }
 
     fn active_network_faults_list(
         &self,
         _f: &mut dyn FnMut(NetworkFaultEnum) -> Result<(), Error>,
     ) -> Result<(), Error> {
+        // OpenThread does not track Matter network faults; the reference
+        // implementation (connectedhomeip) likewise always reports an empty list.
         Ok(())
     }
+}
+
+/// Pack an `openthread::SecurityPolicy`'s boolean flags into the Matter
+/// `SecurityPolicy.Flags` bitmap (a `uint16`).
+///
+/// Bit layout (LSB first), matching the Thread Security Policy bitfield order
+/// used by OpenThread / connectedhomeip:
+/// - bit 0: ObtainNetworkKey
+/// - bit 1: NativeCommissioning
+/// - bit 2: Routers
+/// - bit 3: ExternalCommissioning
+/// - bit 4: CommercialCommissioning
+/// - bit 5: AutonomousEnrollment
+/// - bit 6: NetworkKeyProvisioning
+/// - bit 7: TobleLink
+/// - bit 8: NonCcmRouters
+/// - bits 9..=11: VersionThresholdForRouting
+fn security_policy_flags(sp: &openthread::SecurityPolicy) -> u16 {
+    let mut flags = 0u16;
+    let mut set = |cond: bool, bit: u16| {
+        if cond {
+            flags |= 1 << bit;
+        }
+    };
+
+    set(sp.obtain_network_key_enabled, 0);
+    set(sp.native_commissioning_enabled, 1);
+    set(sp.routers_enabled, 2);
+    set(sp.external_commissioning_enabled, 3);
+    set(sp.commercial_commissioning_enabled, 4);
+    set(sp.autonomous_enrollment_enabled, 5);
+    set(sp.network_key_provisioning_enabled, 6);
+    set(sp.toble_link_enabled, 7);
+    set(sp.non_ccm_routers_enabled, 8);
+
+    flags |= ((sp.version_threshold_for_routing as u16) & 0x7) << 9;
+
+    flags
 }
 
 /// An mDNS trait implementation for `openthread` using Thread SRP
