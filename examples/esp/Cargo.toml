@@ -47,7 +47,6 @@ opt-level = "s"
 overflow-checks = false
 
 [patch.crates-io]
-rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "next" } # Only necessary so that we can see if we have too many Ipv6 re-sends over Thread
 mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
 openthread = { git = "https://github.com/esp-rs/openthread" }
 openthread-sys = { git = "https://github.com/esp-rs/openthread" }
