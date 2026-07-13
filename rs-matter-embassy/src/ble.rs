@@ -15,7 +15,6 @@ use bt_hci::data::{AclPacket, IsoPacket, SyncPacket};
 use bt_hci::ControllerToHostPacket;
 
 use embassy_futures::select::select;
-use embassy_sync_07 as embassy_sync;
 
 use embedded_io::ErrorType;
 
@@ -42,8 +41,8 @@ pub(crate) const MAX_MTU_SIZE: usize = DefaultPacketPool::MTU;
 const MAX_CHANNELS: usize = 2;
 const ADV_SETS: usize = 1;
 
-pub type GPHostResources =
-    HostResources<DefaultPacketPool, MAX_CONNECTIONS, MAX_CHANNELS, ADV_SETS>;
+pub type GPHostResources<C> =
+    HostResources<C, DefaultPacketPool, MAX_CONNECTIONS, MAX_CHANNELS, ADV_SETS>;
 
 type External = [u8; 0];
 
@@ -62,12 +61,12 @@ struct MatterService {
     c2: External,
 }
 
-struct TroubleBtpResources {
-    resources: GPHostResources,
+struct TroubleBtpResources<C> {
+    resources: GPHostResources<C>,
     ind_buf: Vec<u8, MAX_MTU_SIZE>,
 }
 
-impl TroubleBtpResources {
+impl<C> TroubleBtpResources<C> {
     const fn new() -> Self {
         Self {
             resources: GPHostResources::new(),
@@ -203,11 +202,13 @@ where
             stack
         };
 
+        let stack = stack.build();
+
         let Host {
             mut peripheral,
             runner,
             ..
-        } = stack.build();
+        } = stack.host;
 
         let server = unwrap!(Server::new_with_config(GapConfig::Peripheral(
             PeripheralConfig {

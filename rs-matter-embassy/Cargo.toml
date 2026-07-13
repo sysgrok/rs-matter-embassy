@@ -231,15 +231,15 @@ embassy-net = { version = "0.9", optional = true }
 edge-nal-embassy = { version = "0.9", optional = true, features = ["proto-ipv4", "proto-ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
 edge-nal-openthread = { version = "0.1", optional = true, default-features = false }
 
-trouble-host = { version = "0.6", features = ["gatt"] }
-bt-hci = "0.8"
+trouble-host = { version = "0.7", features = ["gatt"] }
+bt-hci = "0.9"
 
 openthread = { version = "0.2", optional = true, default-features = false, features = ["matter"] }
 
 rand_core = "0.9"
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the `esp32*` chips family
-esp-radio = { version = "0.18", optional = true, features = ["ble"] }
+esp-radio = { version = "1.0.0-beta.0", optional = true, features = ["ble"] }
 esp-hal = { version = "~1.1", optional = true, features = ["unstable"] }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the RPi Pico W MCU
