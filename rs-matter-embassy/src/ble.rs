@@ -30,7 +30,7 @@ use rs_matter_stack::matter::utils::select::Coalesce;
 use rs_matter_stack::matter::utils::storage::Vec;
 use rs_matter_stack::matter::utils::sync::{IfMutex, Notification};
 
-use trouble_host::att::{AttCfm, AttClient, AttReq, AttRsp, AttUns};
+use trouble_host::att::{AttClient, AttReq, AttRsp};
 use trouble_host::prelude::*;
 use trouble_host::{self, BleHostError, Controller, HostResources};
 
@@ -206,7 +206,7 @@ where
 
         let runner = stack.runner();
         let mut peripheral = stack.peripheral();
-        
+
         let server = unwrap!(Server::new_with_config(GapConfig::Peripheral(
             PeripheralConfig {
                 name: "TrouBLE",                                             // TODO
@@ -334,7 +334,7 @@ where
                         data: bytes,
                     }) => {
                         if handle == server.matter_service.c1.handle {
-                            info!(
+                            trace!(
                                 "GATT: C1 Write {} len {} / MTU {}",
                                 Bytes(bytes),
                                 bytes.len(),
@@ -354,7 +354,13 @@ where
 
                             trace!("GATT: Write to C2 CCC descriptor: {:?}", bytes);
 
-                            Self::write_reply(event).await?;
+                            // NOTE: We MUST let the attribute server process the CCCD write
+                            // (via `accept`) rather than replying to it ourselves, so that
+                            // `trouble-host` records the subscription in its own CCCD table.
+                            // `Characteristic::indicate` in `handle_indications` consults that
+                            // table (`should_indicate`) and silently drops the indication if the
+                            // peer is not registered as subscribed there.
+                            Self::accept(event).await?;
 
                             if subscription_req {
                                 if !subscribed {
@@ -369,10 +375,6 @@ where
                         } else {
                             Self::accept(event).await?;
                         }
-                    }
-                    AttClient::Confirmation(AttCfm::ConfirmIndication) => {
-                        info!("GATT: Confirm indication");
-                        ind_ack.notify();
                     }
                     _ => Self::accept(event).await?,
                 },
@@ -402,23 +404,22 @@ where
             if len > 0 {
                 let data = &ind_buf[..len];
 
-                info!("GATT: About to indicate {} len {}", Bytes(data), len);
+                // Sends the indication and then blocks until the peer's
+                // `HandleValueConfirmation` is received (or the 30s ATT transaction
+                // timeout elapses, in which case the connection is torn down).
+                //
+                // NOTE: As of `trouble-host` commit 50d0f9f, the indication confirmation
+                // is consumed internally by `trouble-host` and is NO LONGER surfaced as a
+                // `GattConnectionEvent` in `handle_events` - hence waiting for it here,
+                // rather than via a separate notification signalled from the events task.
+                server
+                    .matter_service
+                    .c2
+                    .indicate_raw(conn, data, false)
+                    .await
+                    .map_err(to_matter_err)?;
 
-                GattData::send_unsolicited(
-                    conn.raw(),
-                    AttUns::Indicate {
-                        handle: server.matter_service.c2.handle,
-                        data,
-                    },
-                )
-                .await
-                .map_err(to_matter_err)?;
-
-                info!("GATT: Indicate {} len {}", Bytes(data), len);
-
-                ind_ack.wait().await;
-
-                info!("GATT: Indicate {} len {} - COMPLETE", Bytes(data), len);
+                trace!("GATT: Indicate {} len {}", Bytes(data), len);
             } else {
                 btp.wait_outgoing().await;
             }

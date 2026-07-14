@@ -50,6 +50,8 @@ overflow-checks = false
 mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
 #openthread = { git = "https://github.com/esp-rs/openthread" }
 #openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+openthread = { git = "https://github.com/sysgrok/openthread", branch = "new-radios" }
+openthread-sys = { git = "https://github.com/sysgrok/openthread", branch = "new-radios" }
 esp-hal = { git = "https://github.com/esp-rs/esp-hal" }
 esp-rtos = { git = "https://github.com/esp-rs/esp-hal" }
 esp-alloc = { git = "https://github.com/esp-rs/esp-hal" }
@@ -60,8 +62,6 @@ esp-storage = { git = "https://github.com/esp-rs/esp-hal" }
 esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal" }
 esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal" }
 
-openthread = { path = "../../../openthread/openthread" }
-openthread-sys = { path = "../../../openthread/openthread-sys" }
 #esp-hal = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
 #esp-rtos = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
 #esp-alloc = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
