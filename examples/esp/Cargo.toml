@@ -76,6 +76,10 @@ esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal" }
 #esp-radio-rtos-driver = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
 trouble-host = { git = "https://github.com/alexmoon/trouble", branch = "no-controller-generic" }
 
+nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
+nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "new-embassy-nrf" }
+
 [features]
 default = ["esp32c6"]
 esp32 = ["esp-rtos/esp32", "esp-hal/esp32", "esp-backtrace/esp32", "esp-println/esp32", "esp-radio/esp32", "esp-storage/esp32", "esp-bootloader-esp-idf/esp32", "esp-metadata-generated/esp32", "portable-atomic/critical-section", "wifi"]
