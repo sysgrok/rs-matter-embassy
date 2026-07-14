@@ -97,12 +97,9 @@ esp-rtos = { version = "0.3", features = ["esp-radio", "embassy"] }
 esp-alloc = { version = "0.10" }
 esp-println = { version = "0.17", features = ["log-04"] }
 esp-radio = { version = "1.0.0-beta.0", features = ["ble", "log-04", "unstable"] }
-esp-radio-rtos-driver = "0.3"
 esp-storage = "0.9"
 esp-bootloader-esp-idf = { version = "0.5", features = ["log-04"] }
 esp-metadata-generated = "0.4"
-#esp-sync = "0.2.1"
-#esp-phy = "0.2"
 rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", features = ["esp", "log", "mbedtls"] }
 tinyrlibc = { version = "0.5", default-features = false, features = ["memchr", "utoa", "strtoul"] }
 embassy-futures = "0.1"
