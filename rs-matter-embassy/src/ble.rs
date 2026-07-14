@@ -41,8 +41,8 @@ pub(crate) const MAX_MTU_SIZE: usize = DefaultPacketPool::MTU;
 const MAX_CHANNELS: usize = 2;
 const ADV_SETS: usize = 1;
 
-pub type GPHostResources<C> =
-    HostResources<C, DefaultPacketPool, MAX_CONNECTIONS, MAX_CHANNELS, ADV_SETS>;
+pub type GPHostResources =
+    HostResources<DefaultPacketPool, MAX_CONNECTIONS, MAX_CHANNELS, ADV_SETS>;
 
 type External = [u8; 0];
 
@@ -61,12 +61,12 @@ struct MatterService {
     c2: External,
 }
 
-struct TroubleBtpResources<C> {
-    resources: GPHostResources<C>,
+struct TroubleBtpResources {
+    resources: GPHostResources,
     ind_buf: Vec<u8, MAX_MTU_SIZE>,
 }
 
-impl<C> TroubleBtpResources<C> {
+impl TroubleBtpResources {
     const fn new() -> Self {
         Self {
             resources: GPHostResources::new(),
@@ -204,12 +204,9 @@ where
 
         let stack = stack.build();
 
-        let Host {
-            mut peripheral,
-            runner,
-            ..
-        } = stack.host;
-
+        let runner = stack.runner();
+        let mut peripheral = stack.peripheral();
+        
         let server = unwrap!(Server::new_with_config(GapConfig::Peripheral(
             PeripheralConfig {
                 name: "TrouBLE",                                             // TODO
@@ -337,7 +334,7 @@ where
                         data: bytes,
                     }) => {
                         if handle == server.matter_service.c1.handle {
-                            trace!(
+                            info!(
                                 "GATT: C1 Write {} len {} / MTU {}",
                                 Bytes(bytes),
                                 bytes.len(),
@@ -346,7 +343,7 @@ where
 
                             btp.process_incoming(
                                 Some(conn.raw().att_mtu()),
-                                to_bt_addr(&conn.raw().peer_address()),
+                                to_bt_addr(&conn.raw().peer_address().addr),
                                 bytes,
                             )
                             .map_err(to_matter_err)?;
@@ -374,7 +371,7 @@ where
                         }
                     }
                     AttClient::Confirmation(AttCfm::ConfirmIndication) => {
-                        trace!("GATT: Confirm indication");
+                        info!("GATT: Confirm indication");
                         ind_ack.notify();
                     }
                     _ => Self::accept(event).await?,
@@ -405,6 +402,8 @@ where
             if len > 0 {
                 let data = &ind_buf[..len];
 
+                info!("GATT: About to indicate {} len {}", Bytes(data), len);
+
                 GattData::send_unsolicited(
                     conn.raw(),
                     AttUns::Indicate {
@@ -415,9 +414,11 @@ where
                 .await
                 .map_err(to_matter_err)?;
 
-                trace!("GATT: Indicate {} len {}", Bytes(data), len);
+                info!("GATT: Indicate {} len {}", Bytes(data), len);
 
                 ind_ack.wait().await;
+
+                info!("GATT: Indicate {} len {} - COMPLETE", Bytes(data), len);
             } else {
                 btp.wait_outgoing().await;
             }

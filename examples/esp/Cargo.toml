@@ -50,33 +50,34 @@ overflow-checks = false
 mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
 #openthread = { git = "https://github.com/esp-rs/openthread" }
 #openthread-sys = { git = "https://github.com/esp-rs/openthread" }
-#esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-#esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-#esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-#esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-#esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-#esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-#esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-#esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-#esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal" }
+esp-rtos = { git = "https://github.com/esp-rs/esp-hal" }
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal" }
+esp-backtrace = { git = "https://github.com/esp-rs/esp-hal" }
+esp-println = { git = "https://github.com/esp-rs/esp-hal" }
+esp-radio = { git = "https://github.com/esp-rs/esp-hal" }
+esp-storage = { git = "https://github.com/esp-rs/esp-hal" }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal" }
+esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal" }
 
 openthread = { path = "../../../openthread/openthread" }
 openthread-sys = { path = "../../../openthread/openthread-sys" }
-esp-hal = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
-esp-rtos = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
-esp-alloc = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
-esp-backtrace = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
-esp-println = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
-esp-radio = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
-esp-storage = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
-esp-bootloader-esp-idf = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
-esp-metadata-generated = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
-esp-sync = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
-esp-phy = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
-esp-radio-rtos-driver = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+#esp-hal = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+#esp-rtos = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+#esp-alloc = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+#esp-backtrace = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+#esp-println = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+#esp-radio = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+#esp-storage = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+#esp-bootloader-esp-idf = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+#esp-metadata-generated = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+#esp-sync = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+#esp-phy = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+#esp-radio-rtos-driver = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+trouble-host = { git = "https://github.com/alexmoon/trouble", branch = "no-controller-generic" }
 
 [features]
-default = ["esp32c6"]
+default = ["esp32h2", "thread"]
 esp32 = ["esp-rtos/esp32", "esp-hal/esp32", "esp-backtrace/esp32", "esp-println/esp32", "esp-radio/esp32", "esp-storage/esp32", "esp-bootloader-esp-idf/esp32", "esp-metadata-generated/esp32", "portable-atomic/critical-section", "wifi"]
 esp32c2 = ["esp-rtos/esp32c2", "esp-hal/esp32c2", "esp-backtrace/esp32c2", "esp-println/esp32c2", "esp-radio/esp32c2", "esp-storage/esp32c2", "esp-bootloader-esp-idf/esp32c2", "esp-metadata-generated/esp32c2", "portable-atomic/critical-section", "wifi"]
 esp32c3 = ["esp-rtos/esp32c3", "esp-hal/esp32c3", "esp-backtrace/esp32c3", "esp-println/esp32c3", "esp-radio/esp32c3", "esp-storage/esp32c3", "esp-bootloader-esp-idf/esp32c3", "esp-metadata-generated/esp32c3", "portable-atomic/unsafe-assume-single-core", "wifi"]
@@ -100,8 +101,8 @@ esp-radio-rtos-driver = "0.3"
 esp-storage = "0.9"
 esp-bootloader-esp-idf = { version = "0.5", features = ["log-04"] }
 esp-metadata-generated = "0.4"
-esp-sync = "0.2.1"
-esp-phy = "0.2"
+#esp-sync = "0.2.1"
+#esp-phy = "0.2"
 rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", features = ["esp", "log", "mbedtls"] }
 tinyrlibc = { version = "0.5", default-features = false, features = ["memchr", "utoa", "strtoul"] }
 embassy-futures = "0.1"
