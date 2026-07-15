@@ -25,7 +25,7 @@ use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
 use embassy_rp::clocks::RoscRng;
 use embassy_rp::dma;
-use embassy_rp::peripherals::{DMA_CH0, PIO0};
+use embassy_rp::peripherals::{DMA_CH0, DMA_CH1, PIO0};
 use embassy_rp::pio::InterruptHandler;
 
 use embedded_alloc::LlffHeap;
@@ -62,7 +62,7 @@ macro_rules! mk_static {
 
 bind_interrupts!(struct Irqs {
     PIO0_IRQ_0 => InterruptHandler<PIO0>;
-    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>;
+    DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>, dma::InterruptHandler<DMA_CH1>;
 });
 
 /// The amount of memory for allocating all `rs-matter-stack` futures created during
@@ -170,8 +170,8 @@ async fn main(_spawner: Spawner) {
         // The Matter stack needs Wifi and BLE
         EmbassyWifi::new(
             RpWifiDriver::new(
-                p.PIN_23, p.PIN_25, p.PIN_24, p.PIN_29, p.DMA_CH0, p.PIO0, Irqs, fw, clm, btfw,
-                nvram,
+                p.PIN_23, p.PIN_25, p.PIN_24, p.PIN_29, p.DMA_CH0, p.DMA_CH1, p.PIO0, Irqs, fw,
+                clm, btfw, nvram,
             ),
             crypto.rand().unwrap(),
             true, // Use a random BLE address
