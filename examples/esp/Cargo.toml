@@ -52,15 +52,15 @@ mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
 #openthread-sys = { git = "https://github.com/esp-rs/openthread" }
 openthread = { git = "https://github.com/sysgrok/openthread", branch = "new-radios" }
 openthread-sys = { git = "https://github.com/sysgrok/openthread", branch = "new-radios" }
-esp-hal = { git = "https://github.com/esp-rs/esp-hal" }
-esp-rtos = { git = "https://github.com/esp-rs/esp-hal" }
-esp-alloc = { git = "https://github.com/esp-rs/esp-hal" }
-esp-backtrace = { git = "https://github.com/esp-rs/esp-hal" }
-esp-println = { git = "https://github.com/esp-rs/esp-hal" }
-esp-radio = { git = "https://github.com/esp-rs/esp-hal" }
-esp-storage = { git = "https://github.com/esp-rs/esp-hal" }
-esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal" }
-esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal" }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "5e055e4977e6ed85c70a9700f6b3000d2e09a59f" }
+esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "5e055e4977e6ed85c70a9700f6b3000d2e09a59f" }
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "5e055e4977e6ed85c70a9700f6b3000d2e09a59f" }
+esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "5e055e4977e6ed85c70a9700f6b3000d2e09a59f" }
+esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "5e055e4977e6ed85c70a9700f6b3000d2e09a59f" }
+esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "5e055e4977e6ed85c70a9700f6b3000d2e09a59f" }
+esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "5e055e4977e6ed85c70a9700f6b3000d2e09a59f" }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "5e055e4977e6ed85c70a9700f6b3000d2e09a59f" }
+esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "5e055e4977e6ed85c70a9700f6b3000d2e09a59f" }
 
 #esp-hal = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
 #esp-rtos = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
@@ -74,6 +74,7 @@ esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal" }
 #esp-sync = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
 #esp-phy = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
 #esp-radio-rtos-driver = { git = "https://github.com/yvf/esp-hal", branch = "fix/h2-ieee802154-receive-path" }
+
 trouble-host = { git = "https://github.com/alexmoon/trouble", branch = "no-controller-generic" }
 
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
@@ -101,7 +102,7 @@ esp-rtos = { version = "0.3", features = ["esp-radio", "embassy"] }
 esp-alloc = { version = "0.10" }
 esp-println = { version = "0.17", features = ["log-04"] }
 esp-radio = { version = "1.0.0-beta.0", features = ["ble", "log-04", "unstable"] }
-esp-storage = "0.9"
+esp-storage = { version = "0.9", features = ["embedded-storage"] }
 esp-bootloader-esp-idf = { version = "0.5", features = ["log-04"] }
 esp-metadata-generated = "0.4"
 rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", features = ["esp", "log", "mbedtls"] }
