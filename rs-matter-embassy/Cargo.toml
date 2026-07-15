@@ -182,8 +182,8 @@ openthread = ["dep:openthread", "dep:edge-nal-openthread"]
 # default Minimal Thread Device. Enables the route-table diagnostics and the
 # router-eligible (REED) routing-role refinement in the `ThreadDiag` impl.
 openthread-ftd = ["openthread?/ftd"]
-log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "edge-nal-openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host/log", "cyw43?/log"]
-defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "edge-nal-openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host/defmt", "cyw43?/defmt", "cyw43-pio?/defmt"]
+log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "edge-nal-openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host/log", "cyw43?/log", "embassy-nrf?/log", "nrf-mpsl?/log", "nrf-sdc?/log", "nrf-802154?/log"]
+defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "edge-nal-openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host/defmt", "cyw43?/defmt", "cyw43-pio?/defmt", "embassy-nrf?/defmt", "nrf-mpsl?/defmt", "nrf-sdc?/defmt", "nrf-802154?/defmt"]
 rustcrypto = ["rs-matter-stack/rustcrypto"]
 mbedtls = ["rs-matter-stack/mbedtls", "openthread?/mbedtls-rs-sys"]
 
@@ -231,15 +231,15 @@ embassy-net = { version = "0.9", optional = true }
 edge-nal-embassy = { version = "0.9", optional = true, features = ["proto-ipv4", "proto-ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
 edge-nal-openthread = { version = "0.1", optional = true, default-features = false }
 
-trouble-host = { version = "0.6", features = ["gatt"] }
-bt-hci = "0.8"
+trouble-host = { version = "0.7", features = ["gatt"] }
+bt-hci = "0.9"
 
 openthread = { version = "0.2", optional = true, default-features = false, features = ["matter"] }
 
 rand_core = "0.9"
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the `esp32*` chips family
-esp-radio = { version = "0.18", optional = true, features = ["ble"] }
+esp-radio = { version = "1.0.0-beta.0", optional = true, features = ["ble"] }
 esp-hal = { version = "~1.1", optional = true, features = ["unstable"] }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the RPi Pico W MCU
@@ -249,8 +249,12 @@ embassy-rp = { version = "0.10", optional = true, features = ["unstable-pac", "r
 embassy-net-driver-channel = { version = "0.4", optional = true }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for Nordic silicon
-embassy-nrf = { version = "0.10", optional = true, features = ["time-driver-rtc1", "time", "nrf52840"], default-features = false }
-nrf-sdc = { version = "0.4", default-features = false, optional = true, features = ["peripheral", "nrf52840"] }
+embassy-nrf = { version = "0.11", optional = true, features = ["time-driver-rtc1", "time", "nrf52840"], default-features = false }
+# trouble-host 0.7's `Runner` references central HCI commands (scan/connect) and
+# uses extended advertising even for a peripheral-only role, so the prebuilt SDC
+# lib must be the `multirole` one (both `peripheral` and `central`). Peripheral-
+# only is missing e.g. `sdc_hci_cmd_le_set_ext_adv_enable` at link time.
+nrf-sdc = { version = "0.4", default-features = false, optional = true, features = ["peripheral", "central", "nrf52840"] }
 nrf-mpsl = { version = "0.3", default-features = false, optional = true, features = ["nrf52840", "critical-section-impl"] }
 nrf-802154 = { version = "0.1", default-features = false, optional = true, features = ["nrf52840", "openthread"] }
 portable-atomic = { version = "1", optional = true }

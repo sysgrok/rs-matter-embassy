@@ -7,9 +7,10 @@ members = [
 exclude = ["examples"]
 
 [patch.crates-io]
-nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "08620f00fa54e1423c4d54d2da073fb819602d27" }
-nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "08620f00fa54e1423c4d54d2da073fb819602d27" }
-nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
+nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
+nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "new-embassy-nrf" }
+trouble-host = { git = "https://github.com/alexmoon/trouble", branch = "no-controller-generic" }
 
 [profile.release]
 opt-level = "z"

@@ -29,17 +29,21 @@ incremental = false
 overflow-checks = false
 
 [patch.crates-io]
-nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "08620f00fa54e1423c4d54d2da073fb819602d27" }
-nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "08620f00fa54e1423c4d54d2da073fb819602d27" }
-nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
+#openthread = { git = "https://github.com/esp-rs/openthread" }
+#openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+openthread = { git = "https://github.com/sysgrok/openthread", branch = "new-radios" }
+openthread-sys = { git = "https://github.com/sysgrok/openthread", branch = "new-radios" }
+nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
+nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "new-embassy-nrf" }
 mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
-openthread = { git = "https://github.com/esp-rs/openthread" }
-openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+
+trouble-host = { git = "https://github.com/alexmoon/trouble", branch = "no-controller-generic" }
 
 [dependencies]
 embassy-executor = { version = "0.10", default-features = false, features = ["platform-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
 embassy-time = { version = "0.5", default-features = false, features = ["defmt", "defmt-timestamp-uptime-ms"] }
-embassy-nrf = { version = "0.10", features = ["defmt", "time-driver-rtc1", "time", "nrf52840"], default-features = false }
+embassy-nrf = { version = "0.11", features = ["defmt", "time-driver-rtc1", "time", "nrf52840"], default-features = false }
 embassy-futures = "0.1.1"
 embassy-sync = { version = "0.8", features = ["defmt"] }
 defmt = "1"

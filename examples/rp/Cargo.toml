@@ -25,6 +25,24 @@ incremental = false
 overflow-checks = false
 
 [patch.crates-io]
+cyw43 = { git = "https://github.com/embassy-rs/embassy" }
+cyw43-pio = { git = "https://github.com/embassy-rs/embassy" }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy" }
+embassy-time-driver = { git = "https://github.com/embassy-rs/embassy" }
+embassy-time-queue-utils = { git = "https://github.com/embassy-rs/embassy" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy" }
+embassy-net = { git = "https://github.com/embassy-rs/embassy" }
+embassy-net-driver-channel = { git = "https://github.com/embassy-rs/embassy" }
+embassy-net-wiznet = { git = "https://github.com/embassy-rs/embassy" }
+
+trouble-host = { git = "https://github.com/alexmoon/trouble", branch = "no-controller-generic" }
+
+nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
+nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "new-embassy-nrf" }
 
 [features]
 skip-cyw43-firmware = []
@@ -40,7 +58,7 @@ embedded-alloc = "0.7"
 rs-matter-embassy = { path = "../../rs-matter-embassy", features = ["embassy-net", "rp", "defmt"] }
 
 # Wireless examples
-bt-hci = { version = "0.8", default-features = false, features = ["defmt"] }
+bt-hci = { version = "0.9", default-features = false, features = ["defmt"] }
 cyw43 = { version = "0.7", features = ["firmware-logs", "defmt", "bluetooth"] }
 cyw43-pio = "0.10"
 
