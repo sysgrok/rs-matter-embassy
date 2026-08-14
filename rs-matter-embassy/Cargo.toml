@@ -254,10 +254,6 @@ embassy-net-driver-channel = { version = "0.4", optional = true }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for Nordic silicon
 embassy-nrf = { version = "0.11", optional = true, features = ["time-driver-rtc1", "time", "nrf52840"], default-features = false }
-# trouble-host 0.7's `Runner` references central HCI commands (scan/connect) and
-# uses extended advertising even for a peripheral-only role, so the prebuilt SDC
-# lib must be the `multirole` one (both `peripheral` and `central`). Peripheral-
-# only is missing e.g. `sdc_hci_cmd_le_set_ext_adv_enable` at link time.
 nrf-sdc = { version = "0.4", default-features = false, optional = true, features = ["peripheral", "nrf52840"] }
 nrf-mpsl = { version = "0.3", default-features = false, optional = true, features = ["nrf52840", "critical-section-impl"] }
 nrf-802154 = { version = "0.1", default-features = false, optional = true, features = ["nrf52840", "openthread"] }
