@@ -28,7 +28,9 @@ use nrf_sdc::SoftdeviceController;
 
 use openthread::nrf::Ieee802154Peripheral;
 use openthread::nrf::NrfRadio;
-use openthread::{EmbassyTimeTimer, PhyRadioRunner, ProxyRadio, ProxyRadioResources};
+use openthread::{
+    EmbassyTimeTimer, MacRadio, MacRadioResources, PhyRadioRunner, ProxyRadio, ProxyRadioResources,
+};
 
 use portable_atomic::{AtomicBool, Ordering};
 
@@ -198,6 +200,7 @@ impl RustRadioState {
 pub struct NrfThreadRustRadioRunner<'a, 'd> {
     runner: PhyRadioRunner<'a>,
     radio_peripheral: Peri<'d, RADIO>,
+    mac_radio_resources: MacRadioResources,
 }
 
 impl<'a, 'd> NrfThreadRustRadioRunner<'a, 'd> {
@@ -206,6 +209,7 @@ impl<'a, 'd> NrfThreadRustRadioRunner<'a, 'd> {
         Self {
             runner,
             radio_peripheral,
+            mac_radio_resources: MacRadioResources::new(),
         }
     }
 
@@ -219,13 +223,21 @@ impl<'a, 'd> NrfThreadRustRadioRunner<'a, 'd> {
 
                 info!("Thread radio started");
 
-                let radio = NrfRadio::new(embassy_nrf::radio::ieee802154::Radio::new(
-                    self.radio_peripheral.reborrow(),
-                    NrfThreadRustRadioInterrupts,
-                ));
+                // The proxy runner requires a full-MAC radio, so the bare PHY
+                // gets the software MAC wrapped around it right here, on the
+                // high-priority side - which is what lets the software MAC's
+                // ACK deadlines be served from this execution context.
+                let radio = MacRadio::new(
+                    NrfRadio::new(embassy_nrf::radio::ieee802154::Radio::new(
+                        self.radio_peripheral.reborrow(),
+                        NrfThreadRustRadioInterrupts,
+                    )),
+                    EmbassyTimeTimer,
+                    &mut self.mac_radio_resources,
+                );
 
                 let mut cmd = pin!(RUST_RADIO_STATE.wait_enabled(false));
-                let mut runner = pin!(self.runner.run(radio, EmbassyTimeTimer));
+                let mut runner = pin!(self.runner.run(radio));
 
                 select(&mut cmd, &mut runner).await;
 

@@ -12,11 +12,15 @@ harness = false
 name = "light_eth"
 harness = false
 
+# "s" rather than "z" in both profiles: under minsize, LLVM (23+) lowers
+# unaligned accesses on thumbv6m to `__aeabi_uread4`-style libcalls, which
+# Rust's compiler-builtins does not provide.
+
 [profile.dev]
-opt-level = "z"
+opt-level = "s"
 
 [profile.release]
-opt-level = "z"
+opt-level = "s"
 debug = 2
 debug-assertions = false
 lto = "fat"
@@ -38,11 +42,11 @@ embassy-net = { git = "https://github.com/embassy-rs/embassy" }
 embassy-net-driver-channel = { git = "https://github.com/embassy-rs/embassy" }
 embassy-net-wiznet = { git = "https://github.com/embassy-rs/embassy" }
 
-trouble-host = { git = "https://github.com/alexmoon/trouble", branch = "no-controller-generic" }
+trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "088e09c451177d5db50cf3e58c68d05512265ba0" }
 
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
-nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "new-embassy-nrf" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "new-openthread" }
 
 [features]
 skip-cyw43-firmware = []

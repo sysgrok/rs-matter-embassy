@@ -206,7 +206,7 @@ openthread-heap-int-12288 = ["openthread?/heap-int-12288"]
 openthread-heap-int-16384 = ["openthread?/heap-int-16384"]
 openthread-heap-int-32768 = ["openthread?/heap-int-32768"]
 openthread-heap-int-49152 = ["openthread?/heap-int-49152"]
-openthread-heap-int-65536 = ["openthread?/heap-int-65536"]
+openthread-heap-int-65528 = ["openthread?/heap-int-65528"]
 
 [dependencies]
 log = { version = "0.4", default-features = false, optional = true }

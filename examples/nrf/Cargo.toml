@@ -31,14 +31,14 @@ overflow-checks = false
 [patch.crates-io]
 #openthread = { git = "https://github.com/esp-rs/openthread" }
 #openthread-sys = { git = "https://github.com/esp-rs/openthread" }
-openthread = { git = "https://github.com/sysgrok/openthread", branch = "new-radios" }
-openthread-sys = { git = "https://github.com/sysgrok/openthread", branch = "new-radios" }
+openthread = { git = "https://github.com/sysgrok/openthread", branch = "test-harness" }
+openthread-sys = { git = "https://github.com/sysgrok/openthread", branch = "test-harness" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
-nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "new-embassy-nrf" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "new-openthread" }
 mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
 
-trouble-host = { git = "https://github.com/alexmoon/trouble", branch = "no-controller-generic" }
+trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "088e09c451177d5db50cf3e58c68d05512265ba0" }
 
 [dependencies]
 embassy-executor = { version = "0.10", default-features = false, features = ["platform-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
