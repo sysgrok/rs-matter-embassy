@@ -42,7 +42,7 @@ embassy-net = { git = "https://github.com/embassy-rs/embassy" }
 embassy-net-driver-channel = { git = "https://github.com/embassy-rs/embassy" }
 embassy-net-wiznet = { git = "https://github.com/embassy-rs/embassy" }
 
-trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "088e09c451177d5db50cf3e58c68d05512265ba0" }
+trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "652fe9633db5be92b98136690e4a0ad9d9bb133f" }
 
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }

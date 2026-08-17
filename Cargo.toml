@@ -10,9 +10,9 @@ exclude = ["examples"]
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
 nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "new-openthread" }
-openthread = { git = "https://github.com/sysgrok/openthread", branch = "test-harness" }
-openthread-sys = { git = "https://github.com/sysgrok/openthread", branch = "test-harness" }
-trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "088e09c451177d5db50cf3e58c68d05512265ba0" }
+openthread = { git = "https://github.com/esp-rs/openthread" }
+openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "652fe9633db5be92b98136690e4a0ad9d9bb133f" }
 
 [profile.release]
 opt-level = "z"
