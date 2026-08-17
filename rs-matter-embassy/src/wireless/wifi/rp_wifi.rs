@@ -13,7 +13,7 @@ use embassy_net_driver_channel::Device;
 use embassy_rp::dma::{self, Channel};
 use embassy_rp::gpio::{Level, Output};
 use embassy_rp::interrupt::typelevel::{Binding, DMA_IRQ_0, PIO0_IRQ_0};
-use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_24, PIN_25, PIN_29, PIO0};
+use embassy_rp::peripherals::{DMA_CH0, DMA_CH1, PIN_23, PIN_24, PIN_25, PIN_29, PIO0};
 use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_rp::Peri;
 
@@ -30,6 +30,7 @@ struct Cyw43PioInterrupts;
 
 unsafe impl Binding<PIO0_IRQ_0, InterruptHandler<PIO0>> for Cyw43PioInterrupts {}
 unsafe impl Binding<DMA_IRQ_0, dma::InterruptHandler<DMA_CH0>> for Cyw43PioInterrupts {}
+unsafe impl Binding<DMA_IRQ_0, dma::InterruptHandler<DMA_CH1>> for Cyw43PioInterrupts {}
 
 /// A `WifiDriver` implementation for the ESP32 family of chips.
 pub struct RpWifiDriver<'d> {
@@ -37,7 +38,8 @@ pub struct RpWifiDriver<'d> {
     cs: Peri<'d, PIN_25>,
     dio: Peri<'d, PIN_24>,
     clk: Peri<'d, PIN_29>,
-    dma: Peri<'d, DMA_CH0>,
+    dma0: Peri<'d, DMA_CH0>,
+    dma1: Peri<'d, DMA_CH1>,
     pio: Peri<'d, PIO0>,
     fmw: Option<&'d Aligned<A4, [u8]>>,
     fmw_clm: Option<&'d Aligned<A4, [u8]>>,
@@ -65,7 +67,8 @@ impl<'d> RpWifiDriver<'d> {
         cs: Peri<'d, PIN_25>,
         dio: Peri<'d, PIN_24>,
         clk: Peri<'d, PIN_29>,
-        dma: Peri<'d, DMA_CH0>,
+        dma0: Peri<'d, DMA_CH0>,
+        dma1: Peri<'d, DMA_CH1>,
         pio: Peri<'d, PIO0>,
         _irq: I,
         fmw: Option<&'d Aligned<A4, [u8]>>,
@@ -76,13 +79,15 @@ impl<'d> RpWifiDriver<'d> {
     where
         I: Binding<PIO0_IRQ_0, InterruptHandler<PIO0>> + 'd,
         I: Binding<DMA_IRQ_0, dma::InterruptHandler<DMA_CH0>> + 'd,
+        I: Binding<DMA_IRQ_0, dma::InterruptHandler<DMA_CH1>> + 'd,
     {
         Self {
             pwr,
             cs,
             dio,
             clk,
-            dma,
+            dma0,
+            dma1,
             pio,
             fmw,
             fmw_clm,
@@ -142,7 +147,8 @@ impl super::WifiDriver for RpWifiDriver<'_> {
         let pwr = Output::new(self.pwr.reborrow(), Level::Low);
         let cs = Output::new(self.cs.reborrow(), Level::High);
         let mut pio = Pio::new(self.pio.reborrow(), Cyw43PioInterrupts);
-        let dma = Channel::new(self.dma.reborrow(), Cyw43PioInterrupts);
+        let dma0 = Channel::new(self.dma0.reborrow(), Cyw43PioInterrupts);
+        let dma1 = Channel::new(self.dma1.reborrow(), Cyw43PioInterrupts);
 
         let spi = PioSpi::new(
             &mut pio.common,
@@ -155,7 +161,8 @@ impl super::WifiDriver for RpWifiDriver<'_> {
             cs,
             self.dio.reborrow(),
             self.clk.reborrow(),
-            dma,
+            dma0,
+            dma1,
         );
 
         let (mut net_device, mut net_controller, runner) = cyw43::new(
@@ -189,7 +196,8 @@ impl super::WifiCoexDriver for RpWifiDriver<'_> {
         let pwr = Output::new(self.pwr.reborrow(), Level::Low);
         let cs = Output::new(self.cs.reborrow(), Level::High);
         let mut pio = Pio::new(self.pio.reborrow(), Cyw43PioInterrupts);
-        let dma = Channel::new(self.dma.reborrow(), Cyw43PioInterrupts);
+        let dma0 = Channel::new(self.dma0.reborrow(), Cyw43PioInterrupts);
+        let dma1 = Channel::new(self.dma1.reborrow(), Cyw43PioInterrupts);
 
         let spi = PioSpi::new(
             &mut pio.common,
@@ -202,7 +210,8 @@ impl super::WifiCoexDriver for RpWifiDriver<'_> {
             cs,
             self.dio.reborrow(),
             self.clk.reborrow(),
-            dma,
+            dma0,
+            dma1,
         );
 
         let (mut net_device, bt_device, mut net_controller, runner) = cyw43::new_with_bluetooth(
@@ -241,7 +250,8 @@ impl super::BleDriver for RpWifiDriver<'_> {
         let pwr = Output::new(self.pwr.reborrow(), Level::Low);
         let cs = Output::new(self.cs.reborrow(), Level::High);
         let mut pio = Pio::new(self.pio.reborrow(), Cyw43PioInterrupts);
-        let dma = Channel::new(self.dma.reborrow(), Cyw43PioInterrupts);
+        let dma0 = Channel::new(self.dma0.reborrow(), Cyw43PioInterrupts);
+        let dma1 = Channel::new(self.dma1.reborrow(), Cyw43PioInterrupts);
 
         let spi = PioSpi::new(
             &mut pio.common,
@@ -254,7 +264,8 @@ impl super::BleDriver for RpWifiDriver<'_> {
             cs,
             self.dio.reborrow(),
             self.clk.reborrow(),
-            dma,
+            dma0,
+            dma1,
         );
 
         let (_net_device, bt_device, _net_controller, runner) = cyw43::new_with_bluetooth(

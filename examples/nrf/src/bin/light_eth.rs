@@ -43,7 +43,8 @@ use rs_matter_embassy::matter::utils::select::Coalesce;
 use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
 use rs_matter_embassy::ot::openthread::nrf::NrfRadio;
 use rs_matter_embassy::ot::openthread::{
-    EmbassyTimeTimer, OpenThread, PhyRadioRunner, ProxyRadio, ProxyRadioResources, RamSettings,
+    EmbassyTimeTimer, MacRadio, MacRadioResources, OpenThread, PhyRadioRunner, ProxyRadio,
+    ProxyRadioResources, RamSettings,
 };
 use rs_matter_embassy::ot::{OtMatterResources, OtMdns, OtNetStack, OtNetif};
 use rs_matter_embassy::stack::eth::EthMatterStack;
@@ -264,5 +265,14 @@ const NODE: Node = Node {
 
 #[embassy_executor::task]
 async fn run_radio(mut runner: PhyRadioRunner<'static>, radio: NrfRadio<'static>) -> ! {
-    runner.run(radio, EmbassyTimeTimer).await
+    // The proxy runner requires a full-MAC radio; wrapping the bare PHY in the
+    // software MAC here, in the high-priority executor, is what lets the MAC's
+    // ACK deadlines be served with low latency.
+    static MAC_RADIO_RESOURCES: static_cell::StaticCell<MacRadioResources> =
+        static_cell::StaticCell::new();
+    let mac_radio_resources = MAC_RADIO_RESOURCES.init(MacRadioResources::new());
+
+    runner
+        .run(MacRadio::new(radio, EmbassyTimeTimer, mac_radio_resources))
+        .await
 }

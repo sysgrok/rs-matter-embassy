@@ -2,7 +2,7 @@ use core::cell::Cell;
 
 use esp_radio::wifi::scan::ScanConfig;
 use esp_radio::wifi::sta::StationConfig;
-use esp_radio::wifi::{AuthenticationMethod, Config, WifiController, WifiError};
+use esp_radio::wifi::{AuthenticationMethod, Config, ConnectionError, WifiController, WifiError};
 
 use crate::matter::dm::clusters::net_comm::{
     NetCtl, NetCtlError, NetworkScanInfo, NetworkType, WiFiBandEnum, WiFiSecurityBitmap,
@@ -122,7 +122,7 @@ impl NetCtl for EspWifiController<'_> {
         .map_err(to_ctl_err)?;
         info!("Wifi configuration updated");
 
-        ctl.connect_async().await.map_err(to_ctl_err)?;
+        ctl.connect_async().await.map_err(to_ctl_err2)?;
 
         self.1.lock(|connected| {
             info!("Wifi state updated: {} -> {}", connected.get(), true);
@@ -230,6 +230,22 @@ fn to_ctl_err(e: WifiError) -> NetCtlError {
         WifiError::NotConnected => NetCtlError::OtherConnectionFailure,
         WifiError::Unsupported => NetCtlError::UnsupportedSecurity,
         _ => NetCtlError::Other(ErrorCode::NoNetworkInterface.into()),
+    }
+}
+
+fn to_ctl_err2(e: ConnectionError) -> NetCtlError {
+    match e {
+        ConnectionError::Failed(e) => {
+            error!("Connection error: {:?}", e);
+
+            NetCtlError::OtherConnectionFailure
+        }
+        ConnectionError::WifiError(e) => to_ctl_err(e),
+        _ => {
+            error!("Connection error: {:?}", e);
+
+            NetCtlError::Other(ErrorCode::NoNetworkInterface.into())
+        }
     }
 }
 

@@ -50,15 +50,21 @@ overflow-checks = false
 mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
 openthread = { git = "https://github.com/esp-rs/openthread" }
 openthread-sys = { git = "https://github.com/esp-rs/openthread" }
-esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
-esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "10e48dd74837bae4be663a7d1825d12875363727" }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
+esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
+esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
+esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
+esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
+esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
+esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
+
+trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "652fe9633db5be92b98136690e4a0ad9d9bb133f" }
+
+nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
+nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 
 [features]
 default = ["esp32c6"]
@@ -80,8 +86,8 @@ esp-hal = { version = "~1.1", features = ["log-04", "unstable", "exception-handl
 esp-rtos = { version = "0.3", features = ["esp-radio", "embassy"] }
 esp-alloc = { version = "0.10" }
 esp-println = { version = "0.17", features = ["log-04"] }
-esp-radio = { version = "0.18", features = ["ble", "log-04", "unstable"] }
-esp-storage = "0.9"
+esp-radio = { version = "1.0.0-beta.0", features = ["ble", "log-04", "unstable"] }
+esp-storage = { version = "0.9", features = ["embedded-storage"] }
 esp-bootloader-esp-idf = { version = "0.5", features = ["log-04"] }
 esp-metadata-generated = "0.4"
 rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", features = ["esp", "log", "mbedtls"] }
