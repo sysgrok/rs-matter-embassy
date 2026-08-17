@@ -64,7 +64,7 @@ trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "652fe9633
 
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
-nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "new-openthread" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 
 [features]
 default = ["esp32c6"]
