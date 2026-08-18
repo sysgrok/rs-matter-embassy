@@ -39,9 +39,9 @@ use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
 use rs_matter_embassy::stack::rand::reseeding_csprng;
 use rs_matter_embassy::wireless::nrf::{
-    NrfThreadClockInterruptHandler, NrfThreadHighPrioInterruptHandler,
-    NrfThreadLowPrioInterruptHandler, NrfThreadRadioResources, NrfThreadRustRadioDriver,
-    NrfThreadRustRadioRunner,
+    NrfMpslPeripherals, NrfSdcPeripherals, NrfThreadClockInterruptHandler,
+    NrfThreadHighPrioInterruptHandler, NrfThreadLowPrioInterruptHandler, NrfThreadRadioResources,
+    NrfThreadRustRadioDriver, NrfThreadRustRadioRunner,
 };
 use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
 
@@ -147,24 +147,11 @@ async fn main(_s: Spawner) {
     let (thread_driver, thread_radio_runner) = NrfThreadRustRadioDriver::new(
         mk_static!(NrfThreadRadioResources, NrfThreadRadioResources::new()),
         p.RADIO,
-        p.RTC0,
-        p.TIMER0,
-        p.TEMP,
-        p.PPI_CH17,
-        p.PPI_CH18,
-        p.PPI_CH19,
-        p.PPI_CH20,
-        p.PPI_CH21,
-        p.PPI_CH22,
-        p.PPI_CH23,
-        p.PPI_CH24,
-        p.PPI_CH25,
-        p.PPI_CH26,
-        p.PPI_CH27,
-        p.PPI_CH28,
-        p.PPI_CH29,
-        p.PPI_CH30,
-        p.PPI_CH31,
+        NrfMpslPeripherals::new(p.RTC0, p.TIMER0, p.TEMP, p.PPI_CH19, p.PPI_CH30, p.PPI_CH31),
+        NrfSdcPeripherals::new(
+            p.PPI_CH17, p.PPI_CH18, p.PPI_CH20, p.PPI_CH21, p.PPI_CH22, p.PPI_CH23, p.PPI_CH24,
+            p.PPI_CH25, p.PPI_CH26, p.PPI_CH27, p.PPI_CH28, p.PPI_CH29,
+        ),
         crypto.rand().unwrap(),
         Irqs,
     );

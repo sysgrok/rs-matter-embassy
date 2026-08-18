@@ -4,9 +4,20 @@ version = "0.1.0"
 edition = "2021"
 resolver = "2"
 
+[features]
+default = ["nrf52840"]
+
+nrf52840 = ["rs-matter-embassy/nrf52840", "embassy-nrf/nrf52840", "embassy-nrf/time-driver-rtc1"]
+# `unstable-pac` is for the GRTC scrub in `light_thread_coex`, which has to run
+# before `embassy_nrf::init`.
+nrf54l15 = ["rs-matter-embassy/nrf54l15-app-s", "embassy-nrf/nrf54l15-app-s", "embassy-nrf/time-driver-grtc", "embassy-nrf/unstable-pac"]
+
+# Both examples below drive the `embassy-nrf` IEEE 802.15.4 radio directly, which
+# only exists on the nRF52 family.
 [[bin]]
 name = "light_thread"
 harness = false
+required-features = ["nrf52840"]
 
 [[bin]]
 name = "light_thread_coex"
@@ -15,6 +26,7 @@ harness = false
 [[bin]]
 name = "light_eth"
 harness = false
+required-features = ["nrf52840"]
 
 [profile.dev]
 opt-level = "z"
@@ -41,12 +53,12 @@ trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "652fe9633
 [dependencies]
 embassy-executor = { version = "0.10", default-features = false, features = ["platform-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
 embassy-time = { version = "0.5", default-features = false, features = ["defmt", "defmt-timestamp-uptime-ms"] }
-embassy-nrf = { version = "0.11", features = ["defmt", "time-driver-rtc1", "time", "nrf52840"], default-features = false }
+embassy-nrf = { version = "0.11", features = ["defmt", "time"], default-features = false }
 embassy-futures = "0.1.1"
 embassy-sync = { version = "0.8", features = ["defmt"] }
 defmt = "1"
 embedded-alloc = "0.7"
-rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", features = ["nrf", "openthread", "defmt", "mbedtls", "openthread-heap-int-8192"] }
+rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", features = ["openthread", "defmt", "mbedtls", "openthread-heap-int-8192"] }
 tinyrlibc = { version = "0.5", default-features = false, features = ["alloc", "strstr", "strcmp", "strncmp", "isupper", "memchr", "utoa", "strtoul"] }
 
 cortex-m = "0.7.6"

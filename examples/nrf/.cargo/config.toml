@@ -1,9 +1,14 @@
 [build]
+# The chip is picked with a Cargo feature (`nrf52840` by default, `nrf54l15`),
+# and the target has to be matched to it by hand:
+#   nRF52840 (Cortex-M4F): thumbv7em-none-eabi
+#   nRF54L15 (Cortex-M33F): --target thumbv8m.main-none-eabihf
 target = "thumbv7em-none-eabi"
 #rustflags = ["-Zunstable-options", "-Cpanic=immediate-abort"]
 
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
-# replace nRF82840_xxAA with your chip as listed in `probe-rs chip list`
+# replace nRF52840_xxAA with your chip as listed in `probe-rs chip list`
+# (nRF54L15_M33 for the nRF54L15)
 runner = "probe-rs run --chip nRF52840_xxAA --always-print-stacktrace --catch-reset --catch-hardfault"
 
 [unstable]

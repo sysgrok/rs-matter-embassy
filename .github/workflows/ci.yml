@@ -96,6 +96,18 @@ jobs:
           THREAD_DATASET: "000003"
         run: cd examples/nrf; cargo build --release
 
+      # Only `light_thread_coex` builds here: the other two examples drive the
+      # `embassy-nrf` IEEE 802.15.4 radio, which is an nRF52-only affair.
+      - name: Examples-NRF54L-Build | Clippy
+        env:
+          THREAD_DATASET: "000003"
+        run: cd examples/nrf; cargo clippy --no-default-features --features nrf54l15 --target thumbv8m.main-none-eabihf --no-deps -- -Dwarnings
+
+      - name: Examples-NRF54L-Build | Compile
+        env:
+          THREAD_DATASET: "000003"
+        run: cd examples/nrf; cargo build --release --no-default-features --features nrf54l15 --target thumbv8m.main-none-eabihf
+
       - name: Examples-RP-Build | Fmt Check
         run: cd examples/rp; cargo fmt -- --check
 

@@ -176,7 +176,7 @@ max-exchanges-per-session-3 = ["rs-matter-stack/max-exchanges-per-session-3"]
 embassy-net = ["dep:embassy-net", "edge-nal-embassy", "openthread?/embassy-net-driver-channel", "esp-radio?/wifi"]
 esp = ["esp-radio", "esp-hal", "openthread?/esp-radio"]
 rp = ["cyw43", "cyw43-pio", "embassy-rp", "embassy-net-driver-channel"]
-nrf = ["embassy-nrf", "nrf-sdc", "nrf-mpsl", "nrf-802154", "portable-atomic", "openthread?/embassy-nrf"]
+nrf = ["embassy-nrf", "nrf-sdc", "nrf-mpsl", "nrf-802154", "portable-atomic"]
 openthread = ["dep:openthread", "dep:edge-nal-openthread"]
 # Build OpenThread as a Full Thread Device (router-capable) rather than the
 # default Minimal Thread Device. Enables the route-table diagnostics and the
@@ -186,6 +186,30 @@ log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "edge-nal-openthread
 defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "edge-nal-openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host/defmt", "cyw43?/defmt", "cyw43-pio?/defmt", "embassy-nrf?/defmt", "nrf-mpsl?/defmt", "nrf-sdc?/defmt", "nrf-802154?/defmt"]
 rustcrypto = ["rs-matter-stack/rustcrypto"]
 mbedtls = ["rs-matter-stack/mbedtls", "openthread?/mbedtls-rs-sys"]
+
+# Nordic silicon: pick exactly one of these instead of the bare `nrf` feature.
+# `embassy-nrf`, `nrf-mpsl`, `nrf-sdc` and `nrf-802154` all need to be told
+# which part they are building for, and they all have to be told the same one.
+#
+# nRF52840 is the only part where the pure-Rust `NrfThreadRustRadioDriver` is
+# available - the nRF54L series has no `embassy-nrf` IEEE 802.15.4 radio driver,
+# so `NrfThreadMpslRadioDriver` (the Nordic C driver) is the only option there.
+nrf52840 = ["_nrf52", "embassy-nrf/nrf52840", "nrf-mpsl/nrf52840", "nrf-sdc/nrf52840", "nrf-802154/nrf52840"]
+nrf54l05-app-s = ["_nrf54l", "embassy-nrf/nrf54l05-app-s", "nrf-mpsl/nrf54l05-app-s", "nrf-sdc/nrf54l05-app-s", "nrf-802154/nrf54l05-app-s"]
+nrf54l10-app-s = ["_nrf54l", "embassy-nrf/nrf54l10-app-s", "nrf-mpsl/nrf54l10-app-s", "nrf-sdc/nrf54l10-app-s", "nrf-802154/nrf54l10-app-s"]
+nrf54l10-app-ns = ["_nrf54l", "embassy-nrf/nrf54l10-app-ns", "nrf-mpsl/nrf54l10-app-ns", "nrf-sdc/nrf54l10-app-ns", "nrf-802154/nrf54l10-app-ns"]
+nrf54l15-app-s = ["_nrf54l", "embassy-nrf/nrf54l15-app-s", "nrf-mpsl/nrf54l15-app-s", "nrf-sdc/nrf54l15-app-s", "nrf-802154/nrf54l15-app-s"]
+nrf54l15-app-ns = ["_nrf54l", "embassy-nrf/nrf54l15-app-ns", "nrf-mpsl/nrf54l15-app-ns", "nrf-sdc/nrf54l15-app-ns", "nrf-802154/nrf54l15-app-ns"]
+nrf54lm20-app-s = ["_nrf54l", "embassy-nrf/nrf54lm20-app-s", "nrf-mpsl/nrf54lm20-app-s", "nrf-sdc/nrf54lm20-app-s", "nrf-802154/nrf54lm20-app-s"]
+
+# Internal: the chip family, which is what the driver code actually branches on.
+# `openthread/embassy-nrf` is an nRF52-only affair, as it wraps the `embassy-nrf`
+# radio driver. `RTC0` belongs to MPSL and `RTC2` to the 802.15.4 driver, which
+# leaves `RTC1` for `embassy-time`.
+_nrf52 = ["nrf", "openthread?/embassy-nrf", "embassy-nrf/time-driver-rtc1"]
+# The whole nRF54L series keeps time on the GRTC rather than on an RTC, so
+# `embassy-time` has to be pointed at that instead.
+_nrf54l = ["nrf", "embassy-nrf/time-driver-grtc"]
 
 # OpenThread heap-configuration passthroughs (see the `openthread` crate).
 # OpenThread keeps one fixed-size internal heap buffer, shared by its own code
@@ -252,9 +276,11 @@ cyw43-pio = { version = "0.10", optional = true }
 embassy-rp = { version = "0.10", optional = true, features = ["unstable-pac", "rp2040"] }
 embassy-net-driver-channel = { version = "0.4", optional = true }
 
-# Only necessary when `rs-matter-embassy` is providing extra-sugar for Nordic silicon
-embassy-nrf = { version = "0.11", optional = true, features = ["time-driver-rtc1", "time", "nrf52840"], default-features = false }
-nrf-sdc = { version = "0.4", default-features = false, optional = true, features = ["peripheral", "nrf52840"] }
-nrf-mpsl = { version = "0.3", default-features = false, optional = true, features = ["nrf52840", "critical-section-impl"] }
-nrf-802154 = { version = "0.1", default-features = false, optional = true, features = ["nrf52840", "openthread"] }
+# Only necessary when `rs-matter-embassy` is providing extra-sugar for Nordic silicon.
+# The chip is not selected here but by one of the `nrf*` features above, as all
+# four of these crates have to agree on it.
+embassy-nrf = { version = "0.11", optional = true, features = ["time"], default-features = false }
+nrf-sdc = { version = "0.4", default-features = false, optional = true, features = ["peripheral"] }
+nrf-mpsl = { version = "0.3", default-features = false, optional = true, features = ["critical-section-impl"] }
+nrf-802154 = { version = "0.1", default-features = false, optional = true, features = ["openthread"] }
 portable-atomic = { version = "1", optional = true }

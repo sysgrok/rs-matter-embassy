@@ -8,6 +8,13 @@
 //#![warn(clippy::large_stack_frames)]
 #![warn(clippy::large_types_passed_by_value)]
 
+#[cfg(all(feature = "nrf", not(any(feature = "_nrf52", feature = "_nrf54l"))))]
+compile_error!(
+    "The `nrf` feature needs a chip to go with it: enable one of `nrf52840`, \
+     `nrf54l05-app-s`, `nrf54l10-app-s`, `nrf54l10-app-ns`, `nrf54l15-app-s`, \
+     `nrf54l15-app-ns` or `nrf54lm20-app-s` instead."
+);
+
 // This mod MUST go first, so that the others see its macros.
 pub(crate) mod fmt;
 
