@@ -127,7 +127,7 @@ espflash flash target/riscv32imac-unknown-none-elf/debug/light_wifi --baud 15000
 espflash monitor --elf target/riscv32imac-unknown-none-elf/debug/light_wifi
 ```
 
-### Nordic nRF52840 DK
+### Nordic nRF52840
 
 ```sh
 # Thread dataset should be valid only if you plan to run the `light_eth` "ethernet" example.
@@ -139,4 +139,20 @@ cd nrf
 
 # Replace `light_thread` with `light_eth` below to flash the Ethernet example
 cargo run --bin light_thread
+```
+
+### Nordic nRF54L15
+
+Only the `light_thread_coex` example runs here: `light_thread` and `light_eth` drive
+the `embassy-nrf` IEEE 802.15.4 radio directly, and that one exists on the nRF52
+family only. The chip is picked with a Cargo feature, and the target and the
+`probe-rs` chip name have to be matched to it by hand.
+
+```sh
+cd nrf
+
+cargo run --no-default-features --features nrf54l15 \
+    --target thumbv8m.main-none-eabihf \
+    --config 'target."cfg(all(target_arch = \"arm\", target_os = \"none\"))".runner = "probe-rs run --chip nRF54L15_M33"' \
+    --bin light_thread_coex
 ```
