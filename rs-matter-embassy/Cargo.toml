@@ -276,7 +276,7 @@ trouble-host = { version = "0.7", optional = true, default-features = false, fea
 # as `trouble-host` above - Matter commissioning is BLE-peripheral-only, so neither the central
 # role nor the Security Manager is needed. `use-c-heap` is not optional: the NimBLE C host makes
 # bounded init-time allocations through it and cannot boot without a backend for them.
-nimble-rs = { git = "https://github.com/sysgrok/nimble-rs", optional = true, default-features = false, features = ["peripheral", "use-c-heap", "max-connections-1"] }
+nimble-rs = { git = "https://github.com/sysgrok/nimble-rs", branch = "split-conn-from-periph", optional = true, default-features = false, features = ["peripheral", "use-c-heap", "max-connections-1"] }
 
 bt-hci = "0.9"
 

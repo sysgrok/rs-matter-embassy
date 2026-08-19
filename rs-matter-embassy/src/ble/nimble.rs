@@ -58,6 +58,16 @@ const BLE_ATT_ERR_INSUFFICIENT_RES: u8 = 0x11;
 /// `BLE_HS_EDONE` - the status a completed (peer-confirmed) indication reports.
 const BLE_HS_EDONE: i32 = 14;
 
+/// The advertising interval, in NimBLE's 0.625ms units (160ms).
+///
+/// Set explicitly rather than left at 0: NimBLE reads 0 as "use the defaults", which for
+/// connectable undirected advertising is `BLE_GAP_ADV_FAST_INTERVAL1` - 30-60ms, indefinitely.
+/// That is 3-5x more radio airtime than the `trouble` backend asks for (its
+/// `AdvertisementParameters::default()` is a flat 160ms), and on parts where BLE and 802.15.4
+/// share one radio behind MPSL, every advertising event is a timeslot taken away from Thread.
+/// Matching `trouble` keeps the two backends comparable and Thread coexistence unpenalized.
+const ADV_ITVL: u16 = (160_000u32 / 625) as u16;
+
 // The Matter BTP service UUIDs, as `const BleUuid`s (NimBLE stores 128-bit UUIDs LSB-first; the
 // `BleUuid` constructors handle that).
 const SVC_UUID: BleUuid = BleUuid::uuid16(MATTER_BLE_SERVICE_UUID16);
@@ -297,8 +307,36 @@ where
         // Initialize the host and register the static Matter BTP service table (in flash). The host
         // is not driven yet - that happens in `Ble::run` below, after the hooks are set. Dropped
         // (and hence deinitialized) before `_guard`, when this future completes.
-        let ble: Ble<'_, Services> =
-            Ble::new_with_services(&SERVICES).map_err(to_matter_err_ble)?;
+        //
+        // TODO: inject an MPSL-aware `Parker` here (`Ble::new_with_services_and_parker`) for the
+        // `nrf` backend.
+        //
+        // A NimBLE host call that sends an HCI command blocks until the controller acks it, and
+        // `nimble-rs` spends that wait in `hci::pump_manual` + `Parker::park` - which on bare-metal
+        // ARM defaults to a bare `WFE`. Nothing else on the executor is polled meanwhile, and on
+        // Nordic silicon that includes `mpsl.run()`, whose low-priority processing the 802.15.4
+        // timeslots depend on (see `wireless::thread::nrf`): starve it and a scheduled TX never
+        // completes and RX never re-arms. `trouble` is fully async and never withholds the
+        // executor this way.
+        //
+        // The fix is a `Parker` that services MPSL's low-priority work before sleeping - either by
+        // polling a pinned `mpsl.run()` (the trick `nimble-rs` itself uses to keep its HCI pump
+        // alive across such waits) or by calling `mpsl_low_priority_process()` directly. It needs a
+        // parker threaded through `NimbleBtpGattPeripheral` from the nRF driver that owns the MPSL
+        // instance, so it is not a local change.
+        //
+        // Only worth doing if Thread coexistence misbehaves: the stalls are short (one HCI
+        // command-ack round-trip to an in-process controller), and Thread has been stable since the
+        // advertising interval stopped competing with it for radio timeslots (see `ADV_ITVL`).
+        let ble: Ble<'_, Services> = Ble::new_with_services(&SERVICES).map_err(|e| {
+            error!(
+                "NimBLE host init failed: {:?}. `BleError(6)` (`BLE_HS_ENOMEM`) means the C heap \
+                 is too small - the host allocates its mbuf / transport pools (~13K with the \
+                 stock counts) and its GATT registry from it",
+                debug2format!(e)
+            );
+            Error::from(ErrorCode::BtpError)
+        })?;
 
         // The hooks are plain `fn` items: they capture nothing and reach the peripheral state
         // through the global `CONTEXT`, so no `unsafe` borrowing is needed.
@@ -467,6 +505,8 @@ where
         let params = BleAdvParams {
             conn_mode: BLE_GAP_CONN_MODE_UND,
             disc_mode: BLE_GAP_DISC_MODE_GEN,
+            itvl_min: ADV_ITVL,
+            itvl_max: ADV_ITVL,
             ..Default::default()
         };
 

@@ -97,7 +97,12 @@ const LOG_RINGBUF_SIZE: usize = 2048;
 async fn main(_s: Spawner) {
     // `rs-matter` uses the `x509` crate which (still) needs a few kilos of heap space
     {
+        #[cfg(not(feature = "nimble"))]
         const HEAP_SIZE: usize = 8192;
+        // NimBLE allocates its mbuf/transport pools (~13K with the stock counts) and its GATT
+        // registry from this same heap.
+        #[cfg(feature = "nimble")]
+        const HEAP_SIZE: usize = 8192 + 16384;
 
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
         unsafe { HEAP.init(addr_of_mut!(HEAP_MEM) as usize, HEAP_SIZE) }
