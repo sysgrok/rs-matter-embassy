@@ -8,9 +8,7 @@ use crate::stack::network::{Embedding, Network};
 use crate::stack::wireless::{GattTask, WirelessBle};
 use crate::stack::MatterStack;
 
-use trouble_host::Controller;
-
-use crate::ble::{TroubleBtpGattContext, TroubleBtpGattPeripheral};
+use crate::ble::{BtpGattContext, BtpGattPeripheral, Controller};
 
 #[cfg(feature = "openthread")]
 pub use thread::*;
@@ -63,7 +61,7 @@ pub(crate) const SLOTS: usize = 20;
 ///
 /// ... where `E` can be a next-level, user-supplied embedding or just `()` if the user does not need to embed anything.
 pub struct EmbassyGatt<N, E = ()> {
-    btp_gatt_context: TroubleBtpGattContext,
+    btp_gatt_context: BtpGattContext,
     net_context: N,
     embedding: E,
 }
@@ -78,7 +76,7 @@ where
     #[inline(always)]
     const fn new() -> Self {
         Self {
-            btp_gatt_context: TroubleBtpGattContext::new(),
+            btp_gatt_context: BtpGattContext::new(),
             net_context: N::INIT,
             embedding: E::INIT,
         }
@@ -87,14 +85,14 @@ where
     /// Return an in-place initializer for the `EspGatt` embedding.
     fn init() -> impl Init<Self> {
         init!(Self {
-            btp_gatt_context <- TroubleBtpGattContext::init(),
+            btp_gatt_context <- BtpGattContext::init(),
             net_context <- N::init(),
             embedding <- E::init(),
         })
     }
 
     /// Return a reference to the Bluedroid Gatt peripheral context.
-    pub fn ble_context(&self) -> &TroubleBtpGattContext {
+    pub fn ble_context(&self) -> &BtpGattContext {
         &self.btp_gatt_context
     }
 
@@ -161,7 +159,7 @@ where
     }
 }
 
-impl<'a, R, C> TroubleBtpGattPeripheral<'a, R, C>
+impl<'a, R, C> BtpGattPeripheral<'a, R, C>
 where
     R: RngCore + Copy,
     C: Controller,
@@ -183,7 +181,7 @@ where
 struct BleDriverTaskImpl<'a, A, R> {
     task: A,
     rand: Option<R>,
-    context: &'a TroubleBtpGattContext,
+    context: &'a BtpGattContext,
 }
 
 impl<A, R> BleDriverTask for BleDriverTaskImpl<'_, A, R>
@@ -193,9 +191,9 @@ where
 {
     async fn run<C>(&mut self, controller: C) -> Result<(), Error>
     where
-        C: trouble_host::Controller,
+        C: Controller,
     {
-        let mut peripheral = TroubleBtpGattPeripheral::new(controller, self.rand, self.context);
+        let mut peripheral = BtpGattPeripheral::new(controller, self.rand, self.context);
 
         self.task.run(&mut peripheral).await
     }

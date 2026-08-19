@@ -36,8 +36,6 @@ use rs_matter_stack::matter::crypto::{CryptoRng, CryptoRngCore, RngCore};
 use rs_matter_stack::matter::error::{Error, ErrorCode};
 use rs_matter_stack::rand::RngAdaptor;
 
-use crate::ble::MAX_MTU_SIZE;
-
 #[cfg(feature = "_nrf52")]
 use embassy_nrf::interrupt::typelevel::Handler;
 #[cfg(feature = "_nrf52")]
@@ -69,6 +67,11 @@ pub use nrf_sdc::Peripherals as NrfSdcPeripherals;
 
 #[cfg(feature = "_nrf52")]
 pub use openthread::ProxyRadioResources as NrfThreadRadioResources;
+
+/// The L2CAP buffer size the SoftDevice Controller is configured with, i.e. the largest ACL
+/// payload a link can carry. A property of the controller, so it does not vary with the BLE host
+/// backend compiled on top of it (and it matches the packet-pool MTU the `trouble` backend uses).
+const L2CAP_MTU: usize = 251;
 
 /// How many outgoing L2CAP buffers per link
 const L2CAP_TXQ: u8 = 3;
@@ -508,7 +511,7 @@ impl<'d> SdcDriver<'d> {
             .support_peripheral()
             .peripheral_count(1)
             .map_err(to_matter_err)?
-            .buffer_cfg(MAX_MTU_SIZE as _, MAX_MTU_SIZE as _, L2CAP_TXQ, L2CAP_RXQ)
+            .buffer_cfg(L2CAP_MTU as _, L2CAP_MTU as _, L2CAP_TXQ, L2CAP_RXQ)
             .map_err(to_matter_err)?
             .build(reborrow_sdc(&mut self.p), rng, mpsl, sdc_mem)
             .map_err(to_matter_err)
@@ -621,7 +624,7 @@ where
         let mpsl = self.mpsl.create_mpsl().await?;
 
         // TODO: Externalize as resources
-        // Mem is roughly MAC_CONNECTIONS * MAX_MTU_SIZE * L2CAP_TXQ * L2CAP_RXQ
+        // Mem is roughly MAC_CONNECTIONS * L2CAP_MTU * L2CAP_TXQ * L2CAP_RXQ
         let mut sdc_mem = nrf_sdc::Mem::<3084>::new();
         let mut rand = RngAdaptor::new(SendHack(self.rand));
 
@@ -712,7 +715,7 @@ where
         let mpsl = self.mpsl.create_mpsl().await?;
 
         // TODO: Externalize as resources
-        // Mem is roughly MAC_CONNECTIONS * MAX_MTU_SIZE * L2CAP_TXQ * L2CAP_RXQ
+        // Mem is roughly MAC_CONNECTIONS * L2CAP_MTU * L2CAP_TXQ * L2CAP_RXQ
         let mut sdc_mem = nrf_sdc::Mem::<3084>::new();
         let mut rand = RngAdaptor::new(SendHack(self.rand));
 
@@ -740,7 +743,7 @@ where
         let mpsl = self.mpsl.create_mpsl().await?;
 
         // TODO: Externalize as resources
-        // Mem is roughly MAC_CONNECTIONS * MAX_MTU_SIZE * L2CAP_TXQ * L2CAP_RXQ
+        // Mem is roughly MAC_CONNECTIONS * L2CAP_MTU * L2CAP_TXQ * L2CAP_RXQ
         let mut sdc_mem = nrf_sdc::Mem::<3084>::new();
         let mut rand = RngAdaptor::new(SendHack(self.rand));
 

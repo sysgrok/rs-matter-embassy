@@ -67,7 +67,7 @@ nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa
 nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 
 [features]
-default = ["esp32c6"]
+default = ["esp32c6", "trouble"]
 esp32 = ["esp-rtos/esp32", "esp-hal/esp32", "esp-backtrace/esp32", "esp-println/esp32", "esp-radio/esp32", "esp-storage/esp32", "esp-bootloader-esp-idf/esp32", "esp-metadata-generated/esp32", "portable-atomic/critical-section", "wifi"]
 esp32c2 = ["esp-rtos/esp32c2", "esp-hal/esp32c2", "esp-backtrace/esp32c2", "esp-println/esp32c2", "esp-radio/esp32c2", "esp-storage/esp32c2", "esp-bootloader-esp-idf/esp32c2", "esp-metadata-generated/esp32c2", "portable-atomic/critical-section", "wifi"]
 esp32c3 = ["esp-rtos/esp32c3", "esp-hal/esp32c3", "esp-backtrace/esp32c3", "esp-println/esp32c3", "esp-radio/esp32c3", "esp-storage/esp32c3", "esp-bootloader-esp-idf/esp32c3", "esp-metadata-generated/esp32c3", "portable-atomic/unsafe-assume-single-core", "wifi"]
@@ -76,6 +76,12 @@ esp32s3 = ["esp-rtos/esp32s3", "esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-
 esp32h2 = ["esp-rtos/esp32h2", "esp-hal/esp32h2", "esp-backtrace/esp32h2", "esp-println/esp32h2", "esp-radio/esp32h2", "esp-storage/esp32h2", "esp-bootloader-esp-idf/esp32h2", "esp-metadata-generated/esp32h2", "portable-atomic/critical-section", "thread"]
 wifi = ["rs-matter-embassy/embassy-net"]
 thread = ["rs-matter-embassy/openthread", "rs-matter-embassy/openthread-heap-int-8192"]
+
+# The BLE host backend - exactly one of these, as they are mutually exclusive. `trouble` is a
+# default feature here, so building with NimBLE means naming the chip again:
+# `cargo build --no-default-features --features esp32c6,thread,nimble --release`
+trouble = ["rs-matter-embassy/trouble"]
+nimble = ["rs-matter-embassy/nimble"]
 
 [dependencies]
 log = "0.4"
@@ -90,7 +96,10 @@ esp-radio = { version = "1.0.0-beta.0", features = ["ble", "log-04", "unstable"]
 esp-storage = { version = "0.9", features = ["embedded-storage"] }
 esp-bootloader-esp-idf = { version = "0.5", features = ["log-04"] }
 esp-metadata-generated = "0.4"
-rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", features = ["esp", "log", "mbedtls"] }
+# `default-features = false`: the BLE host backend is selected by this crate's `trouble` /
+# `nimble` features instead, as the `trouble` default would collide with `nimble`. Everything
+# else the defaults used to bring in (`rustcrypto`) is named explicitly.
+rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", default-features = false, features = ["esp", "log", "mbedtls", "rustcrypto"] }
 tinyrlibc = { version = "0.5", default-features = false, features = ["memchr", "utoa", "strtoul"] }
 embassy-futures = "0.1"
 embassy-time = "0.5"

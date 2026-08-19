@@ -8,8 +8,29 @@
 ## Overview
 
 Everything necessary to run [`rs-matter`](https://github.com/project-chip/rs-matter) with Embassy:
-* Implementation of `rs-matter`'s `GattPeripheral` for BLE comissioning support based on [`trouble`](https://github.com/embassy-rs/trouble).
+* Implementation of `rs-matter`'s `GattPeripheral` for BLE comissioning support, with a choice of two BLE host backends (see below).
 * [`rs-matter-stack`](https://github.com/ivmarkov/rs-matter-stack) support with `Netif`, `Gatt`, `Wireless` (for both Wifi and Thread) and `KvBlobStore` implementations.
+
+### BLE host backends
+
+The `GattPeripheral` implementation runs on top of either of two BLE hosts, selected by a Cargo feature.
+Both drive a plain [`bt-hci`](https://github.com/embassy-rs/bt-hci) controller, so the choice does not
+affect the rest of the stack - or the examples - in any way:
+
+| Feature | Host | Notes |
+| --- | --- | --- |
+| `trouble` (default) | [`trouble`](https://github.com/embassy-rs/trouble) | Pure Rust, no C toolchain needed |
+| `nimble` | [`nimble-rs`](https://github.com/sysgrok/nimble-rs) | The (mature, widely deployed) NimBLE C host, wrapped in a thread-free, allocation-free Rust NPL/HCI layer. Needs a clang for the target |
+
+Footprint is close enough that it should not drive the choice: for the ESP32-C6 `light_thread` example,
+NimBLE costs ~10KB more flash and ~3KB more static RAM than `trouble`, plus its runtime C-heap use.
+
+The two are mutually exclusive, and `trouble` is a default feature, so selecting NimBLE means turning the
+defaults off:
+
+```toml
+rs-matter-embassy = { version = "0.1", default-features = false, features = ["rustcrypto", "nimble"] }
+```
 
 ## Example
 
