@@ -45,13 +45,8 @@ extern crate alloc;
 
 macro_rules! mk_static {
     ($t:ty) => {{
-        #[cfg(not(feature = "esp32"))]
-        {
-            static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
-            STATIC_CELL.uninit()
-        }
-        #[cfg(feature = "esp32")]
-        alloc::boxed::Box::leak(alloc::boxed::Box::<$t>::new_uninit())
+        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+        STATIC_CELL.uninit()
     }};
 }
 
@@ -67,12 +62,8 @@ macro_rules! mk_static {
 /// the program runs without panics during the stack initialization.
 const BUMP_SIZE: usize = 20000;
 
-/// Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
-#[cfg(not(feature = "esp32"))]
+/// Heap strictly necessary only for Thread+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
 const HEAP_SIZE: usize = 100 * 1024;
-/// On the esp32, we allocate the Matter Stack from heap as well, due to the non-contiguous memory regions on that chip
-#[cfg(feature = "esp32")]
-const HEAP_SIZE: usize = 140 * 1024;
 
 const RECLAIMED_RAM: usize =
     memory_range!("DRAM2_UNINIT").end - memory_range!("DRAM2_UNINIT").start;
