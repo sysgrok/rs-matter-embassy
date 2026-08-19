@@ -165,9 +165,7 @@ async fn main(_s: Spawner) {
     let mut store = get_persistent_store(peripherals.FLASH, &mut pt_buf[..]);
     stack.startup(&crypto, &mut store).await.unwrap();
 
-    let kv = stack.matter().kv(store);
-
-    if stack.is_commissioned() {
+    if stack.matter().has_fabrics() {
         info!(
             "To reset, press and hold the Boot Mode pin (GPIO9) for {} or more seconds",
             RESET_SECS
@@ -179,8 +177,10 @@ async fn main(_s: Spawner) {
         // Using `pin!` is completely optional, but reduces the size of the final future
         //
         // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
-        // We lend the store by `&mut` so the owned `kv` survives this scope and can
-        // be reused for the factory reset below (the blanket `&mut T: KvBlobStore`).
+        // `kv` only borrows the store (the blanket `&mut T: KvBlobStore`), so dropping it at
+        // the end of this scope hands the store back for the factory reset below.
+        let kv = stack.matter().kv(&mut store);
+
         let mut matter = pin!(stack.run_coex(
             // The Matter stack needs to instantiate an `embassy-net` `Driver` and `Controller`
             EmbassyWifi::new(
@@ -192,7 +192,7 @@ async fn main(_s: Spawner) {
             // The crypto provider
             &crypto,
             // Our `AsyncHandler` + `AsyncMetadata` impl
-            (NODE, handler),
+            (NODE, &handler),
             // The Matter stack needs a blob store to store its state
             &kv,
             // No user future to run
@@ -215,7 +215,11 @@ async fn main(_s: Spawner) {
     // by holding the BOOT pin low 3 or more seconds
     warn!("Resetting storage");
 
-    stack.matter().reset_persist(kv).await.unwrap();
+    // Factory-reset both halves of the persisted state: the `Matter` one (fabrics, basic
+    // info, RTC, sessions) and the Interaction Model one (events watermark, plus the Wifi
+    // credentials held in the networks store). The handler is passed along so cluster
+    // handlers owning persisted state of their own get the `FactoryReset` lifecycle op.
+    stack.reset(&crypto, (NODE, &handler), store).await.unwrap();
 
     warn!("Rebooting...");
 

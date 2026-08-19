@@ -207,6 +207,17 @@ defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "edge-nal-op
 rustcrypto = ["rs-matter-stack/rustcrypto"]
 mbedtls = ["rs-matter-stack/mbedtls", "openthread?/mbedtls-rs-sys"]
 
+# Multicast groups support.
+groups = ["rs-matter-stack/groups"]
+# Persist accepted subscriptions and resume them across a reboot.
+persistent-subscriptions = ["rs-matter-stack/persistent-subscriptions"]
+# CASE session resumption (Sigma2-Resume fast-path + its persisted cache).
+# When off, CASE always runs the full Sigma1/2/3 handshake, which is spec-compliant (resumption is optional) and drops the resume crypto + cache from the build.
+case-resumption = ["rs-matter-stack/case-resumption"]
+# Never initiate a new CASE session: `Exchange::initiate` only reuses an existing session (else fails), so the linker drops the CASE initiator + mDNS resolver.
+# Suits a pure accessory that only reports over sessions its peers established.
+case-responder-only = ["rs-matter-stack/case-responder-only"]
+
 # Nordic silicon: pick exactly one of these instead of the bare `nrf` feature.
 # `embassy-nrf`, `nrf-mpsl`, `nrf-sdc` and `nrf-802154` all need to be told
 # which part they are building for, and they all have to be told the same one.
@@ -264,7 +275,7 @@ embassy-sync-07 = { package = "embassy-sync", version = "0.7", optional = true }
 embassy-time = "0.5"
 embedded-io = "0.7"
 scopeguard = { version = "1", default-features = false }
-rs-matter-stack = { version = "0.1", default-features = false }
+rs-matter-stack = { version = "0.2", default-features = false }
 static_cell = "2"
 rand = { version = "0.8", default-features = false }
 
@@ -273,7 +284,7 @@ sequential-storage = "3"
 
 embassy-net = { version = "0.9", optional = true }
 edge-nal-embassy = { version = "0.9", optional = true, features = ["proto-ipv4", "proto-ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
-edge-nal-openthread = { version = "0.1", optional = true, default-features = false }
+edge-nal-openthread = { version = "0.2", optional = true, default-features = false }
 
 # `default-features = false` to shed `central`: Matter commissioning is
 # BLE-peripheral-only, and the central role drags the scanner/central HCI
@@ -289,7 +300,7 @@ nimble-rs = { version = "0.1", optional = true, default-features = false, featur
 
 bt-hci = "0.9"
 
-openthread = { version = "0.2", optional = true, default-features = false, features = ["matter"] }
+openthread = { version = "0.3", optional = true, default-features = false, features = ["matter"] }
 
 rand_core = "0.9"
 
