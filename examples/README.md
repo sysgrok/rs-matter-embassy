@@ -153,6 +153,6 @@ cd nrf
 
 cargo run --no-default-features --features nrf54l15 \
     --target thumbv8m.main-none-eabihf \
-    --config 'target."cfg(all(target_arch = \"arm\", target_os = \"none\"))".runner = "probe-rs run --chip nRF54L15_M33"' \
+    --config 'target."cfg(all(target_arch = \"arm\", target_os = \"none\"))".runner = "probe-rs run --chip nRF54L15"' \
     --bin light_thread_coex
 ```
