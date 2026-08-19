@@ -183,6 +183,15 @@ max-exchanges-per-session-3 = ["rs-matter-stack/max-exchanges-per-session-3"]
 trouble = ["dep:trouble-host", "dep:embassy-sync-07"]
 nimble = ["dep:nimble-rs"]
 
+# The NimBLE BTP GATT *central* (Matter Commissioner side). Not part of any `MatterStack` assembly
+# - a Matter stack is an Accessory-side notion - but a standalone utility for `rs-matter` users
+# taking the Controller role. Off by default because it brings in the NimBLE central + observer
+# roles, which an Accessory has no use for.
+#
+# NOTE: build-only for now - the BTP engine cannot be put into initiator mode against the
+# rs-matter version this crate pins (see the `TODO` in `ble::nimble::central`).
+nimble-central = ["nimble", "nimble-rs/central"]
+
 # General
 embassy-net = ["dep:embassy-net", "edge-nal-embassy", "openthread?/embassy-net-driver-channel", "esp-radio?/wifi"]
 esp = ["esp-radio", "esp-hal", "openthread?/esp-radio"]

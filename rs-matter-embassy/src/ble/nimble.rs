@@ -31,6 +31,13 @@ use rs_matter_stack::matter::utils::sync::Signal;
 
 use super::ControllerRef;
 
+/// A GATT central (Matter Commissioner-side) BTP transport. Not part of any `MatterStack`
+/// assembly - a standalone utility for `rs-matter` users taking the Controller role.
+#[cfg(feature = "nimble-central")]
+mod central;
+#[cfg(feature = "nimble-central")]
+pub use central::{NimbleBtpGattClient, NimbleBtpGattClientContext};
+
 /// The `bt-hci` controller contract of the selected BLE backend.
 pub use nimble_rs::Controller;
 
