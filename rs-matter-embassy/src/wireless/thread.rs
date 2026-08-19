@@ -6,7 +6,7 @@ use openthread::{OpenThread, Radio};
 
 use rs_matter_stack::matter::persist::KvBlobStoreAccess;
 
-use crate::ble::{ControllerRef, TroubleBtpGattContext, TroubleBtpGattPeripheral};
+use crate::ble::{BtpGattContext, BtpGattPeripheral, Controller, ControllerRef};
 use crate::matter::crypto::{CryptoRngCore, RngCore};
 use crate::matter::dm::networks::wireless::Thread;
 use crate::matter::error::Error;
@@ -60,7 +60,7 @@ pub trait ThreadCoexDriverTask {
     async fn run<R, B>(&mut self, radio: R, ble_ctl: B) -> Result<(), Error>
     where
         R: Radio,
-        B: trouble_host::Controller;
+        B: Controller;
 }
 
 impl<T> ThreadCoexDriverTask for &mut T
@@ -70,7 +70,7 @@ where
     async fn run<R, B>(&mut self, radio: R, ble_ctl: B) -> Result<(), Error>
     where
         R: Radio,
-        B: trouble_host::Controller,
+        B: Controller,
     {
         (*self).run(radio, ble_ctl).await
     }
@@ -142,7 +142,7 @@ where
 impl<R, B> ThreadCoexDriver for PreexistingThreadDriver<R, B>
 where
     R: Radio,
-    B: trouble_host::Controller,
+    B: Controller,
 {
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
@@ -154,7 +154,7 @@ where
 
 impl<R, B> BleDriver for PreexistingThreadDriver<R, B>
 where
-    B: trouble_host::Controller,
+    B: Controller,
 {
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
@@ -170,7 +170,7 @@ pub struct EmbassyThread<'a, T, K, R> {
     ieee_eui64: [u8; 8],
     kv: K,
     context: &'a OtNetContext,
-    ble_context: &'a TroubleBtpGattContext,
+    ble_context: &'a BtpGattContext,
     use_ble_random_addr: bool,
     rand: R,
 }
@@ -211,7 +211,7 @@ where
         ieee_eui64: [u8; 8],
         kv: K,
         context: &'a OtNetContext,
-        ble_context: &'a TroubleBtpGattContext,
+        ble_context: &'a BtpGattContext,
         use_ble_random_addr: bool,
     ) -> Self {
         Self {
@@ -407,7 +407,7 @@ struct ThreadCoexDriverTaskImpl<'a, A, K, C> {
     rand: C,
     kv: K,
     context: &'a OtNetContext,
-    ble_context: &'a TroubleBtpGattContext,
+    ble_context: &'a BtpGattContext,
     task: A,
     use_ble_random_addr: bool,
 }
@@ -421,7 +421,7 @@ where
     async fn run<R, B>(&mut self, radio: R, ble_ctl: B) -> Result<(), Error>
     where
         R: Radio,
-        B: trouble_host::Controller,
+        B: Controller,
     {
         let mut resources = self.context.resources.lock().await;
         let resources = &mut *resources;
@@ -446,7 +446,7 @@ where
         let net_stack = OtNetStack::new(ot.clone());
         let netif = OtNetif::new(ot.clone());
         let mut mdns = OtMdns::new(ot.clone(), &mut resources.mdns_buf);
-        let mut peripheral = TroubleBtpGattPeripheral::new(
+        let mut peripheral = BtpGattPeripheral::new(
             ble_ctl,
             self.use_ble_random_addr.then_some(self.rand),
             self.ble_context,

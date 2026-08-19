@@ -16,7 +16,7 @@ rust-version = "1.84"
 harness = false
 
 [features]
-default = ["rustcrypto"]
+default = ["rustcrypto", "trouble"]
 
 # Sizing
 
@@ -172,6 +172,26 @@ max-exchanges-per-session-5 = ["rs-matter-stack/max-exchanges-per-session-5"] # 
 max-exchanges-per-session-4 = ["rs-matter-stack/max-exchanges-per-session-4"]
 max-exchanges-per-session-3 = ["rs-matter-stack/max-exchanges-per-session-3"]
 
+# BLE host backend - exactly one of `trouble` and `nimble` must be enabled, as both would
+# otherwise claim the one BLE controller.
+#   - `trouble` (the default): the pure-Rust `trouble-host` stack.
+#   - `nimble`: the mature NimBLE C host, via `nimble-rs`. Needs a C toolchain for the target,
+#     and a C heap, from which it makes bounded allocations at runtime.
+# The footprints are close: on an ESP32-C6 Thread build, NimBLE costs ~10K more flash and ~3K more
+# static RAM than `trouble`, plus its runtime C-heap use.
+# To switch: `--no-default-features --features rustcrypto,nimble`
+trouble = ["dep:trouble-host", "dep:embassy-sync-07"]
+nimble = ["dep:nimble-rs"]
+
+# The NimBLE BTP GATT *central* (Matter Commissioner side). Not part of any `MatterStack` assembly
+# - a Matter stack is an Accessory-side notion - but a standalone utility for `rs-matter` users
+# taking the Controller role. Off by default because it brings in the NimBLE central + observer
+# roles, which an Accessory has no use for.
+#
+# NOTE: build-only for now - the BTP engine cannot be put into initiator mode against the
+# rs-matter version this crate pins (see the `TODO` in `ble::nimble::central`).
+nimble-central = ["nimble", "nimble-rs/central"]
+
 # General
 embassy-net = ["dep:embassy-net", "edge-nal-embassy", "openthread?/embassy-net-driver-channel", "esp-radio?/wifi"]
 esp = ["esp-radio", "esp-hal", "openthread?/esp-radio"]
@@ -182,8 +202,8 @@ openthread = ["dep:openthread", "dep:edge-nal-openthread"]
 # default Minimal Thread Device. Enables the route-table diagnostics and the
 # router-eligible (REED) routing-role refinement in the `ThreadDiag` impl.
 openthread-ftd = ["openthread?/ftd"]
-log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "edge-nal-openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host/log", "cyw43?/log", "embassy-nrf?/log", "nrf-mpsl?/log", "nrf-sdc?/log", "nrf-802154?/log"]
-defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "edge-nal-openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host/defmt", "cyw43?/defmt", "cyw43-pio?/defmt", "embassy-nrf?/defmt", "nrf-mpsl?/defmt", "nrf-sdc?/defmt", "nrf-802154?/defmt"]
+log = ["dep:log", "rs-matter-stack/log", "openthread?/log", "edge-nal-openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host?/log", "nimble-rs?/log", "cyw43?/log", "embassy-nrf?/log", "nrf-mpsl?/log", "nrf-sdc?/log", "nrf-802154?/log"]
+defmt = ["dep:defmt", "rs-matter-stack/defmt", "openthread?/defmt", "edge-nal-openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host?/defmt", "nimble-rs?/defmt", "cyw43?/defmt", "cyw43-pio?/defmt", "embassy-nrf?/defmt", "nrf-mpsl?/defmt", "nrf-sdc?/defmt", "nrf-802154?/defmt"]
 rustcrypto = ["rs-matter-stack/rustcrypto"]
 mbedtls = ["rs-matter-stack/mbedtls", "openthread?/mbedtls-rs-sys"]
 
@@ -240,7 +260,7 @@ heapless = "0.9"
 enumset = { version = "1", default-features = false }
 embassy-futures = "0.1"
 embassy-sync = "0.8"
-embassy-sync-07 = { package = "embassy-sync", version = "0.7" } # For trouble-host, until its next release fixes the e-sync re-export issues
+embassy-sync-07 = { package = "embassy-sync", version = "0.7", optional = true } # For trouble-host, until its next release fixes the e-sync re-export issues
 embassy-time = "0.5"
 embedded-io = "0.7"
 scopeguard = { version = "1", default-features = false }
@@ -259,7 +279,14 @@ edge-nal-openthread = { version = "0.1", optional = true, default-features = fal
 # BLE-peripheral-only, and the central role drags the scanner/central HCI
 # paths into the link - which on nRF means the (much larger) multirole
 # SoftDevice Controller blob instead of the peripheral-only one.
-trouble-host = { version = "0.7", default-features = false, features = ["peripheral", "gatt", "derive", "default-packet-pool"] }
+trouble-host = { version = "0.7", optional = true, default-features = false, features = ["peripheral", "gatt", "derive", "default-packet-pool"] }
+
+# The alternative BLE host (the `nimble` feature). `default-features = false` for the same reason
+# as `trouble-host` above - Matter commissioning is BLE-peripheral-only, so neither the central
+# role nor the Security Manager is needed. `use-c-heap` is not optional: the NimBLE C host makes
+# bounded init-time allocations through it and cannot boot without a backend for them.
+nimble-rs = { git = "https://github.com/sysgrok/nimble-rs", optional = true, default-features = false, features = ["peripheral", "use-c-heap", "max-connections-1"] }
+
 bt-hci = "0.9"
 
 openthread = { version = "0.2", optional = true, default-features = false, features = ["matter"] }

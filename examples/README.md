@@ -148,10 +148,14 @@ the `embassy-nrf` IEEE 802.15.4 radio directly, and that one exists on the nRF52
 family only. The chip is picked with a Cargo feature, and the target and the
 `probe-rs` chip name have to be matched to it by hand.
 
+Note that `--no-default-features` drops the default BLE host backend along with the
+default chip, so the backend has to be named too - `trouble` here, or `nimble` for
+the NimBLE host.
+
 ```sh
 cd nrf
 
-cargo run --no-default-features --features nrf54l15 \
+cargo run --no-default-features --features nrf54l15,trouble \
     --target thumbv8m.main-none-eabihf \
     --config 'target."cfg(all(target_arch = \"arm\", target_os = \"none\"))".runner = "probe-rs run --chip nRF54L15"' \
     --bin light_thread_coex

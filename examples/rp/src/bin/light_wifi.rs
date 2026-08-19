@@ -30,6 +30,10 @@ use embassy_rp::pio::InterruptHandler;
 
 use embedded_alloc::LlffHeap;
 
+// Pulls in the C malloc family the NimBLE BLE host allocates through
+#[cfg(feature = "nimble")]
+use tinyrlibc as _;
+
 use panic_rtt_target as _;
 
 use defmt::{info, unwrap};
@@ -87,7 +91,13 @@ const LOG_RINGBUF_SIZE: usize = 2048;
 async fn main(_spawner: Spawner) {
     // `rs-matter` uses the `x509` crate which (still) needs a few kilos of heap space
     {
+        // NimBLE allocates its mbuf/transport pools (~13K with the stock counts) and its GATT
+        // registry from this same heap, so it needs a good deal more headroom than `trouble`,
+        // which allocates nothing here.
+        #[cfg(not(feature = "nimble"))]
         const HEAP_SIZE: usize = 8192;
+        #[cfg(feature = "nimble")]
+        const HEAP_SIZE: usize = 8192 + 16384;
 
         static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
         unsafe { HEAP.init(addr_of_mut!(HEAP_MEM) as usize, HEAP_SIZE) }

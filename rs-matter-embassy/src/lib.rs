@@ -8,6 +8,17 @@
 //#![warn(clippy::large_stack_frames)]
 #![warn(clippy::large_types_passed_by_value)]
 
+#[cfg(all(feature = "trouble", feature = "nimble"))]
+compile_error!(
+    "The `trouble` and `nimble` BLE backends are mutually exclusive. `trouble` is on by default, \
+     so selecting `nimble` means `--no-default-features --features rustcrypto,nimble`."
+);
+
+#[cfg(not(any(feature = "trouble", feature = "nimble")))]
+compile_error!(
+    "A BLE host backend is required: enable either `trouble` (the default) or `nimble`."
+);
+
 #[cfg(all(feature = "nrf", not(any(feature = "_nrf52", feature = "_nrf54l"))))]
 compile_error!(
     "The `nrf` feature needs a chip to go with it: enable one of `nrf52840`, \

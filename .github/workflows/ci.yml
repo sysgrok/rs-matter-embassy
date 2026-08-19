@@ -9,27 +9,68 @@ on:
     - cron: "50 6 * * *"
   workflow_dispatch:
 
+# Supersede an in-flight run when a PR is pushed to again. Deliberately NOT for
+# `master`: those runs publish the size-report artifacts that the bloat check
+# diffs a PR against, so cancelling one would lose a baseline.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   rust_toolchain: nightly
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
-  compile:
-    name: Compile
+  # Formatting is backend- and target-independent, so it runs once for
+  # everything rather than in every matrix leg. rustfmt needs no dependency
+  # resolution, which is what makes checking the cross-compiled example crates
+  # from here cheap.
+  fmt:
+    name: Fmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup | Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.rust_toolchain }}
+          components: rustfmt
+
+      - name: Setup | Checkout
+        uses: actions/checkout@v3
+
+      - name: Fmt Check | Lib
+        run: cargo fmt -- --check
+
+      - name: Fmt Check | Examples
+        run: |
+          cd examples/esp; cargo fmt -- --check; cd -
+          cd examples/nrf; cargo fmt -- --check; cd -
+          cd examples/rp;  cargo fmt -- --check; cd -
+
+  # The main library, once per BLE host backend. `trouble` is a default
+  # feature, so the `nimble` leg has to turn the defaults off and name
+  # `rustcrypto` explicitly (see the backend features in `Cargo.toml`).
+  lib:
+    name: Lib (${{ matrix.backend }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        target:
-          - default
+        include:
+          - backend: trouble
+            log: "--features log"
+            defmt: "--features defmt"
+            build: ""
+          - backend: nimble
+            log: "--no-default-features --features rustcrypto,nimble,log"
+            defmt: "--no-default-features --features rustcrypto,nimble,defmt"
+            build: "--no-default-features --features rustcrypto,nimble"
     steps:
       - name: Setup | Rust
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: ${{ env.rust_toolchain }}
           components: rustfmt, clippy, rust-src
-
-      - name: Setup | Rust thumbv6m-none-eabi
-        run: rustup target add thumbv6m-none-eabi
 
       - name: Install libdbus
         run: sudo apt-get update -y; sudo apt-get install -y libdbus-1-dev
@@ -40,126 +81,158 @@ jobs:
       - name: Setup | Checkout
         uses: actions/checkout@v3
 
-      - name: Build | Fmt Check
-        run: cargo fmt -- --check
-
       - name: Build | Clippy
-        run: cargo clippy --features log --no-deps -- -Dwarnings
+        run: cargo clippy ${{ matrix.log }} --no-deps -- -Dwarnings
 
       - name: Build | Clippy - defmt
-        run: export DEFMT_LOG=trace; cargo clippy --features defmt --no-deps -- -Dwarnings
+        run: export DEFMT_LOG=trace; cargo clippy ${{ matrix.defmt }} --no-deps -- -Dwarnings
+
+      # The GATT central is NimBLE-only and off by default, so it gets its own
+      # pass rather than riding along with the peripheral build above.
+      - name: Build | Clippy - central
+        if: matrix.backend == 'nimble'
+        run: cargo clippy --no-default-features --features rustcrypto,nimble-central,log --no-deps -- -Dwarnings
 
       - name: Build | Compile
-        run: cargo build
+        run: cargo build ${{ matrix.build }}
 
-      - name: Examples-ESP-Build | Fmt Check
-        run: cd examples/esp; cargo fmt -- --check
+  # One job per (example set x BLE host backend). Previously all of this ran
+  # sequentially in a single job; the split is what keeps the wall clock flat
+  # now that every example is also built against NimBLE.
+  #
+  # `reports` is a space-separated `‹report-name›:‹binary›` list - empty for
+  # variants whose binaries are not size-tracked.
+  examples:
+    name: Examples ${{ matrix.name }} (${{ matrix.backend }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Fully explicit: every entry is one job. A partial `include` would be
+        # merged into (and overwritten by) its neighbours rather than forming a
+        # product, so the fields are spelled out per entry.
+        include:
+          - name: esp-thread
+            backend: trouble
+            dir: examples/esp
+            triple: riscv32imac-unknown-none-elf
+            config: infologs-optz-ltofat
+            flags: "--features thread"
+            reports: "esp_light_eth2:light_eth2 esp_light_thread:light_thread"
+          - name: esp-thread
+            backend: nimble
+            dir: examples/esp
+            triple: riscv32imac-unknown-none-elf
+            config: infologs-optz-ltofat-nimble
+            flags: "--no-default-features --features esp32c6,thread,nimble"
+            reports: "esp_light_eth2:light_eth2 esp_light_thread:light_thread"
+          - name: esp-wifi
+            backend: trouble
+            dir: examples/esp
+            triple: riscv32imac-unknown-none-elf
+            config: infologs-optz-ltofat
+            flags: "--features wifi"
+            reports: "esp_light_eth:light_eth esp_light_wifi:light_wifi"
+          - name: esp-wifi
+            backend: nimble
+            dir: examples/esp
+            triple: riscv32imac-unknown-none-elf
+            config: infologs-optz-ltofat-nimble
+            flags: "--no-default-features --features esp32c6,wifi,nimble"
+            reports: "esp_light_eth:light_eth esp_light_wifi:light_wifi"
+          - name: nrf52
+            backend: trouble
+            dir: examples/nrf
+            triple: thumbv7em-none-eabi
+            config: defmtlogs-optz-ltofat
+            flags: ""
+            reports: "nrf52_light_eth:light_eth nrf52_light_thread:light_thread"
+          - name: nrf52
+            backend: nimble
+            dir: examples/nrf
+            triple: thumbv7em-none-eabi
+            config: defmtlogs-optz-ltofat-nimble
+            flags: "--no-default-features --features nrf52840,nimble"
+            reports: "nrf52_light_eth:light_eth nrf52_light_thread:light_thread"
+          # Only `light_thread_coex` builds here: the other two examples drive the
+          # `embassy-nrf` IEEE 802.15.4 radio, which is an nRF52-only affair. Not
+          # size-tracked, hence the empty `reports`.
+          - name: nrf54l
+            backend: trouble
+            dir: examples/nrf
+            triple: thumbv8m.main-none-eabihf
+            config: defmtlogs-optz-ltofat
+            flags: "--no-default-features --features nrf54l15,trouble --target thumbv8m.main-none-eabihf"
+            reports: ""
+          - name: nrf54l
+            backend: nimble
+            dir: examples/nrf
+            triple: thumbv8m.main-none-eabihf
+            config: defmtlogs-optz-ltofat-nimble
+            flags: "--no-default-features --features nrf54l15,nimble --target thumbv8m.main-none-eabihf"
+            reports: ""
+          - name: rp
+            backend: trouble
+            dir: examples/rp
+            triple: thumbv6m-none-eabi
+            config: defmtlogs-optz-ltofat
+            flags: ""
+            reports: "rpz_light_eth:light_eth rpz_light_wifi:light_wifi"
+          - name: rp
+            backend: nimble
+            dir: examples/rp
+            triple: thumbv6m-none-eabi
+            config: defmtlogs-optz-ltofat-nimble
+            flags: "--no-default-features --features nimble"
+            reports: "rpz_light_eth:light_eth rpz_light_wifi:light_wifi"
+    env:
+      WIFI_SSID: "ssid"
+      WIFI_PASS: "pass"
+      THREAD_DATASET: "000003"
+    steps:
+      - name: Setup | Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.rust_toolchain }}
+          components: rustfmt, clippy, rust-src
 
-      - name: Examples-ESP-Build | Clippy - Thread
-        env:
-          WIFI_SSID: "ssid"
-          WIFI_PASS: "pass"
-          THREAD_DATASET: "000003"
-        run: cd examples/esp; cargo clippy --features thread --no-deps -- -Dwarnings
+      - name: Setup | Rust thumbv6m-none-eabi
+        run: rustup target add thumbv6m-none-eabi
 
-      - name: Examples-ESP-Build | Clippy - Wifi
-        env:
-          WIFI_SSID: "ssid"
-          WIFI_PASS: "pass"
-          THREAD_DATASET: "000003"
-        run: cd examples/esp; cargo clippy --features wifi --no-deps -- -Dwarnings
+      - name: Setup | Checkout
+        uses: actions/checkout@v3
 
-      - name: Examples-ESP-Build | Compile - Thread
-        env:
-          WIFI_SSID: "ssid"
-          WIFI_PASS: "pass"
-          THREAD_DATASET: "000003"
-        run: cd examples/esp; cargo build --features thread --release
+      - name: Build | Clippy
+        run: cd ${{ matrix.dir }}; cargo clippy ${{ matrix.flags }} --no-deps -- -Dwarnings
 
-      - name: Examples-ESP-Build | Compile - Wifi
-        env:
-          WIFI_SSID: "ssid"
-          WIFI_PASS: "pass"
-          THREAD_DATASET: "000003"
-        run: cd examples/esp; cargo build --features wifi --release
-
-      - name: Examples-NRF-Build | Fmt Check
-        run: cd examples/nrf; cargo fmt -- --check
-
-      - name: Examples-NRF-Build | Clippy
-        env:
-          THREAD_DATASET: "000003"
-        run: cd examples/nrf; cargo clippy --no-deps -- -Dwarnings
-
-      - name: Examples-NRF-Build | Compile
-        env:
-          THREAD_DATASET: "000003"
-        run: cd examples/nrf; cargo build --release
-
-      # Only `light_thread_coex` builds here: the other two examples drive the
-      # `embassy-nrf` IEEE 802.15.4 radio, which is an nRF52-only affair.
-      - name: Examples-NRF54L-Build | Clippy
-        env:
-          THREAD_DATASET: "000003"
-        run: cd examples/nrf; cargo clippy --no-default-features --features nrf54l15 --target thumbv8m.main-none-eabihf --no-deps -- -Dwarnings
-
-      - name: Examples-NRF54L-Build | Compile
-        env:
-          THREAD_DATASET: "000003"
-        run: cd examples/nrf; cargo build --release --no-default-features --features nrf54l15 --target thumbv8m.main-none-eabihf
-
-      - name: Examples-RP-Build | Fmt Check
-        run: cd examples/rp; cargo fmt -- --check
-
-      - name: Examples-RP-Build | Clippy
-        run: cd examples/rp; cargo clippy --no-deps -- -Dwarnings
-
-      - name: Examples-RP-Build | Compile
-        run: cd examples/rp; cargo build --release
+      - name: Build | Compile
+        run: cd ${{ matrix.dir }}; cargo build --release ${{ matrix.flags }}
 
       - name: Set up environment for size reports
+        if: ${{ !env.ACT && matrix.reports != '' }}
         uses: ./.github/actions/setup-size-reports
-        if: ${{ !env.ACT }}
         with:
           gh-context: ${{ toJson(github) }}
 
+      # The NimBLE variants are published under the same report names but a
+      # `-nimble` config, so the bloat check tracks them as their own series
+      # (it groups by platform + target + config) instead of diffing them
+      # against the `trouble` builds.
       - name: Prepare bloat report from the previous builds
+        if: ${{ !env.ACT && matrix.reports != '' }}
         run: |
+          for report in ${{ matrix.reports }}; do
+            name="${report%%:*}"
+            binary="${report##*:}"
+
             python .github/scripts/memory/gh_sizes.py \
-              esp_light_eth infologs-optz-ltofat riscv32imac-unknown-none-elf \
-              examples/esp/target/riscv32imac-unknown-none-elf/release/light_eth \
+              "$name" "${{ matrix.config }}" "${{ matrix.triple }}" \
+              "${{ matrix.dir }}/target/${{ matrix.triple }}/release/$binary" \
               /tmp/bloat_reports/
-            python .github/scripts/memory/gh_sizes.py \
-              esp_light_eth2 infologs-optz-ltofat riscv32imac-unknown-none-elf \
-              examples/esp/target/riscv32imac-unknown-none-elf/release/light_eth2 \
-              /tmp/bloat_reports/
-            python .github/scripts/memory/gh_sizes.py \
-              esp_light_thread infologs-optz-ltofat riscv32imac-unknown-none-elf \
-              examples/esp/target/riscv32imac-unknown-none-elf/release/light_thread \
-              /tmp/bloat_reports/
-            python .github/scripts/memory/gh_sizes.py \
-              esp_light_wifi infologs-optz-ltofat riscv32imac-unknown-none-elf \
-              examples/esp/target/riscv32imac-unknown-none-elf/release/light_wifi \
-              /tmp/bloat_reports/
-            python .github/scripts/memory/gh_sizes.py \
-              nrf52_light_eth defmtlogs-optz-ltofat thumbv7em-none-eabi \
-              examples/nrf/target/thumbv7em-none-eabi/release/light_eth \
-              /tmp/bloat_reports/
-            python .github/scripts/memory/gh_sizes.py \
-              nrf52_light_thread defmtlogs-optz-ltofat thumbv7em-none-eabi \
-              examples/nrf/target/thumbv7em-none-eabi/release/light_thread \
-              /tmp/bloat_reports/
-            python .github/scripts/memory/gh_sizes.py \
-              rpz_light_eth defmtlogs-optz-ltofat thumbv6m-none-eabi \
-              examples/rp/target/thumbv6m-none-eabi/release/light_eth \
-              /tmp/bloat_reports/
-            python .github/scripts/memory/gh_sizes.py \
-              rpz_light_wifi defmtlogs-optz-ltofat thumbv6m-none-eabi \
-              examples/rp/target/thumbv6m-none-eabi/release/light_wifi \
-              /tmp/bloat_reports/
+          done
 
       - name: Uploading Size Reports
+        if: ${{ !env.ACT && matrix.reports != '' }}
         uses: ./.github/actions/upload-size-reports
-        if: ${{ !env.ACT }}
         with:
-          platform-name: cross-platform
+          platform-name: ${{ matrix.name }}-${{ matrix.backend }}

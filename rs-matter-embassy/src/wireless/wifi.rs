@@ -2,7 +2,7 @@ use core::pin::pin;
 
 use embassy_futures::select::select;
 
-use crate::ble::{ControllerRef, TroubleBtpGattContext, TroubleBtpGattPeripheral};
+use crate::ble::{BtpGattContext, BtpGattPeripheral, Controller, ControllerRef};
 use crate::enet::{create_enet_stack, EnetNetif, EnetStack};
 use crate::eth::EmbassyNetContext;
 use crate::matter::crypto::RngCore;
@@ -61,7 +61,7 @@ pub trait WifiCoexDriverTask {
     where
         D: embassy_net::driver::Driver,
         C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
-        B: trouble_host::Controller;
+        B: Controller;
 }
 
 impl<T> WifiCoexDriverTask for &mut T
@@ -72,7 +72,7 @@ where
     where
         D: embassy_net::driver::Driver,
         C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
-        B: trouble_host::Controller,
+        B: Controller,
     {
         (*self).run(wifi_driver, net_ctl, ble_ctl).await
     }
@@ -163,7 +163,7 @@ where
 
 impl<D, C, B> BleDriver for PreexistingWifiDriver<D, C, B>
 where
-    B: trouble_host::Controller,
+    B: Controller,
 {
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
@@ -177,7 +177,7 @@ impl<D, C, B> WifiCoexDriver for PreexistingWifiDriver<D, C, B>
 where
     D: embassy_net::driver::Driver,
     C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
-    B: trouble_host::Controller,
+    B: Controller,
 {
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
@@ -194,7 +194,7 @@ pub struct EmbassyWifi<'a, T, R> {
     rand: R,
     use_ble_random_addr: bool,
     context: &'a EmbassyNetContext,
-    ble_context: &'a TroubleBtpGattContext,
+    ble_context: &'a BtpGattContext,
 }
 
 impl<'a, T, R> EmbassyWifi<'a, T, R> {
@@ -223,7 +223,7 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
         rand: R,
         use_ble_random_addr: bool,
         context: &'a EmbassyNetContext,
-        ble_context: &'a TroubleBtpGattContext,
+        ble_context: &'a BtpGattContext,
     ) -> Self {
         Self {
             driver,
@@ -345,7 +345,7 @@ where
 
 struct WifiCoexDriverTaskImpl<'a, A, R> {
     context: &'a EmbassyNetContext,
-    ble_context: &'a TroubleBtpGattContext,
+    ble_context: &'a BtpGattContext,
     task: A,
     rand: R,
     use_ble_random_addr: bool,
@@ -360,7 +360,7 @@ where
     where
         D: embassy_net::driver::Driver,
         C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
-        B: trouble_host::Controller,
+        B: Controller,
     {
         let mut resources = self.context.resources.lock().await;
         let mut mdns = self.context.mdns.lock().await;
@@ -377,7 +377,7 @@ where
 
         let net_stack = EnetStack::new(stack, buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
-        let mut peripheral = TroubleBtpGattPeripheral::new(
+        let mut peripheral = BtpGattPeripheral::new(
             ble_ctl,
             self.use_ble_random_addr.then_some(self.rand),
             self.ble_context,
