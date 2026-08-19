@@ -162,7 +162,7 @@ jobs:
             dir: examples/nrf
             triple: thumbv8m.main-none-eabihf
             config: defmtlogs-optz-ltofat
-            flags: "--no-default-features --features nrf54l15 --target thumbv8m.main-none-eabihf"
+            flags: "--no-default-features --features nrf54l15,trouble --target thumbv8m.main-none-eabihf"
             reports: ""
           - name: nrf54l
             backend: nimble
