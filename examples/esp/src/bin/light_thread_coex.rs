@@ -1,5 +1,4 @@
 //! An example utilizing the `EmbassyThreadMatterStack` struct.
-//! TODO: WORK IN PROGRESS
 //!
 //! As the name suggests, this Matter stack assembly uses Thread as the main transport,
 //! and thus BLE for commissioning, in concurrent commissioning mode.
