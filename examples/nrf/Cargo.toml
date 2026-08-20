@@ -33,13 +33,14 @@ incremental = false
 overflow-checks = false
 
 [patch.crates-io]
-openthread = { git = "https://github.com/esp-rs/openthread" }
-openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+#rs-matter = { git = "https://github.com/project-chip/rs-matter" }
+#rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack", branch = "new-rs-matter" }
+#mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
+#openthread = { git = "https://github.com/esp-rs/openthread" }
+#openthread-sys = { git = "https://github.com/esp-rs/openthread" }
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
 nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
-mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
-
 trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "652fe9633db5be92b98136690e4a0ad9d9bb133f" }
 
 [features]

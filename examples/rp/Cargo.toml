@@ -29,6 +29,8 @@ incremental = false
 overflow-checks = false
 
 [patch.crates-io]
+#rs-matter = { git = "https://github.com/project-chip/rs-matter" }
+#rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack", branch = "new-rs-matter" }
 cyw43 = { git = "https://github.com/embassy-rs/embassy", rev = "a18084f6e0c7f0756e4d96bd988ed78455ba1a74" }
 cyw43-pio = { git = "https://github.com/embassy-rs/embassy", rev = "a18084f6e0c7f0756e4d96bd988ed78455ba1a74" }
 embassy-rp = { git = "https://github.com/embassy-rs/embassy", rev = "a18084f6e0c7f0756e4d96bd988ed78455ba1a74" }
@@ -43,7 +45,6 @@ embassy-net-driver-channel = { git = "https://github.com/embassy-rs/embassy", re
 embassy-net-wiznet = { git = "https://github.com/embassy-rs/embassy", rev = "a18084f6e0c7f0756e4d96bd988ed78455ba1a74" }
 
 trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "652fe9633db5be92b98136690e4a0ad9d9bb133f" }
-
 nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
 nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
 nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }

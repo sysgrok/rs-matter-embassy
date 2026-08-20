@@ -15,7 +15,9 @@ use openthread::{
 };
 
 use rs_matter_stack::matter::crypto::Crypto;
+use rs_matter_stack::matter::fabric::MAX_FABRICS;
 use rs_matter_stack::matter::persist::KvBlobStoreAccess;
+use rs_matter_stack::matter::transport::network::MatterLocalService;
 use rs_matter_stack::matter::Matter;
 use rs_matter_stack::mdns::Mdns;
 use rs_matter_stack::nal::{NetStack, NoopNet, UdpBind};
@@ -66,6 +68,11 @@ const OT_MDNS_BUF_SZ: usize = MDNS_REGISTER_BUF_SZ + MDNS_RESOLVE_BUF_SZ + MDNS_
 
 /// `buf` region for the register (respond) loop.
 const MDNS_REGISTER_BUF_SZ: usize = 256;
+
+/// Upper bound on the Matter services this node publishes at once: the
+/// commissionable one (at most one commissioning window is ever open) plus one
+/// operational service per commissioned fabric.
+const MAX_LOCAL_SERVICES: usize = MAX_FABRICS + 1;
 /// `buf` region for the resolve loop: `host name | TXT`.
 const MDNS_RESOLVE_HOST_SZ: usize = 64;
 const MDNS_RESOLVE_TXT_SZ: usize = 128;
@@ -748,8 +755,21 @@ impl<'a, 'd> OtMdns<'a, 'd> {
 
             let buf = &mut *buf;
 
+            // `Matter::mdns_services` invokes its closure with the `Matter` state
+            // mutably borrowed, and `MatterLocalService::service` reads that same
+            // state back (for the ICD TXT keys) - so expanding a service inside the
+            // closure panics on a re-entrant borrow. Collect the published services
+            // first, then expand and register them with the borrow released.
+            let mut services = heapless::Vec::<MatterLocalService, MAX_LOCAL_SERVICES>::new();
+
             unwrap!(matter.mdns_services(|matter_service| {
-                let (service, _) = matter_service.service(matter.dev_det(), matter.port(), buf)?;
+                unwrap!(services.push(matter_service));
+
+                Ok(())
+            }));
+
+            for matter_service in &services {
+                let (service, _) = unwrap!(matter_service.service(matter, &mut *buf));
                 let service = core::mem::ManuallyDrop::new(service);
 
                 // TODO:
@@ -772,9 +792,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
                 unwrap!(ot.srp_add_service(&srp_service)); // TODO
 
                 info!("Added service {:?}", matter_service);
-
-                Ok(())
-            }));
+            }
 
             matter.transport().wait_mdns().await;
         }
