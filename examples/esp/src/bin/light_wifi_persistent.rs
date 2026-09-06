@@ -43,7 +43,8 @@ use rs_matter_embassy::matter::dm::devices::test::{
     DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
 };
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
-use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, EpClMatcher, Node};
+use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
+use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node};
 use rs_matter_embassy::matter::error::Error;
 use rs_matter_embassy::matter::persist::KvBlobStore;
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
@@ -143,18 +144,27 @@ async fn main(_s: Spawner) {
 
     // Chain our endpoint clusters
     let handler = EmptyHandler
+        // The Endpoint 0 system clusters that are ours to provide.
+        // The stack adds the operational network clusters (Network Commissioning,
+        // General Commissioning, General Diagnostics and Wifi/Thread/Ethernet
+        // Diagnostics) on top, because only it knows the network driver state.
+        // Chain any extra Endpoint 0 clusters of your own the same way.
+        .chain(
+            |e, _| e == ROOT_ENDPOINT_ID,
+            Async(EmbassyWifiMatterStack::<0, ()>::root_handler(
+                &(),
+                &mut weak_rand,
+            )),
+        )
         // Our on-off cluster, on Endpoint 1
         .chain(
-            EpClMatcher::new(
-                Some(LIGHT_ENDPOINT_ID),
-                Some(TestOnOffDeviceLogic::CLUSTER.id),
-            ),
+            |e, c| e == LIGHT_ENDPOINT_ID && c == TestOnOffDeviceLogic::CLUSTER.id,
             on_off::HandlerAsyncAdaptor(&on_off),
         )
         // Each Endpoint needs a Descriptor cluster too
         // Just use the one that `rs-matter` provides out of the box
         .chain(
-            EpClMatcher::new(Some(LIGHT_ENDPOINT_ID), Some(desc::DescHandler::CLUSTER.id)),
+            |e, c| e == LIGHT_ENDPOINT_ID && c == desc::DescHandler::CLUSTER.id,
             Async(desc::DescHandler::new(Dataver::new_rand(&mut weak_rand)).adapt()),
         );
 
