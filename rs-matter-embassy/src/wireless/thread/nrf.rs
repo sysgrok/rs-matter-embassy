@@ -32,7 +32,7 @@ use nrf_mpsl::{
 
 use nrf_sdc::SoftdeviceController;
 
-use rs_matter_stack::matter::crypto::{CryptoRng, CryptoRngCore, RngCore};
+use rs_matter_stack::matter::crypto::{CryptoRng, Rng, TryCryptoRng, TryRng};
 use rs_matter_stack::matter::error::{Error, ErrorCode};
 use rs_matter_stack::rand::RngAdaptor;
 
@@ -615,7 +615,7 @@ impl<R> super::ThreadDriver for NrfThreadRustRadioDriver<'_, R> {
 #[cfg(feature = "_nrf52")]
 impl<R> super::BleDriver for NrfThreadRustRadioDriver<'_, R>
 where
-    R: CryptoRngCore + Copy, /*+ Send*/
+    R: CryptoRng + Copy, /*+ Send*/
 {
     async fn run<T>(&mut self, mut task: T) -> Result<(), Error>
     where
@@ -706,7 +706,7 @@ impl<R> super::ThreadDriver for NrfThreadMpslRadioDriver<'_, R> {
 
 impl<R> super::BleDriver for NrfThreadMpslRadioDriver<'_, R>
 where
-    R: CryptoRngCore + Copy, /*+ Send*/
+    R: CryptoRng + Copy, /*+ Send*/
 {
     async fn run<T>(&mut self, mut task: T) -> Result<(), Error>
     where
@@ -734,7 +734,7 @@ where
 
 impl<R> super::ThreadCoexDriver for NrfThreadMpslRadioDriver<'_, R>
 where
-    R: CryptoRngCore + Copy, /*+ Send*/
+    R: CryptoRng + Copy, /*+ Send*/
 {
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
@@ -770,27 +770,27 @@ fn to_matter_err<E: core::fmt::Debug>(e: E) -> Error {
 // TODO: figure out if we need to enforce `Send` on the rand returned by the `Crypto` trait in `rs-matter`
 struct SendHack<T>(T);
 
-impl<T> RngCore for SendHack<T>
+impl<T> TryRng for SendHack<T>
 where
-    T: RngCore,
+    T: Rng,
 {
-    fn next_u32(&mut self) -> u32 {
-        self.0.next_u32()
+    type Error = core::convert::Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        Ok(self.0.next_u32())
     }
 
-    fn next_u64(&mut self) -> u64 {
-        self.0.next_u64()
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        Ok(self.0.next_u64())
     }
 
-    fn fill_bytes(&mut self, dest: &mut [u8]) {
-        self.0.fill_bytes(dest)
-    }
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
+        self.0.fill_bytes(dest);
 
-    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
-        self.0.try_fill_bytes(dest)
+        Ok(())
     }
 }
 
-impl<T> CryptoRng for SendHack<T> where T: CryptoRng + RngCore {}
+impl<T> TryCryptoRng for SendHack<T> where T: CryptoRng {}
 
 unsafe impl<T> Send for SendHack<T> {}

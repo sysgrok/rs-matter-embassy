@@ -1,5 +1,6 @@
 [build]
 target = "thumbv6m-none-eabi"
+rustflags = ["--cfg", "sha2_backend_soft=\"compact\"", "--cfg", "aes_backend_soft=\"compact\""]
 
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 runner = "probe-rs run --chip RP2040 --always-print-stacktrace --catch-reset --catch-hardfault"

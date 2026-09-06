@@ -8,7 +8,7 @@ use embassy_futures::select::select;
 use crate::enet::{
     create_enet_stack, EnetMatterStackResources, EnetMatterUdpBuffers, EnetNetif, EnetStack,
 };
-use crate::matter::crypto::RngCore;
+use crate::matter::crypto::Rng;
 use crate::matter::dm::clusters::gen_diag::InterfaceTypeEnum;
 use crate::matter::error::Error;
 use crate::matter::transport::network::mdns::builtin::BuiltinMdns;
@@ -179,7 +179,7 @@ where
 impl<T, R> Ethernet for EmbassyEthernet<'_, T, R>
 where
     T: EthernetDriver,
-    R: RngCore,
+    R: Rng,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -194,7 +194,7 @@ where
         impl<A, R> EthernetDriverTask for EthernetDriverTaskImpl<'_, '_, A, R>
         where
             A: EthernetTask,
-            R: RngCore,
+            R: Rng,
         {
             async fn run<D>(&mut self, driver: D) -> Result<(), Error>
             where

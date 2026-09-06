@@ -12,7 +12,7 @@ use core::pin::pin;
 use embassy_futures::select::select;
 
 use rs_matter_stack::ble::GattPeripheral;
-use rs_matter_stack::matter::crypto::RngCore;
+use rs_matter_stack::matter::crypto::Rng;
 use rs_matter_stack::matter::error::{Error, ErrorCode};
 use rs_matter_stack::matter::transport::network::btp::{
     AdvData, Btp, C1_CHARACTERISTIC_UUID, C2_CHARACTERISTIC_UUID, MATTER_BLE_SERVICE_UUID16,
@@ -134,7 +134,7 @@ impl Default for TroubleBtpGattContext {
 /// Implements the `GattPeripheral` trait.
 pub struct TroubleBtpGattPeripheral<'a, R, C>
 where
-    R: RngCore + Copy,
+    R: Rng + Copy,
     C: Controller,
 {
     // TODO: Ideally this should be the controller itself, but this is not possible
@@ -146,7 +146,7 @@ where
 
 impl<'a, R, C> TroubleBtpGattPeripheral<'a, R, C>
 where
-    R: RngCore + Copy,
+    R: Rng + Copy,
     C: Controller,
 {
     /// Create a new instance.
@@ -453,7 +453,7 @@ where
 
 impl<R, C> GattPeripheral for TroubleBtpGattPeripheral<'_, R, C>
 where
-    R: RngCore + Copy,
+    R: Rng + Copy,
     C: Controller,
 {
     async fn run(

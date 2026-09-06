@@ -7,7 +7,7 @@ use openthread::{OpenThread, Radio};
 use rs_matter_stack::matter::persist::KvBlobStoreAccess;
 
 use crate::ble::{BtpGattContext, BtpGattPeripheral, Controller, ControllerRef};
-use crate::matter::crypto::{CryptoRngCore, RngCore};
+use crate::matter::crypto::{CryptoRng, Rng};
 use crate::matter::dm::networks::wireless::Thread;
 use crate::matter::error::Error;
 use crate::matter::utils::init::{init, Init};
@@ -16,7 +16,6 @@ use crate::matter::utils::sync::IfMutex;
 use crate::ot::{to_matter_err, OtNetCtl, OtNetStack, OtPersist};
 use crate::ot::{OtMatterResources, OtMdns, OtNetif};
 use crate::stack::network::{Embedding, Network};
-use crate::stack::rand::RngAdaptor;
 use crate::stack::wireless::{self, Gatt, GattTask};
 
 use super::{BleDriver, BleDriverTask, BleDriverTaskImpl, EmbassyWirelessMatterStack};
@@ -179,7 +178,7 @@ impl<'a, T, K, R> EmbassyThread<'a, T, K, R>
 where
     T: ThreadDriver,
     K: KvBlobStoreAccess,
-    R: CryptoRngCore + Copy,
+    R: CryptoRng + Copy,
 {
     /// Create a new instance of the `EmbassyThread` type.
     pub fn new<const B: usize, E>(
@@ -230,7 +229,7 @@ impl<T, K, R> wireless::Thread for EmbassyThread<'_, T, K, R>
 where
     T: ThreadDriver,
     K: KvBlobStoreAccess,
-    R: CryptoRngCore + Copy,
+    R: CryptoRng + Copy,
 {
     // The Thread controller this driver produces. The operational task receives
     // `&OtNetCtl` (the driver passes `&net_ctl`), so the chain net-ctl type — and
@@ -263,7 +262,7 @@ impl<T, K, R> wireless::ThreadCoex for EmbassyThread<'_, T, K, R>
 where
     T: ThreadCoexDriver,
     K: KvBlobStoreAccess,
-    R: CryptoRngCore + Copy,
+    R: CryptoRng + Copy,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -287,7 +286,7 @@ impl<T, K, R> Gatt for EmbassyThread<'_, T, K, R>
 where
     T: BleDriver,
     K: KvBlobStoreAccess,
-    R: RngCore + Copy,
+    R: Rng + Copy,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -350,7 +349,7 @@ impl<A, K, C> ThreadDriverTask for ThreadDriverTaskImpl<'_, A, K, C>
 where
     A: wireless::ThreadTask,
     K: KvBlobStoreAccess,
-    C: CryptoRngCore + Copy,
+    C: CryptoRng + Copy,
 {
     async fn run<R>(&mut self, radio: R) -> Result<(), Error>
     where
@@ -363,7 +362,7 @@ where
         persister.load()?;
 
         let mut settings = persister.settings();
-        let mut rand = RngAdaptor::new(self.rand);
+        let mut rand = self.rand;
 
         let ot = OpenThread::new_with_udp_srp(
             self.ieee_eui64,
@@ -416,7 +415,7 @@ impl<A, K, C> ThreadCoexDriverTask for ThreadCoexDriverTaskImpl<'_, A, K, C>
 where
     A: wireless::ThreadCoexTask,
     K: KvBlobStoreAccess,
-    C: CryptoRngCore + Copy,
+    C: CryptoRng + Copy,
 {
     async fn run<R, B>(&mut self, radio: R, ble_ctl: B) -> Result<(), Error>
     where
@@ -430,7 +429,7 @@ where
         persister.load()?;
 
         let mut settings = persister.settings();
-        let mut rand = RngAdaptor::new(self.rand);
+        let mut rand = self.rand;
 
         let ot = OpenThread::new_with_udp_srp(
             self.ieee_eui64,

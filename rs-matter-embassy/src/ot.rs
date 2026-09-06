@@ -856,15 +856,18 @@ impl<'a, 'd> OtMdns<'a, 'd> {
                             return;
                         };
 
-                        matter
-                            .transport()
-                            .try_deposit_mdns_resolve(&MdnsRemoteService {
+                        matter.transport().try_deposit_mdns_resolve(
+                            &MdnsRemoteService {
                                 instance_name: DottedName(instance_name.as_str()),
                                 port: Some(info.port),
                                 addrs: core::iter::once(IpAddr::V6(addr)),
                                 txt: TxtEntries::new(info.txt_data.unwrap_or(&[])),
                                 scope_id: 0,
-                            });
+                            },
+                            // The OpenThread DNS client resolves via the SRP server,
+                            // so no on-link vs off-link scoring of the answers
+                            &[],
+                        );
                     },
                 )
                 .await;
@@ -1010,7 +1013,7 @@ impl Mdns for OtMdns<'_, '_> {
         _udp: U,
         _mac: &[u8],
         _ipv4: core::net::Ipv4Addr,
-        _ipv6: core::net::Ipv6Addr,
+        _ipv6: &[core::net::Ipv6Addr],
         _interface: u32,
     ) -> Result<(), Error>
     where

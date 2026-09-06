@@ -1,6 +1,6 @@
 //! Wireless: Type aliases and state structs for an Embassy Matter stack running over a wireless network (Wifi or Thread) and BLE.
 
-use crate::matter::crypto::RngCore;
+use crate::matter::crypto::Rng;
 use crate::matter::dm::networks::wireless::WirelessNetwork;
 use crate::matter::error::Error;
 use crate::matter::utils::init::{init, Init};
@@ -161,7 +161,7 @@ where
 
 impl<'a, R, C> BtpGattPeripheral<'a, R, C>
 where
-    R: RngCore + Copy,
+    R: Rng + Copy,
     C: Controller,
 {
     pub fn new_for_stack<const B: usize, T, E>(
@@ -187,7 +187,7 @@ struct BleDriverTaskImpl<'a, A, R> {
 impl<A, R> BleDriverTask for BleDriverTaskImpl<'_, A, R>
 where
     A: GattTask,
-    R: RngCore + Copy,
+    R: Rng + Copy,
 {
     async fn run<C>(&mut self, controller: C) -> Result<(), Error>
     where
