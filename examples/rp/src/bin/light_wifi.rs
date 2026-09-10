@@ -80,14 +80,12 @@ bind_interrupts!(struct Irqs {
 /// If - for your platform - this size is not enough, increase it until
 /// the program runs without panics during the stack initialization.
 // RP2350 (thumbv8m) has larger stack frames than RP2040 (thumbv6m), so its coex
-// futures need a considerably bigger bump arena. Too small an arena panics
-// (silently) during stack init, so this is deliberately over-provisioned until
-// the peak is re-measured against the current stack - watch the `BUMP[...]`
-// log line, which reports usage only when the arena is big enough to fit.
+// futures need a bigger bump arena: the measured peak is ~30.4 KB, just over the
+// RP2040's 30000.
 #[cfg(feature = "rp2040")]
 const BUMP_SIZE: usize = 30000;
 #[cfg(not(feature = "rp2040"))]
-const BUMP_SIZE: usize = 131072;
+const BUMP_SIZE: usize = 40960;
 
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();

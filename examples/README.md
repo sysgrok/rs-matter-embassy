@@ -62,7 +62,7 @@ and target (use `rp235xb` instead of `rp235xa` for the QFN-80 RP2350B):
 
 ```sh
 cd rp
-cargo +nightly build --no-default-features --features rp235xa --target thumbv8m.main-none-eabihf
+cargo +nightly build --no-default-features --features trouble,rp235xa --target thumbv8m.main-none-eabihf
 
 # Replace `light_wifi` with `light_eth` below to flash the Ethernet example
 probe-rs run --chip RP235x target/thumbv8m.main-none-eabihf/debug/light_wifi
