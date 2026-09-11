@@ -50,7 +50,14 @@ nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa
 nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 
 [features]
-default = ["trouble"]
+default = ["trouble", "rp2040"]
+# Chip selection; enable exactly one and build for the matching target:
+#   rp2040  -> thumbv6m-none-eabi        (Raspberry Pi Pico / Pico W)
+#   rp235xa -> thumbv8m.main-none-eabihf (Raspberry Pi Pico 2 / Pico 2 W)
+#   rp235xb -> thumbv8m.main-none-eabihf (RP2350B, QFN-80)
+rp2040 = ["embassy-rp/rp2040", "rs-matter-embassy/rp2040"]
+rp235xa = ["embassy-rp/rp235xa", "rs-matter-embassy/rp235xa"]
+rp235xb = ["embassy-rp/rp235xb", "rs-matter-embassy/rp235xb"]
 skip-cyw43-firmware = []
 trouble = ["rs-matter-embassy/trouble"]
 # NimBLE makes bounded C-heap allocations, so it needs the C malloc family, which
@@ -61,7 +68,7 @@ nimble = ["rs-matter-embassy/nimble", "dep:tinyrlibc"]
 [dependencies]
 embassy-executor = { version = "0.10", default-features = false, features = ["platform-cortex-m", "executor-thread", "defmt"] }
 embassy-time = { version = "0.5", default-features = false, features = ["defmt", "defmt-timestamp-uptime-ms"] }
-embassy-rp = { version = "0.10", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
+embassy-rp = { version = "0.10", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl"] }
 embassy-futures = "0.1.2"
 embassy-sync = { version = "0.8", features = ["defmt"] }
 defmt = "1"

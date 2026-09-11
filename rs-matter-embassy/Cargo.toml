@@ -196,6 +196,15 @@ nimble-central = ["nimble", "nimble-rs/central"]
 embassy-net = ["dep:embassy-net", "edge-nal-embassy", "openthread?/embassy-net-driver-channel", "esp-radio?/wifi"]
 esp = ["esp-radio", "esp-hal", "openthread?/esp-radio"]
 rp = ["cyw43", "cyw43-pio", "embassy-rp", "embassy-net-driver-channel"]
+# Chip selection for the `rp` backend. `embassy-rp` requires exactly one of these
+# to be enabled; pick the one matching your MCU (these are pass-throughs to the
+# `embassy-rp` features of the same name):
+#   - `rp2040`  : RP2040 (e.g. Raspberry Pi Pico / Pico W)
+#   - `rp235xa` : RP2350A (e.g. Raspberry Pi Pico 2 / Pico 2 W)
+#   - `rp235xb` : RP2350B (QFN-80 variant)
+rp2040 = ["embassy-rp/rp2040"]
+rp235xa = ["embassy-rp/rp235xa"]
+rp235xb = ["embassy-rp/rp235xb"]
 nrf = ["embassy-nrf", "nrf-sdc", "nrf-mpsl", "nrf-802154", "portable-atomic"]
 openthread = ["dep:openthread", "dep:edge-nal-openthread"]
 # Build OpenThread as a Full Thread Device (router-capable) rather than the
@@ -311,7 +320,7 @@ esp-hal = { version = "~1.1", optional = true, features = ["unstable"] }
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the RPi Pico W MCU
 cyw43 = { version = "0.7", optional = true, features = ["firmware-logs", "bluetooth"] }
 cyw43-pio = { version = "0.10", optional = true }
-embassy-rp = { version = "0.10", optional = true, features = ["unstable-pac", "rp2040"] }
+embassy-rp = { version = "0.10", optional = true, features = ["unstable-pac"] }
 embassy-net-driver-channel = { version = "0.4", optional = true }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for Nordic silicon.
