@@ -2,6 +2,7 @@
 # `--target thumbv8m.main-none-eabihf` and one of the `rp235xa` / `rp235xb` features.
 [build]
 target = "thumbv6m-none-eabi"
+rustflags = ["--cfg", "sha2_backend_soft=\"compact\"", "--cfg", "aes_backend_soft=\"compact\""]
 
 [target.thumbv6m-none-eabi]
 runner = "probe-rs run --chip RP2040 --always-print-stacktrace --catch-reset --catch-hardfault"

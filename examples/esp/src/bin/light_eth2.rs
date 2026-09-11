@@ -25,7 +25,7 @@ use esp_radio::ieee802154::Ieee802154;
 
 use log::info;
 
-use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, RngCore};
+use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, Rng};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::app::on_off::{self, OnOffHooks};
 use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
@@ -34,7 +34,8 @@ use rs_matter_embassy::matter::dm::devices::test::{
     DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
 };
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
-use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, EpClMatcher, Node};
+use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
+use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node};
 use rs_matter_embassy::matter::persist::DummyKvBlobStore;
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::select::Coalesce;
@@ -43,7 +44,7 @@ use rs_matter_embassy::ot::openthread::esp::EspRadio;
 use rs_matter_embassy::ot::openthread::{OpenThread, RamSettings};
 use rs_matter_embassy::ot::{OtMatterResources, OtMdns, OtNetStack, OtNetif};
 use rs_matter_embassy::stack::eth::EthMatterStack;
-use rs_matter_embassy::stack::rand::{reseeding_csprng, RngAdaptor};
+use rs_matter_embassy::stack::rand::reseeding_csprng;
 
 use tinyrlibc as _;
 
@@ -125,7 +126,7 @@ async fn main(_s: Spawner) {
         &TEST_DEV_ATT,
     ));
 
-    let mut ot_rng = RngAdaptor::new(crypto.rand().unwrap());
+    let mut ot_rng = crypto.rand().unwrap();
     let ot_resources = mk_static!(OtMatterResources).init_with(OtMatterResources::init());
 
     let mut ot_settings = RamSettings::new(&mut ot_resources.settings_buf);
@@ -163,18 +164,24 @@ async fn main(_s: Spawner) {
 
     // Chain our endpoint clusters
     let handler = EmptyHandler
+        // The Endpoint 0 system clusters that are ours to provide.
+        // The stack adds the operational network clusters (Network Commissioning,
+        // General Commissioning, General Diagnostics and Wifi/Thread/Ethernet
+        // Diagnostics) on top, because only it knows the network driver state.
+        // Chain any extra Endpoint 0 clusters of your own the same way.
+        .chain(
+            |e, _| e == ROOT_ENDPOINT_ID,
+            Async(EthMatterStack::<0, ()>::root_handler(&(), &mut weak_rand)),
+        )
         // Our on-off cluster, on Endpoint 1
         .chain(
-            EpClMatcher::new(
-                Some(LIGHT_ENDPOINT_ID),
-                Some(TestOnOffDeviceLogic::CLUSTER.id),
-            ),
+            |e, c| e == LIGHT_ENDPOINT_ID && c == TestOnOffDeviceLogic::CLUSTER.id,
             on_off::HandlerAsyncAdaptor(&on_off),
         )
         // Each Endpoint needs a Descriptor cluster too
         // Just use the one that `rs-matter` provides out of the box
         .chain(
-            EpClMatcher::new(Some(LIGHT_ENDPOINT_ID), Some(desc::DescHandler::CLUSTER.id)),
+            |e, c| e == LIGHT_ENDPOINT_ID && c == desc::DescHandler::CLUSTER.id,
             Async(desc::DescHandler::new(Dataver::new_rand(&mut weak_rand)).adapt()),
         );
 

@@ -286,7 +286,6 @@ embedded-io = "0.7"
 scopeguard = { version = "1", default-features = false }
 rs-matter-stack = { version = "0.2", default-features = false }
 static_cell = "2"
-rand = { version = "0.8", default-features = false }
 
 embedded-storage-async = "0.4.1"
 sequential-storage = "3"
@@ -311,6 +310,7 @@ bt-hci = "0.9"
 
 openthread = { version = "0.3", optional = true, default-features = false, features = ["matter"] }
 
+# TEMPORARY: `nrf-sdc` still consumes `rand_core` 0.9 RNGs; `rs-matter` and `rs-matter-stack` are on 0.10 (bridged with `rs_matter_stack::rand::RngAdaptor`)
 rand_core = "0.9"
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the `esp32*` chips family

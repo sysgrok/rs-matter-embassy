@@ -29,8 +29,11 @@ incremental = false
 overflow-checks = false
 
 [patch.crates-io]
-#rs-matter = { git = "https://github.com/project-chip/rs-matter" }
-#rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack", branch = "new-rs-matter" }
+rs-matter = { git = "https://github.com/project-chip/rs-matter" }
+rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack" }
+mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
+openthread = { git = "https://github.com/esp-rs/openthread" }
+openthread-sys = { git = "https://github.com/esp-rs/openthread" }
 cyw43 = { git = "https://github.com/embassy-rs/embassy", rev = "a18084f6e0c7f0756e4d96bd988ed78455ba1a74" }
 cyw43-pio = { git = "https://github.com/embassy-rs/embassy", rev = "a18084f6e0c7f0756e4d96bd988ed78455ba1a74" }
 embassy-rp = { git = "https://github.com/embassy-rs/embassy", rev = "a18084f6e0c7f0756e4d96bd988ed78455ba1a74" }
@@ -84,7 +87,6 @@ cyw43-pio = "0.10"
 # W5500 Ethernet examples
 embassy-net-wiznet = { version = "0.3", features = ["defmt"] }
 embedded-hal-bus = { version = "0.1", features = ["async"] }
-rand_core = "0.9"
 
 cortex-m = "0.7.6"
 cortex-m-rt = "0.7"

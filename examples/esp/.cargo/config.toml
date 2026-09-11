@@ -5,11 +5,11 @@ target = "riscv32imac-unknown-none-elf"
 
 [target.'cfg(all(target_arch = "riscv32", target_os = "none"))']
 runner = "espflash flash --monitor"
-rustflags = ["-C", "link-arg=-Tlinkall.x", "-C", "force-frame-pointers"]
+rustflags = ["-C", "link-arg=-Tlinkall.x", "-C", "force-frame-pointers", "--cfg", "sha2_backend_soft=\"compact\"", "--cfg", "aes_backend_soft=\"compact\""]
 
 [target.'cfg(all(target_arch = "xtensa", target_os = "none"))']
 runner  = "espflash flash --monitor"
-rustflags = ["-C", "link-arg=-Wl,-Tlinkall.x", "-C", "link-arg=-nostartfiles"]
+rustflags = ["-C", "link-arg=-Wl,-Tlinkall.x", "-C", "link-arg=-nostartfiles", "--cfg", "sha2_backend_soft=\"compact\"", "--cfg", "aes_backend_soft=\"compact\""]
 
 [unstable]
 #build-std-features = ["panic_immediate_abort"]
