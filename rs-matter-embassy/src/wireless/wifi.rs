@@ -5,7 +5,7 @@ use embassy_futures::select::select;
 use crate::ble::{BtpGattContext, BtpGattPeripheral, Controller, ControllerRef};
 use crate::enet::{create_enet_stack, EnetNetif, EnetStack};
 use crate::eth::EmbassyNetContext;
-use crate::matter::crypto::RngCore;
+use crate::matter::crypto::Rng;
 use crate::matter::dm::clusters::gen_diag::InterfaceTypeEnum;
 use crate::matter::dm::clusters::net_comm::NetCtl;
 use crate::matter::dm::clusters::wifi_diag::{WifiDiag, WirelessDiag};
@@ -238,7 +238,7 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
 impl<T, R> wireless::Wifi for EmbassyWifi<'_, T, R>
 where
     T: WifiDriver,
-    R: RngCore + Copy,
+    R: Rng + Copy,
 {
     // Forward the concrete controller type from the underlying Wifi driver, so the
     // commissioning and operational handler chains share one net-ctl type.
@@ -264,7 +264,7 @@ where
 impl<T, R> wireless::WifiCoex for EmbassyWifi<'_, T, R>
 where
     T: WifiCoexDriver,
-    R: RngCore + Copy,
+    R: Rng + Copy,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -285,7 +285,7 @@ where
 impl<T, R> Gatt for EmbassyWifi<'_, T, R>
 where
     T: BleDriver,
-    R: RngCore + Copy,
+    R: Rng + Copy,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -310,7 +310,7 @@ struct WifiDriverTaskImpl<'a, A, R> {
 impl<A, R> WifiDriverTask for WifiDriverTaskImpl<'_, A, R>
 where
     A: wireless::WifiTask,
-    R: RngCore,
+    R: Rng,
 {
     async fn run<D, C>(&mut self, driver: D, net_ctl: C) -> Result<(), Error>
     where
@@ -354,7 +354,7 @@ struct WifiCoexDriverTaskImpl<'a, A, R> {
 impl<A, R> WifiCoexDriverTask for WifiCoexDriverTaskImpl<'_, A, R>
 where
     A: wireless::WifiCoexTask,
-    R: RngCore + Copy,
+    R: Rng + Copy,
 {
     async fn run<D, C, B>(&mut self, wifi_driver: D, net_ctl: C, ble_ctl: B) -> Result<(), Error>
     where

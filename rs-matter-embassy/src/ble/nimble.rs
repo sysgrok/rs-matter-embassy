@@ -15,7 +15,7 @@ use nimble_rs::gatt::server::{BleGattRegister, GattServices, GattsEvent};
 use nimble_rs::{gatt_services, Ble, BleError, BleUuid, HostEvent};
 
 use rs_matter_stack::ble::GattPeripheral;
-use rs_matter_stack::matter::crypto::RngCore;
+use rs_matter_stack::matter::crypto::Rng;
 use rs_matter_stack::matter::error::{Error, ErrorCode};
 use rs_matter_stack::matter::transport::network::btp::{
     AdvData, Btp, C1_CHARACTERISTIC_UUID, C2_CHARACTERISTIC_UUID, C3_CHARACTERISTIC_UUID,
@@ -272,7 +272,7 @@ pub struct NimbleBtpGattPeripheral<'a, R, C> {
 
 impl<'a, R, C> NimbleBtpGattPeripheral<'a, R, C>
 where
-    R: RngCore + Copy,
+    R: Rng + Copy,
     C: Controller,
 {
     /// Create a new instance.
@@ -528,7 +528,7 @@ where
 
 impl<R, C> GattPeripheral for NimbleBtpGattPeripheral<'_, R, C>
 where
-    R: RngCore + Copy,
+    R: Rng + Copy,
     C: Controller,
 {
     async fn run(
