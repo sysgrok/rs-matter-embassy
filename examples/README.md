@@ -2,33 +2,33 @@
 
 <img src="https://github.com/ivmarkov/rs-matter-embassy/blob/master/examples/acme.jpg" alt="ACME" width="300" height="670">
 
-The examples are tested and _should_ work on the nrf52, rPI Pico W, esp32, esp32s3, esp32c3 and esp32c6.
+The examples are tested and should work on the nrfXX, rPI Pico and esp32XX.
 
 With that said, it is still early days for all of `rs-matter`, `trouble` (the bare-metal BLE stack in use) 
 and `openthread` (the OpenThread Rust wrappers) so you might face issues during the initial commissioning.
 
 Please [report](https://github.com/ivmarkov/rs-matter-embassy/issues) those!
 
-Also, currently the persistance is (temporarily) switched off, so if you stop/restart the MCU, you'll have to go over
+Also, currently the persistence is (temporarily) switched off, so if you stop/restart the MCU, you'll have to go over
 the commissioning process again, by first removing your device from your Matter Controller.
 
 ## Matter Controller
 
 You need one of:
 * **Google**:
-  * Google Home/Nest or other Google Matter Controller
+  * Google Home/Nest or other Google Matter Controller (only the devices with screens support Thread)
   * The Google Home app on your phone
 * **Alexa**:
   * Alexa Echo Hub, Echo Dot or other Amazon Matter Controller
   * The Alexa app on your phone
-  * Note that Alexa will not work with the Thread examples yet, as no MCU is supported
-  * with BLE+Thread coex, and Alexa requires that
 * **Apple**:
   * Apple TV or other Apple Matter Controller
   * An iPhone with the Apple Home app
 * **Samsung**
-  * A recent TV hich can act as a SmartThings controller, or the Samsung / Aeotec SmarthThings standalone hub
+  * A recent TV can act as a SmartThings controller, or the Samsung / Aeotec SmarthThings standalone hub
   * The SmartThings app on your phone
+* **IKEA**
+  * You need the Dirigera hub, which is a Matter controller and a Thread Border Router
 
 Once you build and flash the firmware, follow the instructions in the phone app.
 
