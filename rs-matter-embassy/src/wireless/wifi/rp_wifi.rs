@@ -180,6 +180,12 @@ impl<C> bt_hci::controller::Controller for Cyw43Controller<'_, '_, C>
 where
     C: bt_hci::controller::Controller,
 {
+    type Buffer<'b> = C::Buffer<'b>;
+
+    fn alloc_buf(&self) -> Result<Self::Buffer<'_>, Self::Error> {
+        self.ctl.alloc_buf()
+    }
+
     fn write_acl_data(&self, packet: &AclPacket) -> impl Future<Output = Result<(), Self::Error>> {
         self.with(self.ctl.write_acl_data(packet))
     }
@@ -197,7 +203,7 @@ where
 
     fn read<'a>(
         &self,
-        buf: &'a mut [u8],
+        buf: &'a mut Self::Buffer<'_>,
     ) -> impl Future<Output = Result<ControllerToHostPacket<'a>, Self::Error>> {
         self.with(self.ctl.read(buf))
     }

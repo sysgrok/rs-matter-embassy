@@ -53,6 +53,12 @@ impl<C> bt_hci::controller::Controller for ControllerRef<'_, C>
 where
     C: bt_hci::controller::Controller,
 {
+    type Buffer<'b> = C::Buffer<'b>;
+
+    fn alloc_buf(&self) -> Result<Self::Buffer<'_>, Self::Error> {
+        self.0.alloc_buf()
+    }
+
     fn write_acl_data(&self, packet: &AclPacket) -> impl Future<Output = Result<(), Self::Error>> {
         self.0.write_acl_data(packet)
     }
@@ -70,7 +76,7 @@ where
 
     fn read<'a>(
         &self,
-        buf: &'a mut [u8],
+        buf: &'a mut Self::Buffer<'_>,
     ) -> impl Future<Output = Result<ControllerToHostPacket<'a>, Self::Error>> {
         self.0.read(buf)
     }
@@ -80,6 +86,12 @@ impl<C> bt_hci::controller::blocking::Controller for ControllerRef<'_, C>
 where
     C: bt_hci::controller::blocking::Controller,
 {
+    type Buffer<'b> = C::Buffer<'b>;
+
+    fn alloc_buf(&self) -> Result<Self::Buffer<'_>, Self::Error> {
+        self.0.alloc_buf()
+    }
+
     fn write_acl_data(&self, packet: &AclPacket) -> Result<(), Self::Error> {
         self.0.write_acl_data(packet)
     }
@@ -113,13 +125,16 @@ where
         self.0.try_write_iso_data(packet)
     }
 
-    fn read<'a>(&self, buf: &'a mut [u8]) -> Result<ControllerToHostPacket<'a>, Self::Error> {
+    fn read<'a>(
+        &self,
+        buf: &'a mut Self::Buffer<'_>,
+    ) -> Result<ControllerToHostPacket<'a>, Self::Error> {
         self.0.read(buf)
     }
 
     fn try_read<'a>(
         &self,
-        buf: &'a mut [u8],
+        buf: &'a mut Self::Buffer<'_>,
     ) -> Result<ControllerToHostPacket<'a>, bt_hci::controller::blocking::TryError<Self::Error>>
     {
         self.0.try_read(buf)

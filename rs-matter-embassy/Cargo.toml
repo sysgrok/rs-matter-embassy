@@ -180,7 +180,7 @@ max-exchanges-per-session-3 = ["rs-matter-stack/max-exchanges-per-session-3"]
 # The footprints are close: on an ESP32-C6 Thread build, NimBLE costs ~10K more flash and ~3K more
 # static RAM than `trouble`, plus its runtime C-heap use.
 # To switch: `--no-default-features --features rustcrypto,nimble`
-trouble = ["dep:trouble-host", "dep:embassy-sync-07"]
+trouble = ["dep:trouble-host"]
 nimble = ["dep:nimble-rs"]
 
 # The NimBLE BTP GATT *central* (Matter Commissioner side). Not part of any `MatterStack` assembly
@@ -280,7 +280,6 @@ heapless = "0.9"
 enumset = { version = "1", default-features = false }
 embassy-futures = "0.1"
 embassy-sync = "0.8"
-embassy-sync-07 = { package = "embassy-sync", version = "0.7", optional = true } # For trouble-host, until its next release fixes the e-sync re-export issues
 embassy-time = "0.5"
 embedded-io = "0.7"
 scopeguard = { version = "1", default-features = false }
@@ -298,7 +297,7 @@ edge-nal-openthread = { version = "0.2", optional = true, default-features = fal
 # BLE-peripheral-only, and the central role drags the scanner/central HCI
 # paths into the link - which on nRF means the (much larger) multirole
 # SoftDevice Controller blob instead of the peripheral-only one.
-trouble-host = { version = "0.7", optional = true, default-features = false, features = ["peripheral", "gatt", "derive", "default-packet-pool"] }
+trouble-host = { version = "0.8", optional = true, default-features = false, features = ["peripheral", "gatt", "derive", "default-packet-pool"] }
 
 # The alternative BLE host (the `nimble` feature). `default-features = false` for the same reason
 # as `trouble-host` above - Matter commissioning is BLE-peripheral-only, so neither the central
@@ -306,7 +305,7 @@ trouble-host = { version = "0.7", optional = true, default-features = false, fea
 # bounded init-time allocations through it and cannot boot without a backend for them.
 nimble-rs = { version = "0.1", optional = true, default-features = false, features = ["peripheral", "use-c-heap", "max-connections-1"] }
 
-bt-hci = "0.9"
+bt-hci = "0.10"
 
 openthread = { version = "0.3", optional = true, default-features = false, features = ["matter"] }
 
@@ -315,7 +314,7 @@ rand_core = "0.9"
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the `esp32*` chips family
 esp-radio = { version = "1.0.0-beta.0", optional = true, features = ["ble"] }
-esp-hal = { version = "~1.1", optional = true, features = ["unstable"] }
+esp-hal = { version = "~1.2", optional = true, features = ["unstable"] }
 
 # Only necessary when `rs-matter-embassy` is providing extra-sugar for the RPi Pico W MCU
 cyw43 = { version = "0.7", optional = true, features = ["firmware-logs", "bluetooth"] }
@@ -328,6 +327,6 @@ embassy-net-driver-channel = { version = "0.4", optional = true }
 # four of these crates have to agree on it.
 embassy-nrf = { version = "0.11", optional = true, features = ["time"], default-features = false }
 nrf-sdc = { version = "0.4", default-features = false, optional = true, features = ["peripheral"] }
-nrf-mpsl = { version = "0.3", default-features = false, optional = true, features = ["critical-section-impl"] }
+nrf-mpsl = { version = "0.4", default-features = false, optional = true, features = ["critical-section-impl"] }
 nrf-802154 = { version = "0.1", default-features = false, optional = true, features = ["openthread"] }
 portable-atomic = { version = "1", optional = true }
