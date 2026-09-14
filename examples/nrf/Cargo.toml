@@ -33,16 +33,15 @@ incremental = false
 overflow-checks = false
 
 [patch.crates-io]
-rs-matter = { git = "https://github.com/project-chip/rs-matter" }
-rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack" }
-mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
-openthread = { git = "https://github.com/esp-rs/openthread" }
-openthread-sys = { git = "https://github.com/esp-rs/openthread" }
-# Unreleased work on the `bt-hci-010` branches (bt-hci 0.10, released nrf-mpsl/nrf-sdc)
-nimble-rs = { git = "https://github.com/sysgrok/nimble-rs", branch = "bt-hci-010" }
-nimble-rs-sys = { git = "https://github.com/sysgrok/nimble-rs", branch = "bt-hci-010" }
-nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "bt-hci-010" }
-nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154", branch = "bt-hci-010" }
+#rs-matter = { git = "https://github.com/project-chip/rs-matter" }
+#rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack" }
+#mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
+#openthread = { git = "https://github.com/esp-rs/openthread" }
+#openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+#nimble-rs = { git = "https://github.com/sysgrok/nimble-rs" }
+#nimble-rs-sys = { git = "https://github.com/sysgrok/nimble-rs" }
+#nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
+#nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154" }
 
 [features]
 default = ["nrf52840", "trouble"]
