@@ -19,7 +19,8 @@ use core::pin::pin;
 use core::ptr::addr_of_mut;
 
 #[cfg(not(feature = "skip-cyw43-firmware"))]
-use cyw43::{aligned_bytes, Aligned, A4};
+use cyw43::aligned_bytes;
+use cyw43::{Aligned, A4};
 use embassy_executor::Spawner;
 
 use embassy_rp::bind_interrupts;

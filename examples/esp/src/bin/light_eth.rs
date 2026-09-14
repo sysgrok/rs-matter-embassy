@@ -22,7 +22,7 @@ use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 use esp_metadata_generated::memory_range;
 use esp_radio::wifi::sta::StationConfig;
-use esp_radio::wifi::{Config, WifiController};
+use esp_radio::wifi::{AuthenticationMethodConfig, Config, WifiController};
 
 use log::info;
 
@@ -101,12 +101,7 @@ async fn main(_s: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(
-        timg0.timer0,
-        #[cfg(target_arch = "riscv32")]
-        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT)
-            .software_interrupt0,
-    );
+    esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
@@ -118,8 +113,10 @@ async fn main(_s: Spawner) {
     // Configure and start the Wifi first
     let station_config = Config::Station(
         StationConfig::default()
-            .with_ssid(WIFI_SSID)
-            .with_password(WIFI_PASS.into()),
+            .with_ssid(WIFI_SSID.try_into().unwrap())
+            .with_authentication(AuthenticationMethodConfig::Wpa2Personal(
+                WIFI_PASS.try_into().unwrap(),
+            )),
     );
     let wifi = peripherals.WIFI;
     let controller = esp_radio::wifi::WifiController::new(

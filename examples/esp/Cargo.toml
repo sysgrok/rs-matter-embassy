@@ -52,20 +52,21 @@ rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack" }
 mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
 openthread = { git = "https://github.com/esp-rs/openthread" }
 openthread-sys = { git = "https://github.com/esp-rs/openthread" }
-esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
-esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
-esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
-esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
-esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
-esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
-esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
-esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
-esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "ab45d33cf69f941e5bd8b939b9a4ad0e68bd6b7d" }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
+esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
+esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
+esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
+esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
+esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
+esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
 
-nrf-sdc = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
-nrf-mpsl = { git = "https://github.com/alexmoon/nrf-sdc.git", rev = "f54b6389ffa2750d4d3a4f5435660cb66b47e51a" }
-nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
-trouble-host = { git = "https://github.com/embassy-rs/trouble", rev = "652fe9633db5be92b98136690e4a0ad9d9bb133f" }
+# Unreleased work on the `bt-hci-010` branches (bt-hci 0.10, released nrf-mpsl/nrf-sdc)
+nimble-rs = { git = "https://github.com/sysgrok/nimble-rs", branch = "bt-hci-010" }
+nimble-rs-sys = { git = "https://github.com/sysgrok/nimble-rs", branch = "bt-hci-010" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "bt-hci-010" }
+nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154", branch = "bt-hci-010" }
 
 [features]
 default = ["esp32c6", "trouble"]
@@ -84,15 +85,15 @@ thread = ["rs-matter-embassy/openthread", "rs-matter-embassy/mbedtls", "rs-matte
 log = "0.4"
 embassy-executor = "0.10"
 embassy-embedded-hal = "0.6"
-esp-backtrace = { version = "0.19", features = ["panic-handler", "println"] }
-esp-hal = { version = "~1.1", features = ["log-04", "unstable", "exception-handler"] }
-esp-rtos = { version = "0.3", features = ["esp-radio", "embassy"] }
-esp-alloc = { version = "0.10" }
-esp-println = { version = "0.17", features = ["log-04"] }
+esp-backtrace = { version = "0.20", features = ["panic-handler", "println"] }
+esp-hal = { version = "~1.2", features = ["log-04", "unstable", "exception-handler"] }
+esp-rtos = { version = "0.4", features = ["esp-radio", "embassy"] }
+esp-alloc = { version = "0.11" }
+esp-println = { version = "0.18", features = ["log-04"] }
 esp-radio = { version = "1.0.0-beta.0", features = ["ble", "log-04", "unstable"] }
-esp-storage = { version = "0.9", features = ["embedded-storage"] }
-esp-bootloader-esp-idf = { version = "0.5", features = ["log-04"] }
-esp-metadata-generated = "0.4"
+esp-storage = { version = "0.10", features = ["embedded-storage"] }
+esp-bootloader-esp-idf = { version = "0.6", features = ["log-04"] }
+esp-metadata-generated = "0.5"
 # `default-features = false`: the BLE host backend is selected by this crate's `trouble` /
 # `nimble` features instead, as the `trouble` default would collide with `nimble`. Everything
 # else the defaults used to bring in (`rustcrypto`) is named explicitly.

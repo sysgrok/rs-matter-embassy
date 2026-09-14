@@ -2,7 +2,10 @@ use core::cell::Cell;
 
 use esp_radio::wifi::scan::ScanConfig;
 use esp_radio::wifi::sta::StationConfig;
-use esp_radio::wifi::{AuthenticationMethod, Config, ConnectionError, WifiController, WifiError};
+use esp_radio::wifi::{
+    AuthenticationMethod, AuthenticationMethodConfig, Config, ConnectionError, Password, Ssid,
+    WifiController, WifiError,
+};
 
 use crate::matter::dm::clusters::net_comm::{
     NetCtl, NetCtlError, NetworkScanInfo, NetworkType, WiFiBandEnum, WiFiSecurityBitmap,
@@ -50,7 +53,7 @@ impl NetCtl for EspWifiController<'_> {
 
         let mut scan_config = ScanConfig::default();
         if let Some(network) = network.filter(|n| !n.is_empty()) {
-            scan_config = scan_config.with_ssid(core::str::from_utf8(network).unwrap_or("???"));
+            scan_config = scan_config.with_ssid(Ssid::try_from(network).map_err(to_ctl_err)?);
         }
 
         let aps = ctl.scan_async(&scan_config).await.map_err(to_err)?;
@@ -75,6 +78,7 @@ impl NetCtl for EspWifiController<'_> {
                     Some(AuthenticationMethod::Wpa2Wpa3Personal) => {
                         WiFiSecurityBitmap::WPA_2_PERSONAL | WiFiSecurityBitmap::WPA_3_PERSONAL
                     }
+                    Some(AuthenticationMethod::Wpa3Personal) => WiFiSecurityBitmap::WPA_3_PERSONAL,
                     Some(AuthenticationMethod::Wpa2Enterprise) => {
                         WiFiSecurityBitmap::WPA_2_PERSONAL
                     }
@@ -95,10 +99,10 @@ impl NetCtl for EspWifiController<'_> {
 
         let mut ctl = self.0.lock().await;
 
-        let ssid = core::str::from_utf8(ssid).unwrap_or("???");
-        let pass = core::str::from_utf8(pass).unwrap_or("???");
-
-        info!("Wifi connect request for SSID {}", ssid);
+        info!(
+            "Wifi connect request for SSID {}",
+            core::str::from_utf8(ssid).unwrap_or("???")
+        );
 
         // If already connected, disconnect first to ensure a clean state.
         // Calling connect_async() while already connected can hang forever
@@ -114,10 +118,18 @@ impl NetCtl for EspWifiController<'_> {
             });
         }
 
+        // An empty password means an open network; anything else is taken as WPA2-Personal,
+        // which is what the driver used to assume for a configured password
+        let authentication = if pass.is_empty() {
+            AuthenticationMethodConfig::Open
+        } else {
+            AuthenticationMethodConfig::Wpa2Personal(Password::try_from(*pass).map_err(to_ctl_err)?)
+        };
+
         ctl.set_config(&Config::Station(
             StationConfig::default()
-                .with_ssid(ssid)
-                .with_password(unwrap!(pass.try_into())),
+                .with_ssid(Ssid::try_from(*ssid).map_err(to_ctl_err)?)
+                .with_authentication(authentication),
         ))
         .map_err(to_ctl_err)?;
         info!("Wifi configuration updated");
