@@ -381,8 +381,7 @@ where
 
         // Three concurrent pumps: the NimBLE host itself, incoming C1 writes, and outgoing C2
         // indications - the last of which also drives (re)advertising synchronously, so that needs
-        // no future of its own. This keeps the `run` future (which rs-matter-stack bump-allocates)
-        // small.
+        // no future of its own. This keeps the `run` future small.
         select3(
             Self::run_host(&ble, &self.ble_ctl),
             self.process_incoming(btp),
@@ -514,7 +513,7 @@ where
     }
 
     /// Configure and (re)start connectable, undirected advertising. Synchronous - deliberately not a
-    /// separate async task, so the bump-allocated `run` future stays small.
+    /// separate async task, so the `run` future stays small.
     fn advertise(&self, ble: &Ble<'_, Services>) -> Result<(), Error> {
         // Infers (and, if need be, generates) the identity address to advertise with: the
         // controller's public address where it has one, a random static one otherwise.

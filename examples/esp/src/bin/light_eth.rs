@@ -60,18 +60,6 @@ macro_rules! mk_static {
     }};
 }
 
-/// The amount of memory for allocating all `rs-matter-stack` futures created during
-/// the execution of the `run*` methods.
-/// This does NOT include the rest of the Matter stack.
-///
-/// The futures of `rs-matter-stack` created during the execution of the `run*` methods
-/// are allocated in a special way using a small bump allocator which results
-/// in a much lower memory usage by those.
-///
-/// If - for your platform - this size is not enough, increase it until
-/// the program runs without panics during the stack initialization.
-const BUMP_SIZE: usize = 20000;
-
 /// Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
 #[cfg(not(feature = "esp32"))]
 const HEAP_SIZE: usize = 100 * 1024;
@@ -106,9 +94,11 @@ async fn main(_s: Spawner) {
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = mk_static!(EmbassyEthMatterStack::<BUMP_SIZE, ()>).init_with(
-        EmbassyEthMatterStack::init(&TEST_DEV_DET, TEST_DEV_COMM, &TEST_DEV_ATT),
-    );
+    let stack = mk_static!(EmbassyEthMatterStack::<()>).init_with(EmbassyEthMatterStack::init(
+        &TEST_DEV_DET,
+        TEST_DEV_COMM,
+        &TEST_DEV_ATT,
+    ));
 
     // Configure and start the Wifi first
     let station_config = Config::Station(
@@ -151,7 +141,7 @@ async fn main(_s: Spawner) {
         // Chain any extra Endpoint 0 clusters of your own the same way.
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
-            Async(EmbassyEthMatterStack::<0, ()>::root_handler(
+            Async(EmbassyEthMatterStack::<()>::root_handler(
                 &(),
                 &mut weak_rand,
             )),
@@ -229,7 +219,7 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 /// The Matter Light device Node
 const NODE: Node = Node {
     endpoints: &[
-        EmbassyEthMatterStack::<0, ()>::root_endpoint(),
+        EmbassyEthMatterStack::<()>::root_endpoint(),
         Endpoint::new(
             LIGHT_ENDPOINT_ID,
             devices!(DEV_TYPE_ON_OFF_LIGHT),

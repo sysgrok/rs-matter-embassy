@@ -5,8 +5,7 @@
 //!
 //! If you want to use Ethernet, utilize `EmbassyEthMatterStack` instead.
 //! If you want to use non-concurrent commissioning, call `run` instead of `run_coex`
-//! and provision a higher `BUMP_SIZE` because the non-concurrent commissioning has slightly higher
-//! memory requirements on the futures' sizes.
+//! (the non-concurrent commissioning has slightly higher memory requirements on the futures' sizes).
 //! (Note: Alexa does not work (yet) with non-concurrent commissioning.)
 //!
 //! The example implements a fictitious Light device (an On-Off Matter cluster).
@@ -71,24 +70,6 @@ bind_interrupts!(struct Irqs {
     DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>, dma::InterruptHandler<DMA_CH1>;
 });
 
-/// The amount of memory for allocating all `rs-matter-stack` futures created during
-/// the execution of the `run*` methods.
-/// This does NOT include the rest of the Matter stack.
-///
-/// The futures of `rs-matter-stack` created during the execution of the `run*` methods
-/// are allocated in a special way using a small bump allocator which results
-/// in a much lower memory usage by those.
-///
-/// If - for your platform - this size is not enough, increase it until
-/// the program runs without panics during the stack initialization.
-// RP2350 (thumbv8m) has larger stack frames than RP2040 (thumbv6m), so its coex
-// futures need a bigger bump arena: the measured peak is ~30.4 KB, just over the
-// RP2040's 30000.
-#[cfg(feature = "rp2040")]
-const BUMP_SIZE: usize = 30000;
-#[cfg(not(feature = "rp2040"))]
-const BUMP_SIZE: usize = 40960;
-
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();
 
@@ -138,9 +119,11 @@ async fn main(_spawner: Spawner) {
     // Statically allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = mk_static!(EmbassyWifiMatterStack<BUMP_SIZE, ()>).init_with(
-        EmbassyWifiMatterStack::init(&TEST_DEV_DET, TEST_DEV_COMM, &TEST_DEV_ATT),
-    );
+    let stack = mk_static!(EmbassyWifiMatterStack<()>).init_with(EmbassyWifiMatterStack::init(
+        &TEST_DEV_DET,
+        TEST_DEV_COMM,
+        &TEST_DEV_ATT,
+    ));
 
     // Create the crypto provider, using the ROSC RNG peripheral (which is a TRNG) as the source of randomness for a reseeding CSPRNG.
     let crypto = default_crypto(
@@ -167,7 +150,7 @@ async fn main(_spawner: Spawner) {
         // Chain any extra Endpoint 0 clusters of your own the same way.
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
-            Async(EmbassyWifiMatterStack::<0, ()>::root_handler(
+            Async(EmbassyWifiMatterStack::<()>::root_handler(
                 &(),
                 &mut weak_rand,
             )),
@@ -228,7 +211,7 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 /// The Matter Light device Node
 const NODE: Node = Node {
     endpoints: &[
-        EmbassyWifiMatterStack::<0, ()>::root_endpoint(),
+        EmbassyWifiMatterStack::<()>::root_endpoint(),
         Endpoint::new(
             LIGHT_ENDPOINT_ID,
             devices!(DEV_TYPE_ON_OFF_LIGHT),

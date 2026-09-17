@@ -91,8 +91,6 @@ bind_interrupts!(struct Irqs {
     AAR00_CCM00 => CcmInterruptHandler;
 });
 
-const BUMP_SIZE: usize = 21000;
-
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();
 
@@ -144,16 +142,14 @@ async fn main(_s: Spawner) {
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = mk_static!(EmbassyThreadMatterStack<BUMP_SIZE, ()>).init_with(
-        EmbassyThreadMatterStack::init(
-            &TEST_BASIC_INFO,
-            BasicCommData {
-                password: TEST_DEV_COMM.password,
-                discriminator,
-            },
-            &TEST_DEV_ATT,
-        ),
-    );
+    let stack = mk_static!(EmbassyThreadMatterStack<()>).init_with(EmbassyThreadMatterStack::init(
+        &TEST_BASIC_INFO,
+        BasicCommData {
+            password: TEST_DEV_COMM.password,
+            discriminator,
+        },
+        &TEST_DEV_ATT,
+    ));
 
     #[cfg(feature = "nrf52840")]
     let (mpsl_p, sdc_p, ieee802154_p) = (
@@ -245,7 +241,7 @@ async fn main(_s: Spawner) {
         // Chain any extra Endpoint 0 clusters of your own the same way.
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
-            Async(EmbassyThreadMatterStack::<0, ()>::root_handler(
+            Async(EmbassyThreadMatterStack::<()>::root_handler(
                 &(),
                 &mut weak_rand,
             )),
@@ -312,7 +308,7 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 /// The Matter Light device Node
 const NODE: Node = Node {
     endpoints: &[
-        EmbassyThreadMatterStack::<0, ()>::root_endpoint(),
+        EmbassyThreadMatterStack::<()>::root_endpoint(),
         Endpoint::new(
             LIGHT_ENDPOINT_ID,
             devices!(DEV_TYPE_ON_OFF_LIGHT),

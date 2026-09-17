@@ -48,10 +48,10 @@ unsafe impl Binding<DMA_IRQ_0, dma::InterruptHandler<DMA_CH1>> for Cyw43PioInter
 /// The `cyw43` driver state holds the network RX/TX packet buffers, as well as the
 /// BLE HCI packet buffers, and is therefore quite large (~21KB).
 ///
-/// Since the `run*` methods below are driven by futures which - inside the Matter stack -
-/// are allocated from a small bump allocator, keeping the state as a local of those futures
-/// would inflate the bump memory requirements by its full size. Hence the state lives in a
-/// `static` instead, and is handed out - exclusively - via this guard.
+/// Keeping it as a local of the `run*` futures below would inflate those futures - and thus
+/// the memory the user has to set aside for the Matter stack's `run*` future - by its full
+/// size. Hence the state lives in a `static` instead, and is handed out - exclusively - via
+/// this guard.
 static CYW43_STATE_TAKEN: Mutex<Cell<bool>, CriticalSectionRawMutex> = Mutex::new(Cell::new(false));
 static mut CYW43_STATE: cyw43::State = cyw43::State::new();
 

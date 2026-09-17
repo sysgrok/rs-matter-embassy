@@ -40,8 +40,8 @@ pub mod rp {
 ///
 /// The difference between this and `WirelessMatterStack` is that all resources necessary for the
 /// operation of the BLE controller and pre-allocated inside the stack.
-pub type EmbassyWirelessMatterStack<'a, const B: usize, T, N, E = ()> =
-    MatterStack<'a, B, EmbassyWirelessBle<T, N, E>>;
+pub type EmbassyWirelessMatterStack<'a, T, N, E = ()> =
+    MatterStack<'a, EmbassyWirelessBle<T, N, E>>;
 
 /// A type alias for an Embassy implementation of the `Network` trait for a Matter stack running over
 /// BLE during commissioning, and then over either WiFi or Thread when operating.
@@ -164,10 +164,10 @@ where
     R: Rng + Copy,
     C: Controller,
 {
-    pub fn new_for_stack<const B: usize, T, E>(
+    pub fn new_for_stack<T, E>(
         ble_ctl: C,
         rand: Option<R>,
-        stack: &'a crate::wireless::EmbassyWirelessMatterStack<B, T, E>,
+        stack: &'a crate::wireless::EmbassyWirelessMatterStack<T, E>,
     ) -> Self
     where
         T: WirelessNetwork,

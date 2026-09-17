@@ -27,8 +27,8 @@ pub mod rp_wifi;
 ///
 /// The difference between this and the `WifiMatterStack` is that all resources necessary for the
 /// operation of `embassy-net` as well as the BLE controller and pre-allocated inside the stack.
-pub type EmbassyWifiMatterStack<'a, const B: usize, E = ()> =
-    EmbassyWirelessMatterStack<'a, B, Wifi, EmbassyNetContext, E>;
+pub type EmbassyWifiMatterStack<'a, E = ()> =
+    EmbassyWirelessMatterStack<'a, Wifi, EmbassyNetContext, E>;
 
 /// A trait representing a task that needs access to the Wifi driver and controller to perform its work
 pub trait WifiDriverTask {
@@ -199,11 +199,11 @@ pub struct EmbassyWifi<'a, T, R> {
 
 impl<'a, T, R> EmbassyWifi<'a, T, R> {
     /// Create a new instance of the `EmbassyWifi` type.
-    pub fn new<const B: usize, E>(
+    pub fn new<E>(
         driver: T,
         rand: R,
         use_ble_random_addr: bool,
-        stack: &'a EmbassyWifiMatterStack<'a, B, E>,
+        stack: &'a EmbassyWifiMatterStack<'a, E>,
     ) -> Self
     where
         E: Embedding,

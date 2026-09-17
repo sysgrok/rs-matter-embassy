@@ -29,8 +29,8 @@ pub mod nrf;
 ///
 /// The difference between this and the `ThreadMatterStack` is that all resources necessary for the
 /// operation of `openthread` as well as the BLE controller and pre-allocated inside the stack.
-pub type EmbassyThreadMatterStack<'a, const B: usize, E = ()> =
-    EmbassyWirelessMatterStack<'a, B, Thread, OtNetContext, E>;
+pub type EmbassyThreadMatterStack<'a, E = ()> =
+    EmbassyWirelessMatterStack<'a, Thread, OtNetContext, E>;
 
 /// A trait representing a task that needs access to the Thread radio to perform its work
 pub trait ThreadDriverTask {
@@ -181,12 +181,12 @@ where
     R: CryptoRng + Copy,
 {
     /// Create a new instance of the `EmbassyThread` type.
-    pub fn new<const B: usize, E>(
+    pub fn new<E>(
         driver: T,
         rand: R,
         ieee_eui64: [u8; 8],
         kv: K,
-        stack: &'a EmbassyThreadMatterStack<'a, B, E>,
+        stack: &'a EmbassyThreadMatterStack<'a, E>,
         use_ble_random_addr: bool,
     ) -> Self
     where
