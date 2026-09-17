@@ -133,6 +133,8 @@ struct Connection {
 struct State {
     connection: Option<Connection>,
     conn_gen: usize,
+    /// The `conn_gen` the BTP session was last reset for (see `State::sync_btp`)
+    btp_gen: Option<usize>,
     /// The value attribute handle of `C2`, learned from the registration event; indications are
     /// addressed to it. `0` until the `Ble` host reports it.
     c2_val_handle: u16,
@@ -151,6 +153,7 @@ impl State {
         Self {
             connection: None,
             conn_gen: 0,
+            btp_gen: None,
             c2_val_handle: 0,
             in_data: Vec::new(),
             out_data: Vec::new(),
@@ -163,12 +166,28 @@ impl State {
         init!(Self {
             connection: None,
             conn_gen: 0,
+            btp_gen: None,
             c2_val_handle: 0,
             in_data <- Vec::init(),
             out_data <- Vec::init(),
             need_advertise: false,
             adv_data <- Vec::init(),
         })
+    }
+
+    /// Reset the BTP session if it still belongs to a previous BLE connection.
+    ///
+    /// Every BLE connection is a brand-new BTP session. Both pumps - the incoming one and the
+    /// outgoing one - call this under the state lock before they touch `btp`, so that neither
+    /// can ever operate on the session of a connection that is already gone. In particular the
+    /// outgoing pump must not push a frame left over from the previous session (typically a
+    /// stand-alone ACK that became due after the peer had disconnected) down the new connection:
+    /// that frame carries the old session's sequence numbers and precedes the handshake response.
+    fn sync_btp(&mut self, btp: &Btp) {
+        if self.btp_gen != Some(self.conn_gen) {
+            btp.reset();
+            self.btp_gen = Some(self.conn_gen);
+        }
     }
 }
 
@@ -219,6 +238,7 @@ impl NimbleBtpGattContext {
             let mut state = state.borrow_mut();
 
             state.connection = None;
+            state.btp_gen = None;
             state.in_data.clear();
             state.out_data.clear();
             state.adv_data.clear();
@@ -387,8 +407,6 @@ where
     /// While it might seem that this can be done directly from the GATTS hook, this is not
     /// generally possible because `Btp` might not be `Sync`, while the hook has to be.
     async fn process_incoming(&self, btp: &Btp) -> Result<(), Error> {
-        let mut generation = None;
-
         loop {
             let processed = self.context.state.lock(|state| {
                 let mut state = state.borrow_mut();
@@ -397,10 +415,7 @@ where
                 let conn = state.connection.as_ref().map(|c| (c.mtu, c.peer));
 
                 if let Some((mtu, peer)) = conn {
-                    if generation != Some(state.conn_gen) {
-                        btp.reset();
-                        generation = Some(state.conn_gen);
-                    }
+                    state.sync_btp(btp);
 
                     if !state.in_data.is_empty() {
                         btp.process_incoming(mtu, peer, &state.in_data)?;
@@ -445,6 +460,9 @@ where
                     Some(conn) if conn.subscribed => (conn.mtu, conn.conn_handle),
                     _ => return Ok::<_, Error>(false),
                 };
+
+                // Never emit anything on behalf of a previous connection's session.
+                state.sync_btp(btp);
 
                 if self.context.out_nack() {
                     // The previous indication has not been acknowledged by the peer yet.
