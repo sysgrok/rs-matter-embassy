@@ -1,6 +1,7 @@
 use core::pin::pin;
+use core::sync::atomic::{AtomicU32, Ordering};
 
-use embassy_futures::select::{select, select4, Either};
+use embassy_futures::select::{select, select3, select4, Either, Either3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
@@ -175,12 +176,12 @@ where
 ///
 /// The device runs on two periods: a short `active_poll_period_ms` for
 /// `active_hold` after boot or a [`SedHandle::request_active`] nudge
-/// (commissioning, button presses, ICD stay-active), decaying to the long
-/// `idle_poll_period_ms` once quiet.
+/// (commissioning, button presses, ICD stay-active), decaying to the *idle*
+/// period once quiet. The idle period is not fixed here - it is owned by the
+/// [`SedHandle`], so the application can change it at runtime (e.g. to follow
+/// the device's ICD operating mode).
 #[derive(Clone, Copy, Debug)]
 pub struct ThreadSedConfig {
-    /// Poll period while idle (the steady state).
-    pub idle_poll_period_ms: u32,
     /// Poll period while active.
     pub active_poll_period_ms: u32,
     /// How long the active window stays open after the last nudge.
@@ -189,40 +190,60 @@ pub struct ThreadSedConfig {
     pub child_timeout_s: Option<u32>,
 }
 
-/// An application-owned handle used to (re)open the SED "active" window.
+/// An application-owned handle for the SED duty cycle: it owns the current idle
+/// poll period and can (re)open the "active" window.
 ///
-/// It wraps a [`Signal`], so it is `const`-constructible, `Sync` and
-/// static-friendly - declare it as a `static` and lend a `&` to
-/// [`EmbassyThread::with_sed`]. Then call [`Self::request_active`] from a
-/// button handler, or when an ICD `StayActiveRequest` arrives.
+/// It is `const`-constructible, `Sync` and static-friendly - declare it as a
+/// `static`, hand a `&` to [`EmbassyThread::with_sed`], then call its methods
+/// wherever the application learns about state changes (a button handler, an
+/// ICD stay-active request, or a change to the ICD operating mode).
 ///
 /// ```ignore
-/// static SED: SedHandle = SedHandle::new();
+/// static SED: SedHandle = SedHandle::new(30_000);
 /// // ... .with_sed(config, &SED)
-/// SED.request_active();
+/// SED.request_active();          // be responsive for a while
+/// SED.set_idle_period(900_000);  // then sleep longer between polls
 /// ```
-pub struct SedHandle(Signal<CriticalSectionRawMutex, ()>);
+pub struct SedHandle {
+    active: Signal<CriticalSectionRawMutex, ()>,
+    idle_changed: Signal<CriticalSectionRawMutex, ()>,
+    idle_poll_period_ms: AtomicU32,
+}
 
 impl SedHandle {
-    /// Create a new handle.
-    pub const fn new() -> Self {
-        Self(Signal::new())
+    /// Create a new handle with the given initial idle poll period.
+    pub const fn new(idle_poll_period_ms: u32) -> Self {
+        Self {
+            active: Signal::new(),
+            idle_changed: Signal::new(),
+            idle_poll_period_ms: AtomicU32::new(idle_poll_period_ms),
+        }
     }
 
     /// (Re)open the active window. Non-blocking and coalescing, so it is safe
     /// to call from anywhere.
     pub fn request_active(&self) {
-        self.0.signal(());
+        self.active.signal(());
     }
 
-    async fn wait(&self) {
-        self.0.wait().await
+    /// Change the idle poll period. Applied immediately if the device is
+    /// currently idle, and at the next decay otherwise.
+    pub fn set_idle_period(&self, poll_period_ms: u32) {
+        self.idle_poll_period_ms
+            .store(poll_period_ms, Ordering::Relaxed);
+        self.idle_changed.signal(());
     }
-}
 
-impl Default for SedHandle {
-    fn default() -> Self {
-        Self::new()
+    fn idle_poll_period_ms(&self) -> u32 {
+        self.idle_poll_period_ms.load(Ordering::Relaxed)
+    }
+
+    async fn wait_active(&self) {
+        self.active.wait().await
+    }
+
+    async fn wait_idle_changed(&self) {
+        self.idle_changed.wait().await
     }
 }
 
@@ -603,7 +624,6 @@ async fn run_sed(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(),
     };
 
     let active_ms = config.active_poll_period_ms;
-    let idle_ms = config.idle_poll_period_ms;
     let hold = config.active_hold;
 
     // Boot (and commissioning) starts responsive.
@@ -613,17 +633,29 @@ async fn run_sed(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(),
         // Keep the active window open while nudges keep arriving.
         let mut deadline = Instant::now() + hold;
         loop {
-            match select(handle.wait(), Timer::at(deadline)).await {
-                Either::First(()) => deadline = Instant::now() + hold,
-                Either::Second(()) => break,
+            match select3(handle.wait_active(), handle.wait_idle_changed(), Timer::at(deadline))
+                .await
+            {
+                Either3::First(()) => deadline = Instant::now() + hold,
+                // Idle period changed mid-window; picked up at the next decay.
+                Either3::Second(()) => {}
+                Either3::Third(()) => break,
             }
         }
 
-        // Quiet for `hold`: decay to the idle period.
-        let _ = ot.set_poll_period(idle_ms);
+        // Quiet: decay to the current idle period.
+        let _ = ot.set_poll_period(handle.idle_poll_period_ms());
 
-        // Stay idle until nudged.
-        handle.wait().await;
+        // Stay idle until nudged, re-applying whenever the idle period changes.
+        loop {
+            match select(handle.wait_active(), handle.wait_idle_changed()).await {
+                Either::First(()) => break,
+                Either::Second(()) => {
+                    let _ = ot.set_poll_period(handle.idle_poll_period_ms());
+                }
+            }
+        }
+
         let _ = ot.set_poll_period(active_ms);
     }
 }
