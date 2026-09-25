@@ -1,6 +1,9 @@
 use core::pin::pin;
 
-use embassy_futures::select::select3;
+use embassy_futures::select::{select, select4, Either};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
+use embassy_time::{Duration, Instant, Timer};
 
 use openthread::{OpenThread, Radio};
 
@@ -163,6 +166,73 @@ where
     }
 }
 
+/// Sleepy End Device (SED) configuration for the Thread stack.
+///
+/// Setting `rx_on_when_idle = false` makes OpenThread park the receiver and
+/// wake only to data-poll its parent, so both the radio and (with esp-rtos
+/// auto light-sleep) the CPU can sleep. The poll period is the primary
+/// radio-duty-cycle / battery-life knob.
+///
+/// The device runs on two periods: a short `active_poll_period_ms` for
+/// `active_hold` after boot or a [`SedHandle::request_active`] nudge
+/// (commissioning, button presses, ICD stay-active), decaying to the long
+/// `idle_poll_period_ms` once quiet.
+#[derive(Clone, Copy, Debug)]
+pub struct ThreadSedConfig {
+    /// Poll period while idle (the steady state).
+    pub idle_poll_period_ms: u32,
+    /// Poll period while active.
+    pub active_poll_period_ms: u32,
+    /// How long the active window stays open after the last nudge.
+    pub active_hold: Duration,
+    /// Child timeout in seconds, or `None` to leave OpenThread's default.
+    pub child_timeout_s: Option<u32>,
+}
+
+/// An application-owned handle used to (re)open the SED "active" window.
+///
+/// It wraps a [`Signal`], so it is `const`-constructible, `Sync` and
+/// static-friendly - declare it as a `static` and lend a `&` to
+/// [`EmbassyThread::with_sed`]. Then call [`Self::request_active`] from a
+/// button handler, or when an ICD `StayActiveRequest` arrives.
+///
+/// ```ignore
+/// static SED: SedHandle = SedHandle::new();
+/// // ... .with_sed(config, &SED)
+/// SED.request_active();
+/// ```
+pub struct SedHandle(Signal<CriticalSectionRawMutex, ()>);
+
+impl SedHandle {
+    /// Create a new handle.
+    pub const fn new() -> Self {
+        Self(Signal::new())
+    }
+
+    /// (Re)open the active window. Non-blocking and coalescing, so it is safe
+    /// to call from anywhere.
+    pub fn request_active(&self) {
+        self.0.signal(());
+    }
+
+    async fn wait(&self) {
+        self.0.wait().await
+    }
+}
+
+impl Default for SedHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The per-run SED wiring: the app's handle plus the timings. `Copy`.
+#[derive(Clone, Copy)]
+struct SedRuntime<'a> {
+    handle: &'a SedHandle,
+    config: ThreadSedConfig,
+}
+
 /// A `Wireless` trait implementation for `openthread`'s Thread stack.
 pub struct EmbassyThread<'a, T, K, R> {
     driver: T,
@@ -172,6 +242,7 @@ pub struct EmbassyThread<'a, T, K, R> {
     ble_context: &'a BtpGattContext,
     use_ble_random_addr: bool,
     rand: R,
+    sed: Option<SedRuntime<'a>>,
 }
 
 impl<'a, T, K, R> EmbassyThread<'a, T, K, R>
@@ -221,7 +292,22 @@ where
             ble_context,
             rand,
             use_ble_random_addr,
+            sed: None,
         }
+    }
+
+    /// Configure this node as a Sleepy End Device (see [`ThreadSedConfig`]).
+    ///
+    /// `active` is the application's [`SedHandle`], used to reopen the active
+    /// window at runtime (e.g. on a button press or an ICD stay-active
+    /// request). Applied to OpenThread right after it is created.
+    #[must_use]
+    pub fn with_sed(mut self, config: ThreadSedConfig, active: &'a SedHandle) -> Self {
+        self.sed = Some(SedRuntime {
+            handle: active,
+            config,
+        });
+        self
     }
 }
 
@@ -253,6 +339,7 @@ where
                 kv: &self.kv,
                 context: self.context,
                 task,
+                sed: self.sed,
             })
             .await
     }
@@ -277,6 +364,7 @@ where
                 ble_context: self.ble_context,
                 use_ble_random_addr: self.use_ble_random_addr,
                 task,
+                sed: self.sed,
             })
             .await
     }
@@ -343,6 +431,7 @@ struct ThreadDriverTaskImpl<'a, A, K, C> {
     kv: K,
     context: &'a OtNetContext,
     task: A,
+    sed: Option<SedRuntime<'a>>,
 }
 
 impl<A, K, C> ThreadDriverTask for ThreadDriverTaskImpl<'_, A, K, C>
@@ -386,10 +475,20 @@ where
             Ok(())
         });
         let mut persist = pin!(persister.run());
+        if let Some(sed) = self.sed {
+            ot.set_link_mode(false, false, false)
+                .map_err(to_matter_err)?;
+            if let Some(child_timeout_s) = sed.config.child_timeout_s {
+                ot.set_child_timeout(child_timeout_s);
+            }
+        }
+
+        let mut sed = pin!(run_sed(&ot, self.sed));
+
         ot.enable_ipv6(true).map_err(to_matter_err)?;
         ot.srp_autostart().map_err(to_matter_err)?;
 
-        let result = select3(&mut main, &mut radio, &mut persist)
+        let result = select4(&mut main, &mut radio, &mut persist, &mut sed)
             .coalesce()
             .await;
 
@@ -409,6 +508,7 @@ struct ThreadCoexDriverTaskImpl<'a, A, K, C> {
     ble_context: &'a BtpGattContext,
     task: A,
     use_ble_random_addr: bool,
+    sed: Option<SedRuntime<'a>>,
 }
 
 impl<A, K, C> ThreadCoexDriverTask for ThreadCoexDriverTaskImpl<'_, A, K, C>
@@ -461,10 +561,20 @@ where
             Ok(())
         });
         let mut persist = pin!(persister.run());
+        if let Some(sed) = self.sed {
+            ot.set_link_mode(false, false, false)
+                .map_err(to_matter_err)?;
+            if let Some(child_timeout_s) = sed.config.child_timeout_s {
+                ot.set_child_timeout(child_timeout_s);
+            }
+        }
+
+        let mut sed = pin!(run_sed(&ot, self.sed));
+
         ot.enable_ipv6(true).map_err(to_matter_err)?;
         ot.srp_autostart().map_err(to_matter_err)?;
 
-        let result = select3(&mut main, &mut radio, &mut persist)
+        let result = select4(&mut main, &mut radio, &mut persist, &mut sed)
             .coalesce()
             .await;
 
@@ -473,5 +583,47 @@ where
         let _ = ot.enable_ipv6(false);
 
         result
+    }
+}
+
+/// Drives the SED duty cycle: a short `active_poll_period_ms` window that
+/// reopens on boot and on every [`SedHandle::request_active`] nudge, decaying
+/// to `idle_poll_period_ms` after `active_hold` of quiet.
+///
+/// Runs as a branch of the driver task's `select4`, so every OpenThread call
+/// stays on one task.
+async fn run_sed(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(), Error> {
+    let SedRuntime { handle, config } = match sed {
+        Some(sed) => sed,
+        None => {
+            // No SED configured: this branch never completes.
+            core::future::pending::<()>().await;
+            unreachable!()
+        }
+    };
+
+    let active_ms = config.active_poll_period_ms;
+    let idle_ms = config.idle_poll_period_ms;
+    let hold = config.active_hold;
+
+    // Boot (and commissioning) starts responsive.
+    let _ = ot.set_poll_period(active_ms);
+
+    loop {
+        // Keep the active window open while nudges keep arriving.
+        let mut deadline = Instant::now() + hold;
+        loop {
+            match select(handle.wait(), Timer::at(deadline)).await {
+                Either::First(()) => deadline = Instant::now() + hold,
+                Either::Second(()) => break,
+            }
+        }
+
+        // Quiet for `hold`: decay to the idle period.
+        let _ = ot.set_poll_period(idle_ms);
+
+        // Stay idle until nudged.
+        handle.wait().await;
+        let _ = ot.set_poll_period(active_ms);
     }
 }
