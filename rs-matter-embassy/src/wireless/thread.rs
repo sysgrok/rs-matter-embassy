@@ -6,7 +6,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
 
-use openthread::{OpenThread, Radio};
+use openthread::{DeviceRole, OpenThread, Radio};
 
 use rs_matter_stack::matter::persist::KvBlobStoreAccess;
 
@@ -504,7 +504,7 @@ where
             }
         }
 
-        let mut sed = pin!(run_sed(&ot, self.sed));
+        let mut sed = pin!(run_sed_and_diag(&ot, self.sed));
 
         ot.enable_ipv6(true).map_err(to_matter_err)?;
         ot.srp_autostart().map_err(to_matter_err)?;
@@ -590,7 +590,7 @@ where
             }
         }
 
-        let mut sed = pin!(run_sed(&ot, self.sed));
+        let mut sed = pin!(run_sed_and_diag(&ot, self.sed));
 
         ot.enable_ipv6(true).map_err(to_matter_err)?;
         ot.srp_autostart().map_err(to_matter_err)?;
@@ -657,5 +657,34 @@ async fn run_sed(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(),
         }
 
         let _ = ot.set_poll_period(active_ms);
+    }
+}
+
+/// Runs the SED duty-cycle driver and the Thread-role diagnostic concurrently.
+/// Neither future ever completes, so this branch just keeps both alive.
+async fn run_sed_and_diag(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(), Error> {
+    let mut sed = pin!(run_sed(ot, sed));
+    let mut diag = pin!(run_thread_diag(ot));
+
+    let _ = select(&mut sed, &mut diag).await;
+
+    core::future::pending().await
+}
+
+/// Logs the Thread device role whenever it changes, so a log capture shows
+/// whether the node is attached, detached, or re-attaching.
+async fn run_thread_diag(ot: &OpenThread<'_>) -> Result<(), Error> {
+    const POLL: Duration = Duration::from_secs(5);
+
+    let mut last: Option<DeviceRole> = None;
+
+    loop {
+        Timer::after(POLL).await;
+
+        let role = ot.device_role();
+        if last != Some(role) {
+            last = Some(role);
+            info!("Thread device role: {role:?}");
+        }
     }
 }
