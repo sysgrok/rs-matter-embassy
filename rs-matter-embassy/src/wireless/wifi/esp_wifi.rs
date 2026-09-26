@@ -47,6 +47,11 @@ impl super::WifiDriver for EspWifiDriver<'_> {
         // esp32c6-specific - need to boost the power to get a good signal
         unwrap!(controller.set_power_saving(esp_radio::wifi::PowerSaveMode::None));
 
+        // Since esp-hal PR #5706, esp-radio sets the max TX power to 20 (5dBm) instead of leaving
+        // the ESP-IDF default of 80 (20dBm). With 5dBm, scans find few APs and connecting fails
+        // with `AuthenticationExpired`, so restore the previous level.
+        unwrap!(controller.set_max_tx_power(80));
+
         task.run(
             esp_radio::wifi::Interface::station(),
             EspWifiController::new(controller),
@@ -65,13 +70,22 @@ impl super::WifiCoexDriver for EspWifiDriver<'_> {
             Default::default(),
         )));
 
+        // Wi-Fi power management while the station is disconnected starves the BLE controller:
+        // BLE advertisements never go on air while Wi-Fi is up but not (yet) connected, which is
+        // exactly the situation during concurrent commissioning. esp-radio hard-coded this to
+        // `false` until esp-hal PR #6144, which made it configurable with the ESP-IDF default (`true`).
         let mut controller = unwrap!(esp_radio::wifi::WifiController::new(
             self.wifi_peripheral.reborrow(),
-            esp_radio::wifi::ControllerConfig::default(),
+            esp_radio::wifi::ControllerConfig::default().with_sta_disconnected_pm(false),
         ));
 
         // esp32c6-specific - need to boost the power to get a good signal
         unwrap!(controller.set_power_saving(esp_radio::wifi::PowerSaveMode::None));
+
+        // Since esp-hal PR #5706, esp-radio sets the max TX power to 20 (5dBm) instead of leaving
+        // the ESP-IDF default of 80 (20dBm). With 5dBm, scans find few APs and connecting fails
+        // with `AuthenticationExpired`, so restore the previous level.
+        unwrap!(controller.set_max_tx_power(80));
 
         task.run(
             esp_radio::wifi::Interface::station(),
