@@ -190,6 +190,39 @@ pub struct ThreadSedConfig {
     pub child_timeout_s: Option<u32>,
 }
 
+impl ThreadSedConfig {
+    fn active_child_supervision_check_timeout_s(&self) -> u16 {
+        child_supervision_check_timeout_s(self.active_poll_period_ms)
+    }
+}
+
+/// OpenThread's default child-supervision interval: the child asks its parent
+/// for a supervision message at least this often
+/// (`OPENTHREAD_CONFIG_CHILD_SUPERVISION_INTERVAL`). Left unchanged here.
+const CHILD_SUPERVISION_INTERVAL_S: u32 = 129;
+
+/// OpenThread's default child-supervision check timeout
+/// (`OPENTHREAD_CONFIG_CHILD_SUPERVISION_CHECK_TIMEOUT`).
+const DEFAULT_CHILD_SUPERVISION_CHECK_TIMEOUT_S: u32 = 190;
+
+/// The child-supervision check timeout that matches a poll period, never below
+/// OpenThread's default.
+///
+/// A sleepy child only gets the parent's queued supervision message when it
+/// polls, so the longest normal gap between frames from the parent is the
+/// supervision interval plus one poll period. With a check timeout below that
+/// gap (e.g. the 190 s default against a 900 s poll period), every idle period
+/// ends in a false "Supervision timeout" and a needless Child Update Request.
+/// One more poll period is added as margin for a missed poll.
+fn child_supervision_check_timeout_s(poll_period_ms: u32) -> u16 {
+    CHILD_SUPERVISION_INTERVAL_S
+        .saturating_add(poll_period_ms.div_ceil(1000).saturating_mul(2))
+        .clamp(
+            DEFAULT_CHILD_SUPERVISION_CHECK_TIMEOUT_S,
+            u32::from(u16::MAX),
+        ) as u16
+}
+
 /// An application-owned handle for the SED duty cycle: it owns the current idle
 /// poll period and can (re)open the "active" window.
 ///
@@ -236,6 +269,10 @@ impl SedHandle {
 
     fn idle_poll_period_ms(&self) -> u32 {
         self.idle_poll_period_ms.load(Ordering::Relaxed)
+    }
+
+    fn idle_child_supervision_check_timeout_s(&self) -> u16 {
+        child_supervision_check_timeout_s(self.idle_poll_period_ms())
     }
 
     async fn wait_active(&self) {
@@ -628,6 +665,7 @@ async fn run_sed(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(),
 
     // Boot (and commissioning) starts responsive.
     let _ = ot.set_poll_period(active_ms);
+    ot.set_child_supervision_check_timeout(config.active_child_supervision_check_timeout_s());
 
     loop {
         // Keep the active window open while nudges keep arriving.
@@ -645,6 +683,7 @@ async fn run_sed(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(),
 
         // Quiet: decay to the current idle period.
         let _ = ot.set_poll_period(handle.idle_poll_period_ms());
+        ot.set_child_supervision_check_timeout(handle.idle_child_supervision_check_timeout_s());
 
         // Stay idle until nudged, re-applying whenever the idle period changes.
         loop {
@@ -652,11 +691,15 @@ async fn run_sed(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(),
                 Either::First(()) => break,
                 Either::Second(()) => {
                     let _ = ot.set_poll_period(handle.idle_poll_period_ms());
+                    ot.set_child_supervision_check_timeout(
+                        handle.idle_child_supervision_check_timeout_s(),
+                    );
                 }
             }
         }
 
         let _ = ot.set_poll_period(active_ms);
+        ot.set_child_supervision_check_timeout(config.active_child_supervision_check_timeout_s());
     }
 }
 
@@ -685,6 +728,53 @@ async fn run_thread_diag(ot: &OpenThread<'_>) -> Result<(), Error> {
         if last != Some(role) {
             last = Some(role);
             info!("Thread device role: {role:?}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::child_supervision_check_timeout_s;
+
+    struct TestCase {
+        name: &'static str,
+        poll_period_ms: u32,
+        expected: u16,
+    }
+
+    #[test]
+    fn test_child_supervision_check_timeout_s() {
+        let test_cases = [
+            TestCase {
+                name: "short poll keeps the OpenThread default",
+                poll_period_ms: 15_000,
+                expected: 190,
+            },
+            TestCase {
+                name: "long poll adds the interval and two poll periods",
+                poll_period_ms: 900_000,
+                expected: 1_929,
+            },
+            TestCase {
+                name: "partial seconds round up",
+                poll_period_ms: 100_500,
+                expected: 331,
+            },
+            TestCase {
+                name: "very long poll saturates at the u16 maximum",
+                poll_period_ms: 40_000_000,
+                expected: u16::MAX,
+            },
+        ];
+
+        for TestCase {
+            name,
+            poll_period_ms,
+            expected,
+        } in test_cases
+        {
+            let result = child_supervision_check_timeout_s(poll_period_ms);
+            assert_eq!(result, expected, "Failed case: '{name}'");
         }
     }
 }
