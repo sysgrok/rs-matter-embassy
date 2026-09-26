@@ -1,7 +1,7 @@
 use core::pin::pin;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use embassy_futures::select::{select, select3, select4, Either3, Either4};
+use embassy_futures::select::{select, select3, select4, Either, Either3, Either4};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
@@ -552,7 +552,10 @@ where
         .map_err(to_matter_err)?;
 
         let net_ctl = OtNetCtl::new(ot.clone());
-        let net_stack = OtNetStack::new(ot.clone());
+        let net_stack = match self.sed {
+            Some(sed) => OtNetStack::new(ot.clone()).with_sed(sed.handle),
+            None => OtNetStack::new(ot.clone()),
+        };
         let netif = OtNetif::new(ot.clone());
         let mut mdns = OtMdns::new(ot.clone(), &mut resources.mdns_buf);
 
@@ -630,7 +633,10 @@ where
         .map_err(to_matter_err)?;
 
         let net_ctl = OtNetCtl::new(ot.clone());
-        let net_stack = OtNetStack::new(ot.clone());
+        let net_stack = match self.sed {
+            Some(sed) => OtNetStack::new(ot.clone()).with_sed(sed.handle),
+            None => OtNetStack::new(ot.clone()),
+        };
         let netif = OtNetif::new(ot.clone());
         let mut mdns = OtMdns::new(ot.clone(), &mut resources.mdns_buf);
         let mut peripheral = BtpGattPeripheral::new(
@@ -711,7 +717,7 @@ async fn run_sed(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(),
             {
                 Either4::First(()) => deadline = Instant::now() + hold,
                 Either4::Second(()) => {
-                    run_fast_poll_burst(ot, &config).await;
+                    run_fast_poll_burst(ot, handle, &config).await;
                     let _ = ot.set_poll_period(active_ms);
                     ot.set_child_supervision_check_timeout(
                         config.active_child_supervision_check_timeout_s(),
@@ -738,7 +744,7 @@ async fn run_sed(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(),
             {
                 Either3::First(()) => break,
                 Either3::Second(()) => {
-                    run_fast_poll_burst(ot, &config).await;
+                    run_fast_poll_burst(ot, handle, &config).await;
                     let _ = ot.set_poll_period(handle.idle_poll_period_ms());
                     ot.set_child_supervision_check_timeout(
                         handle.idle_child_supervision_check_timeout_s(),
@@ -758,17 +764,21 @@ async fn run_sed(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(),
     }
 }
 
-/// Polls at the fast period for `fast_hold`. The caller restores its own poll
-/// period afterwards. OpenThread sends the first poll at once when the period
-/// gets shorter, so the burst starts without delay.
+/// Polls at the fast period until `fast_hold` passes without another
+/// [`SedHandle::request_fast_polls`]. The caller restores its own poll period
+/// afterwards. OpenThread sends the first poll at once when the period gets
+/// shorter, so the burst starts without delay.
 ///
-/// Nudges that arrive during the burst are latched by their signals and handled
-/// after it.
-async fn run_fast_poll_burst(ot: &OpenThread<'_>, config: &ThreadSedConfig) {
+/// Other nudges that arrive during the burst are latched by their signals and
+/// handled after it.
+async fn run_fast_poll_burst(ot: &OpenThread<'_>, handle: &SedHandle, config: &ThreadSedConfig) {
     let _ = ot.set_poll_period(config.fast_poll_period_ms);
     ot.set_child_supervision_check_timeout(config.fast_child_supervision_check_timeout_s());
 
-    Timer::after(config.fast_hold).await;
+    let mut deadline = Instant::now() + config.fast_hold;
+    while let Either::First(()) = select(handle.wait_fast(), Timer::at(deadline)).await {
+        deadline = Instant::now() + config.fast_hold;
+    }
 }
 
 /// Runs the SED duty-cycle driver and the Thread-role diagnostic concurrently.

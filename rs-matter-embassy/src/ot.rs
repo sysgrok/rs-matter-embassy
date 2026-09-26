@@ -3,7 +3,7 @@
 
 use core::fmt::Write;
 use core::future::poll_fn;
-use core::net::IpAddr;
+use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use embassy_futures::select::{select, select3};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
@@ -20,9 +20,16 @@ use rs_matter_stack::matter::persist::KvBlobStoreAccess;
 use rs_matter_stack::matter::transport::network::MatterLocalService;
 use rs_matter_stack::matter::Matter;
 use rs_matter_stack::mdns::Mdns;
-use rs_matter_stack::nal::{NetStack, NoopNet, UdpBind};
+use rs_matter_stack::nal::io::ErrorType;
+use rs_matter_stack::nal::{
+    MulticastV4, MulticastV6, NetStack, NoopNet, Readable, UdpBind, UdpReceive, UdpSend, UdpSplit,
+    UdpSplitMulticast,
+};
+
+use edge_nal_openthread::{OtNalError, OtUdpSocket, OtUdpStack};
 
 use crate::fmt::Bytes;
+use crate::wireless::SedHandle;
 
 use crate::matter::dm::clusters::gen_diag::{InterfaceTypeEnum, NetifDiag, NetifInfo};
 use crate::matter::dm::clusters::net_comm::{
@@ -129,18 +136,32 @@ impl Default for OtMatterResources {
 }
 
 /// An implementation of `NetStack` for `openthread`
-pub struct OtNetStack<'d>(OpenThread<'d>);
+pub struct OtNetStack<'d> {
+    ot: OpenThread<'d>,
+    sed: Option<&'d SedHandle>,
+}
 
 impl<'d> OtNetStack<'d> {
     /// Create a new `OtNetStack` instance
     pub const fn new(ot: OpenThread<'d>) -> Self {
-        Self(ot)
+        Self { ot, sed: None }
+    }
+
+    /// Start a fast-poll burst on `sed` after every UDP datagram sent through
+    /// this stack (see [`SedHandle::request_fast_polls`]).
+    ///
+    /// A Sleepy End Device only receives when it polls its parent, so the reply
+    /// to anything it sends - a report, a CASE `Sigma2`, a response to a
+    /// controller request - waits at the parent until the next poll.
+    pub fn with_sed(mut self, sed: &'d SedHandle) -> Self {
+        self.sed = Some(sed);
+        self
     }
 }
 
 impl<'d> NetStack for OtNetStack<'d> {
     type UdpBind<'t>
-        = edge_nal_openthread::OtUdpStack<'d>
+        = OtSedUdpStack<'d>
     where
         Self: 't;
 
@@ -165,7 +186,10 @@ impl<'d> NetStack for OtNetStack<'d> {
         Self: 't;
 
     fn udp_bind(&self) -> Option<Self::UdpBind<'_>> {
-        Some(edge_nal_openthread::OtUdpStack::new(self.0.clone()))
+        Some(OtSedUdpStack {
+            stack: OtUdpStack::new(self.ot.clone()),
+            sed: self.sed,
+        })
     }
 
     fn udp_connect(&self) -> Option<Self::UdpConnect<'_>> {
@@ -182,6 +206,174 @@ impl<'d> NetStack for OtNetStack<'d> {
 
     fn dns(&self) -> Option<Self::Dns<'_>> {
         None
+    }
+}
+
+/// An `edge-nal` UDP stack for `openthread` whose sockets start a SED fast-poll
+/// burst after every send. See [`OtNetStack::with_sed`].
+pub struct OtSedUdpStack<'d> {
+    stack: OtUdpStack<'d>,
+    sed: Option<&'d SedHandle>,
+}
+
+impl<'d> UdpBind for OtSedUdpStack<'d> {
+    type Error = OtNalError;
+
+    type Socket<'t>
+        = OtSedUdpSocket<'d>
+    where
+        Self: 't;
+
+    async fn bind(&self, addr: SocketAddr) -> Result<Self::Socket<'_>, Self::Error> {
+        Ok(OtSedUdpSocket {
+            socket: self.stack.bind(addr).await?,
+            sed: self.sed,
+        })
+    }
+}
+
+/// A UDP socket of [`OtSedUdpStack`].
+pub struct OtSedUdpSocket<'d> {
+    socket: OtUdpSocket<'d>,
+    sed: Option<&'d SedHandle>,
+}
+
+impl ErrorType for OtSedUdpSocket<'_> {
+    type Error = OtNalError;
+}
+
+impl UdpSend for OtSedUdpSocket<'_> {
+    async fn send(&mut self, remote: SocketAddr, data: &[u8]) -> Result<(), Self::Error> {
+        self.socket.send(remote, data).await?;
+        request_fast_polls(self.sed);
+
+        Ok(())
+    }
+}
+
+impl UdpReceive for OtSedUdpSocket<'_> {
+    async fn receive(&mut self, buf: &mut [u8]) -> Result<(usize, SocketAddr), Self::Error> {
+        self.socket.receive(buf).await
+    }
+}
+
+impl Readable for OtSedUdpSocket<'_> {
+    async fn readable(&mut self) -> Result<(), Self::Error> {
+        self.socket.readable().await
+    }
+}
+
+impl MulticastV4 for OtSedUdpSocket<'_> {
+    async fn join_v4(
+        &mut self,
+        multicast_addr: Ipv4Addr,
+        interface: Ipv4Addr,
+    ) -> Result<(), Self::Error> {
+        self.socket.join_v4(multicast_addr, interface).await
+    }
+
+    async fn leave_v4(
+        &mut self,
+        multicast_addr: Ipv4Addr,
+        interface: Ipv4Addr,
+    ) -> Result<(), Self::Error> {
+        self.socket.leave_v4(multicast_addr, interface).await
+    }
+}
+
+impl MulticastV6 for OtSedUdpSocket<'_> {
+    async fn join_v6(
+        &mut self,
+        multicast_addr: Ipv6Addr,
+        interface: u32,
+    ) -> Result<(), Self::Error> {
+        self.socket.join_v6(multicast_addr, interface).await
+    }
+
+    async fn leave_v6(
+        &mut self,
+        multicast_addr: Ipv6Addr,
+        interface: u32,
+    ) -> Result<(), Self::Error> {
+        self.socket.leave_v6(multicast_addr, interface).await
+    }
+}
+
+impl<'d> UdpSplit for OtSedUdpSocket<'d> {
+    type Receive<'a>
+        = &'a OtUdpSocket<'d>
+    where
+        Self: 'a;
+
+    type Send<'a>
+        = OtSedUdpSend<'a, 'd>
+    where
+        Self: 'a;
+
+    fn split(&mut self) -> (Self::Receive<'_>, Self::Send<'_>) {
+        (
+            &self.socket,
+            OtSedUdpSend {
+                socket: &self.socket,
+                sed: self.sed,
+            },
+        )
+    }
+}
+
+impl<'d> UdpSplitMulticast for OtSedUdpSocket<'d> {
+    type MulticastV4<'a>
+        = &'a OtUdpSocket<'d>
+    where
+        Self: 'a;
+
+    type MulticastV6<'a>
+        = &'a OtUdpSocket<'d>
+    where
+        Self: 'a;
+
+    fn split_multicast(
+        &mut self,
+    ) -> (
+        Self::Receive<'_>,
+        Self::Send<'_>,
+        Self::MulticastV4<'_>,
+        Self::MulticastV6<'_>,
+    ) {
+        (
+            &self.socket,
+            OtSedUdpSend {
+                socket: &self.socket,
+                sed: self.sed,
+            },
+            &self.socket,
+            &self.socket,
+        )
+    }
+}
+
+/// The send half of a split [`OtSedUdpSocket`].
+pub struct OtSedUdpSend<'a, 'd> {
+    socket: &'a OtUdpSocket<'d>,
+    sed: Option<&'d SedHandle>,
+}
+
+impl ErrorType for OtSedUdpSend<'_, '_> {
+    type Error = OtNalError;
+}
+
+impl UdpSend for OtSedUdpSend<'_, '_> {
+    async fn send(&mut self, remote: SocketAddr, data: &[u8]) -> Result<(), Self::Error> {
+        self.socket.send(remote, data).await?;
+        request_fast_polls(self.sed);
+
+        Ok(())
+    }
+}
+
+fn request_fast_polls(sed: Option<&SedHandle>) {
+    if let Some(sed) = sed {
+        sed.request_fast_polls();
     }
 }
 
