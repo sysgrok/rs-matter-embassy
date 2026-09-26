@@ -1,7 +1,7 @@
 use core::pin::pin;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use embassy_futures::select::{select, select3, select4, Either, Either3};
+use embassy_futures::select::{select, select3, select4, Either3, Either4};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
@@ -180,12 +180,24 @@ where
 /// period once quiet. The idle period is not fixed here - it is owned by the
 /// [`SedHandle`], so the application can change it at runtime (e.g. to follow
 /// the device's ICD operating mode).
+///
+/// A third, much shorter burst of `fast_poll_period_ms` for `fast_hold` follows
+/// a [`SedHandle::request_fast_polls`] nudge, sent right after the device
+/// transmits a message. A reply to that message waits at the parent until the
+/// next poll, and the parent's MAC ACK cannot announce it (the reply does not
+/// exist yet when the ACK is sent), so without the burst the reply only arrives
+/// with a retransmission or the next regular poll. This is the Matter ICD
+/// "active mode" after network activity.
 #[derive(Clone, Copy, Debug)]
 pub struct ThreadSedConfig {
     /// Poll period while active.
     pub active_poll_period_ms: u32,
     /// How long the active window stays open after the last nudge.
     pub active_hold: Duration,
+    /// Poll period during a fast-poll burst.
+    pub fast_poll_period_ms: u32,
+    /// How long a fast-poll burst lasts.
+    pub fast_hold: Duration,
     /// Child timeout in seconds, or `None` to leave OpenThread's default.
     pub child_timeout_s: Option<u32>,
 }
@@ -193,6 +205,10 @@ pub struct ThreadSedConfig {
 impl ThreadSedConfig {
     fn active_child_supervision_check_timeout_s(&self) -> u16 {
         child_supervision_check_timeout_s(self.active_poll_period_ms)
+    }
+
+    fn fast_child_supervision_check_timeout_s(&self) -> u16 {
+        child_supervision_check_timeout_s(self.fast_poll_period_ms)
     }
 }
 
@@ -235,10 +251,12 @@ fn child_supervision_check_timeout_s(poll_period_ms: u32) -> u16 {
 /// static SED: SedHandle = SedHandle::new(30_000);
 /// // ... .with_sed(config, &SED)
 /// SED.request_active();          // be responsive for a while
+/// SED.request_fast_polls();      // fetch the reply to a message just sent
 /// SED.set_idle_period(900_000);  // then sleep longer between polls
 /// ```
 pub struct SedHandle {
     active: Signal<CriticalSectionRawMutex, ()>,
+    fast: Signal<CriticalSectionRawMutex, ()>,
     idle_changed: Signal<CriticalSectionRawMutex, ()>,
     idle_poll_period_ms: AtomicU32,
 }
@@ -248,6 +266,7 @@ impl SedHandle {
     pub const fn new(idle_poll_period_ms: u32) -> Self {
         Self {
             active: Signal::new(),
+            fast: Signal::new(),
             idle_changed: Signal::new(),
             idle_poll_period_ms: AtomicU32::new(idle_poll_period_ms),
         }
@@ -257,6 +276,13 @@ impl SedHandle {
     /// to call from anywhere.
     pub fn request_active(&self) {
         self.active.signal(());
+    }
+
+    /// Start a short fast-poll burst, right after the device sent a message
+    /// that expects a reply. Non-blocking and coalescing, so it is safe to call
+    /// from anywhere.
+    pub fn request_fast_polls(&self) {
+        self.fast.signal(());
     }
 
     /// Change the idle poll period. Applied immediately if the device is
@@ -277,6 +303,10 @@ impl SedHandle {
 
     async fn wait_active(&self) {
         self.active.wait().await
+    }
+
+    async fn wait_fast(&self) {
+        self.fast.wait().await
     }
 
     async fn wait_idle_changed(&self) {
@@ -671,13 +701,25 @@ async fn run_sed(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(),
         // Keep the active window open while nudges keep arriving.
         let mut deadline = Instant::now() + hold;
         loop {
-            match select3(handle.wait_active(), handle.wait_idle_changed(), Timer::at(deadline))
-                .await
+            match select4(
+                handle.wait_active(),
+                handle.wait_fast(),
+                handle.wait_idle_changed(),
+                Timer::at(deadline),
+            )
+            .await
             {
-                Either3::First(()) => deadline = Instant::now() + hold,
+                Either4::First(()) => deadline = Instant::now() + hold,
+                Either4::Second(()) => {
+                    run_fast_poll_burst(ot, &config).await;
+                    let _ = ot.set_poll_period(active_ms);
+                    ot.set_child_supervision_check_timeout(
+                        config.active_child_supervision_check_timeout_s(),
+                    );
+                }
                 // Idle period changed mid-window; picked up at the next decay.
-                Either3::Second(()) => {}
-                Either3::Third(()) => break,
+                Either4::Third(()) => {}
+                Either4::Fourth(()) => break,
             }
         }
 
@@ -687,9 +729,22 @@ async fn run_sed(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(),
 
         // Stay idle until nudged, re-applying whenever the idle period changes.
         loop {
-            match select(handle.wait_active(), handle.wait_idle_changed()).await {
-                Either::First(()) => break,
-                Either::Second(()) => {
+            match select3(
+                handle.wait_active(),
+                handle.wait_fast(),
+                handle.wait_idle_changed(),
+            )
+            .await
+            {
+                Either3::First(()) => break,
+                Either3::Second(()) => {
+                    run_fast_poll_burst(ot, &config).await;
+                    let _ = ot.set_poll_period(handle.idle_poll_period_ms());
+                    ot.set_child_supervision_check_timeout(
+                        handle.idle_child_supervision_check_timeout_s(),
+                    );
+                }
+                Either3::Third(()) => {
                     let _ = ot.set_poll_period(handle.idle_poll_period_ms());
                     ot.set_child_supervision_check_timeout(
                         handle.idle_child_supervision_check_timeout_s(),
@@ -701,6 +756,19 @@ async fn run_sed(ot: &OpenThread<'_>, sed: Option<SedRuntime<'_>>) -> Result<(),
         let _ = ot.set_poll_period(active_ms);
         ot.set_child_supervision_check_timeout(config.active_child_supervision_check_timeout_s());
     }
+}
+
+/// Polls at the fast period for `fast_hold`. The caller restores its own poll
+/// period afterwards. OpenThread sends the first poll at once when the period
+/// gets shorter, so the burst starts without delay.
+///
+/// Nudges that arrive during the burst are latched by their signals and handled
+/// after it.
+async fn run_fast_poll_burst(ot: &OpenThread<'_>, config: &ThreadSedConfig) {
+    let _ = ot.set_poll_period(config.fast_poll_period_ms);
+    ot.set_child_supervision_check_timeout(config.fast_child_supervision_check_timeout_s());
+
+    Timer::after(config.fast_hold).await;
 }
 
 /// Runs the SED duty-cycle driver and the Thread-role diagnostic concurrently.
@@ -745,6 +813,11 @@ mod test {
     #[test]
     fn test_child_supervision_check_timeout_s() {
         let test_cases = [
+            TestCase {
+                name: "fast-poll burst keeps the OpenThread default",
+                poll_period_ms: 200,
+                expected: 190,
+            },
             TestCase {
                 name: "short poll keeps the OpenThread default",
                 poll_period_ms: 15_000,
