@@ -37,6 +37,7 @@ use crate::enet::{
 use crate::matter::error::Error;
 use crate::matter::utils::sync::blocking::Mutex;
 use crate::wifi::rp::Cyw43WifiController;
+use crate::wireless::PreexistingBleDriver;
 
 #[derive(Copy, Clone)]
 struct Cyw43PioInterrupts;
@@ -441,10 +442,15 @@ impl super::WifiCoexDriver for RpWifiDriver<'_> {
         let mut task = pin!(async {
             Self::init_net_controller(&mut net_device, &mut net_controller, fmw_clm).await;
 
+            // The CYW43 BLE controller stays up for the whole run; the stack starts and stops
+            // advertising on it as commissioning windows come and go.
+            let ble_ctl =
+                Cyw43Controller::new(ExternalController::<_, 20>::new(bt_device), &runner);
+
             task.run(
                 net_device,
                 Cyw43WifiController::new(net_controller),
-                Cyw43Controller::new(ExternalController::<_, 20>::new(bt_device), &runner),
+                PreexistingBleDriver::new(&ble_ctl),
             )
             .await
         });

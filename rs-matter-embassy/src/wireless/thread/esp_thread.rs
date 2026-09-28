@@ -1,12 +1,8 @@
-use bt_hci::controller::ExternalController;
-
-use esp_radio::ble::controller::BleConnector;
-
 use openthread::esp::EspRadio;
 
 use rs_matter_stack::matter::error::Error;
 
-use crate::wireless::SLOTS;
+use crate::wireless::esp::EspBleDriver;
 
 /// A `ThreadRadio` implementation for the ESP32 family of chips.
 pub struct EspThreadDriver<'d> {
@@ -63,11 +59,6 @@ impl super::ThreadCoexDriver for EspThreadDriver<'_> {
     where
         A: super::ThreadCoexDriverTask,
     {
-        let ble_controller = ExternalController::<_, SLOTS>::new(unwrap!(BleConnector::new(
-            self.bt_peripheral.reborrow(),
-            Default::default(),
-        )));
-
         let radio = EspRadio::new(openthread::esp::Ieee802154::new(
             self.radio_peripheral.reborrow(),
         ));
@@ -76,20 +67,20 @@ impl super::ThreadCoexDriver for EspThreadDriver<'_> {
             None => radio,
         };
 
-        task.run(radio, ble_controller).await
+        // The BLE controller is created (and the `esp-radio` BLE stack initialized) only while
+        // the task actually runs BLE - see `EspBleDriver`.
+        task.run(radio, EspBleDriver::new(self.bt_peripheral.reborrow()))
+            .await
     }
 }
 
 impl super::BleDriver for EspThreadDriver<'_> {
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
         A: super::BleDriverTask,
     {
-        let ble_controller = ExternalController::<_, SLOTS>::new(unwrap!(BleConnector::new(
-            self.bt_peripheral.reborrow(),
-            Default::default(),
-        )));
-
-        task.run(ble_controller).await
+        EspBleDriver::new(self.bt_peripheral.reborrow())
+            .run(task)
+            .await
     }
 }

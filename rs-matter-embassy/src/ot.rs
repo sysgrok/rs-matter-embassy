@@ -1024,12 +1024,36 @@ impl Mdns for OtMdns<'_, '_> {
     }
 }
 
-/// The `KvBlobStore` key used to persist OpenThread's SRP ECDSA key
+/// The `KvBlobStore` key under which the persisted subset of the OpenThread settings is
+/// stored, as one blob of `[key: u16 LE][len: u16 LE][value]` records.
+const OT_SETTINGS_KEY: u16 = VENDOR_KEYS_START;
+
+/// The OpenThread settings that survive a reboot.
 ///
-/// While persisting other keys is optional, this one _must_ get persisted,
-/// or else - upon device restart - it will fail to re-register its SRP services
-/// in the SRP server.
-const OT_SRP_ECDSA_KEY: u16 = VENDOR_KEYS_START;
+/// - `SrpEcdsaKey` _must_ be persisted, or else - upon device restart - the node fails to
+///   re-register its SRP services (the SRP server sees a different key for the same host).
+/// - `ActiveDataset`, `NetworkInfo` and `ParentInfo` let OpenThread restore its previous
+///   attachment on start-up: with a still-valid child entry at the parent (child timeout not
+///   yet elapsed) it re-attaches with a single `Child Update Request` exchange instead of a
+///   full attach (discovery, `Parent Request`, `Child ID Request`). That is what makes a
+///   deep-sleeping Sleepy End Device - one that reboots on every wake-up - viable. Restoring
+///   the MAC/MLE frame counters from `NetworkInfo` also keeps the node's frames accepted by
+///   its neighbors after the reboot.
+/// - `KeySlaacIidSecretKey` keeps the node's SLAAC IPv6 addresses stable across reboots.
+/// - `SrpClientInfo` remembers the SRP server the node registered with.
+const PERSISTED_SETTINGS: &[SettingsKey] = &[
+    SettingsKey::ActiveDataset,
+    SettingsKey::NetworkInfo,
+    SettingsKey::ParentInfo,
+    SettingsKey::KeySlaacIidSecretKey,
+    SettingsKey::SrpEcdsaKey,
+    SettingsKey::SrpClientInfo,
+];
+
+/// Whether `key` is one of the persisted settings.
+fn is_persisted_setting(key: u16) -> bool {
+    PERSISTED_SETTINGS.iter().any(|k| *k as u16 == key)
+}
 
 /// A struct for implementing persistance of `openthread` settings - volatitle and
 /// non-volatile (for selected keys)
@@ -1053,13 +1077,8 @@ where
                 settings_buf,
                 |change| match change {
                     RamSettingsChange::Added { key, .. }
-                    | RamSettingsChange::Removed { key, .. }
-                        if key == SettingsKey::SrpEcdsaKey as u16 =>
-                    {
-                        true
-                    }
+                    | RamSettingsChange::Removed { key, .. } => is_persisted_setting(key),
                     RamSettingsChange::Clear => true,
-                    _ => false,
                 },
             )),
             kv,
@@ -1073,22 +1092,27 @@ where
         &self.settings
     }
 
-    /// Load (a selected subset of) the settings from the `KvBlobStore` non-volatile storage
+    /// Load the persisted subset of the settings (see `PERSISTED_SETTINGS`) from the
+    /// `KvBlobStore` non-volatile storage
     pub fn load(&self) -> Result<(), Error> {
         self.kv.access(|kv, buf| {
-            if let Some(data) = kv.load(OT_SRP_ECDSA_KEY, buf)? {
+            if let Some(data) = kv.load(OT_SETTINGS_KEY, buf)? {
                 self.settings.with(|settings| {
                     let mut offset = 0;
 
-                    while offset < data.len() {
+                    while offset + 4 <= data.len() {
                         let key = u16::from_le_bytes([data[offset], data[offset + 1]]);
-                        offset += 2;
+                        let len = u16::from_le_bytes([data[offset + 2], data[offset + 3]]) as usize;
+                        offset += 4;
 
-                        let value = &data[offset..];
+                        let Some(value) = data.get(offset..offset + len) else {
+                            warn!("Truncated persisted OpenThread settings; ignoring the rest");
+                            break;
+                        };
 
                         unwrap!(settings.add(key, value));
 
-                        offset += value.len();
+                        offset += len;
                     }
                 });
             }
@@ -1097,7 +1121,8 @@ where
         })
     }
 
-    /// Store (a selected subset of) the settings to the `KvBlobStore` non-volatile storage
+    /// Store the persisted subset of the settings (see `PERSISTED_SETTINGS`) to the
+    /// `KvBlobStore` non-volatile storage
     pub fn store(&self) -> Result<(), Error> {
         self.kv.access(|kv, buf| {
             let offset = self.settings.with(|settings| {
@@ -1105,12 +1130,14 @@ where
 
                 for (key, value) in settings
                     .iter()
-                    .filter(|(key, _)| *key == SettingsKey::SrpEcdsaKey as u16)
+                    .filter(|(key, _)| is_persisted_setting(*key))
                 {
-                    assert!(value.len() + 2 <= buf.len() - offset);
+                    assert!(value.len() + 4 <= buf.len() - offset);
 
                     buf[offset..offset + 2].copy_from_slice(&key.to_le_bytes());
-                    offset += 2;
+                    buf[offset + 2..offset + 4]
+                        .copy_from_slice(&(value.len() as u16).to_le_bytes());
+                    offset += 4;
 
                     buf[offset..offset + value.len()].copy_from_slice(value);
                     offset += value.len();
@@ -1121,7 +1148,7 @@ where
 
             let (data, buf) = buf.split_at_mut(offset);
 
-            kv.store(OT_SRP_ECDSA_KEY, data, buf)
+            kv.store(OT_SETTINGS_KEY, data, buf)
         })
     }
 

@@ -117,14 +117,14 @@ jobs:
             dir: examples/esp
             triple: riscv32imac-unknown-none-elf
             config: infologs-optz-ltofat
-            flags: "--features thread"
+            flags: "--features thread,case-resumption,persistent-subscriptions"
             reports: "esp_light_eth2:light_eth2 esp_light_thread:light_thread"
           - name: esp-thread
             backend: nimble
             dir: examples/esp
             triple: riscv32imac-unknown-none-elf
             config: infologs-optz-ltofat-nimble
-            flags: "--no-default-features --features esp32c6,thread,nimble"
+            flags: "--no-default-features --features esp32c6,thread,nimble,case-resumption,persistent-subscriptions"
             reports: "esp_light_eth2:light_eth2 esp_light_thread:light_thread"
           - name: esp-wifi
             backend: trouble

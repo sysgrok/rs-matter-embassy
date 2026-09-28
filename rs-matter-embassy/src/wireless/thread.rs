@@ -1,12 +1,13 @@
 use core::pin::pin;
 
-use embassy_futures::select::select3;
+use embassy_futures::select::select4;
 
 use openthread::{OpenThread, Radio};
 
+use rs_matter_stack::matter::dm::clusters::icd_mgmt::{Icd, IcdNetParams};
 use rs_matter_stack::matter::persist::KvBlobStoreAccess;
 
-use crate::ble::{BtpGattContext, BtpGattPeripheral, Controller, ControllerRef};
+use crate::ble::{BtpGattContext, Controller};
 use crate::matter::crypto::{CryptoRng, Rng};
 use crate::matter::dm::networks::wireless::Thread;
 use crate::matter::error::Error;
@@ -18,7 +19,10 @@ use crate::ot::{OtMatterResources, OtMdns, OtNetif};
 use crate::stack::network::{Embedding, Network};
 use crate::stack::wireless::{self, Gatt, GattTask};
 
-use super::{BleDriver, BleDriverTask, BleDriverTaskImpl, EmbassyWirelessMatterStack};
+use super::{
+    BleDriver, BleDriverGattPeripheral, BleDriverTask, BleDriverTaskImpl,
+    EmbassyWirelessMatterStack, PreexistingBleDriver,
+};
 
 #[cfg(feature = "esp")]
 pub mod esp_thread;
@@ -53,25 +57,30 @@ where
 }
 
 /// A trait representing a task that needs access to the Thread radio,
-/// as well as to the BLE controller to perform its work
+/// as well as to a BLE driver to perform its work.
+///
+/// The task gets a `BleDriver` rather than a BLE controller, so that the BLE controller can be
+/// created only while BLE is needed (i.e. while a commissioning window is advertised) and torn
+/// down afterwards - which matters for battery-powered devices. A driver that has a pre-existing
+/// controller can hand out `PreexistingBleDriver`.
 pub trait ThreadCoexDriverTask {
-    /// Run the task with the given Thread radio and BLE controller
-    async fn run<R, B>(&mut self, radio: R, ble_ctl: B) -> Result<(), Error>
+    /// Run the task with the given Thread radio and BLE driver
+    async fn run<R, B>(&mut self, radio: R, ble: B) -> Result<(), Error>
     where
         R: Radio,
-        B: Controller;
+        B: BleDriver;
 }
 
 impl<T> ThreadCoexDriverTask for &mut T
 where
     T: ThreadCoexDriverTask,
 {
-    async fn run<R, B>(&mut self, radio: R, ble_ctl: B) -> Result<(), Error>
+    async fn run<R, B>(&mut self, radio: R, ble: B) -> Result<(), Error>
     where
         R: Radio,
-        B: Controller,
+        B: BleDriver,
     {
-        (*self).run(radio, ble_ctl).await
+        (*self).run(radio, ble).await
     }
 }
 
@@ -147,7 +156,8 @@ where
     where
         A: ThreadCoexDriverTask,
     {
-        task.run(&mut self.0, ControllerRef::new(&self.1)).await
+        task.run(&mut self.0, PreexistingBleDriver::new(&self.1))
+            .await
     }
 }
 
@@ -155,11 +165,11 @@ impl<R, B> BleDriver for PreexistingThreadDriver<R, B>
 where
     B: Controller,
 {
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
         A: BleDriverTask,
     {
-        task.run(ControllerRef::new(&self.1)).await
+        PreexistingBleDriver::new(&self.1).run(task).await
     }
 }
 
@@ -172,6 +182,7 @@ pub struct EmbassyThread<'a, T, K, R> {
     ble_context: &'a BtpGattContext,
     use_ble_random_addr: bool,
     rand: R,
+    icd: Option<&'a Icd>,
 }
 
 impl<'a, T, K, R> EmbassyThread<'a, T, K, R>
@@ -221,7 +232,21 @@ where
             ble_context,
             rand,
             use_ble_random_addr,
+            icd: None,
         }
+    }
+
+    /// Make the Thread node a Sleepy End Device following the ICD power mode of the given ICD
+    /// Management cluster state - the same `Icd` instance that backs the application's
+    /// `IcdMgmtHandler` on the root endpoint.
+    ///
+    /// The node then keeps its receiver off between data polls and polls its parent at the ICD
+    /// polling interval: the fast (`SAI`) one while the ICD is in active mode, the slow (`SII`)
+    /// one while idle. See the `icd_mgmt` module of `rs-matter` for the state machine.
+    #[must_use]
+    pub const fn with_icd(mut self, icd: &'a Icd) -> Self {
+        self.icd = Some(icd);
+        self
     }
 }
 
@@ -253,6 +278,7 @@ where
                 kv: &self.kv,
                 context: self.context,
                 task,
+                icd: self.icd,
             })
             .await
     }
@@ -277,6 +303,7 @@ where
                 ble_context: self.ble_context,
                 use_ble_random_addr: self.use_ble_random_addr,
                 task,
+                icd: self.icd,
             })
             .await
     }
@@ -343,6 +370,7 @@ struct ThreadDriverTaskImpl<'a, A, K, C> {
     kv: K,
     context: &'a OtNetContext,
     task: A,
+    icd: Option<&'a Icd>,
 }
 
 impl<A, K, C> ThreadDriverTask for ThreadDriverTaskImpl<'_, A, K, C>
@@ -379,6 +407,10 @@ where
         let netif = OtNetif::new(ot.clone());
         let mut mdns = OtMdns::new(ot.clone(), &mut resources.mdns_buf);
 
+        if let Some(icd) = self.icd {
+            configure_sed(&ot, icd)?;
+        }
+
         let mut main = pin!(self.task.run(&net_stack, &netif, &net_ctl, &mut mdns));
         let mut radio = pin!(async {
             ot.run(radio).await;
@@ -386,10 +418,11 @@ where
             Ok(())
         });
         let mut persist = pin!(persister.run());
+        let mut icd = pin!(run_icd(&ot, self.icd));
         ot.enable_ipv6(true).map_err(to_matter_err)?;
         ot.srp_autostart().map_err(to_matter_err)?;
 
-        let result = select3(&mut main, &mut radio, &mut persist)
+        let result = select4(&mut main, &mut radio, &mut persist, &mut icd)
             .coalesce()
             .await;
 
@@ -409,6 +442,7 @@ struct ThreadCoexDriverTaskImpl<'a, A, K, C> {
     ble_context: &'a BtpGattContext,
     task: A,
     use_ble_random_addr: bool,
+    icd: Option<&'a Icd>,
 }
 
 impl<A, K, C> ThreadCoexDriverTask for ThreadCoexDriverTaskImpl<'_, A, K, C>
@@ -417,10 +451,10 @@ where
     K: KvBlobStoreAccess,
     C: CryptoRng + Copy,
 {
-    async fn run<R, B>(&mut self, radio: R, ble_ctl: B) -> Result<(), Error>
+    async fn run<R, B>(&mut self, radio: R, ble: B) -> Result<(), Error>
     where
         R: Radio,
-        B: Controller,
+        B: BleDriver,
     {
         let mut resources = self.context.resources.lock().await;
         let resources = &mut *resources;
@@ -445,11 +479,17 @@ where
         let net_stack = OtNetStack::new(ot.clone());
         let netif = OtNetif::new(ot.clone());
         let mut mdns = OtMdns::new(ot.clone(), &mut resources.mdns_buf);
-        let mut peripheral = BtpGattPeripheral::new(
-            ble_ctl,
+        // The BLE controller is created only while the stack runs the peripheral, i.e. while a
+        // commissioning window is advertised over BLE.
+        let mut peripheral = BleDriverGattPeripheral::new(
+            ble,
             self.use_ble_random_addr.then_some(self.rand),
             self.ble_context,
         );
+
+        if let Some(icd) = self.icd {
+            configure_sed(&ot, icd)?;
+        }
 
         let mut main =
             pin!(self
@@ -461,10 +501,11 @@ where
             Ok(())
         });
         let mut persist = pin!(persister.run());
+        let mut icd = pin!(run_icd(&ot, self.icd));
         ot.enable_ipv6(true).map_err(to_matter_err)?;
         ot.srp_autostart().map_err(to_matter_err)?;
 
-        let result = select3(&mut main, &mut radio, &mut persist)
+        let result = select4(&mut main, &mut radio, &mut persist, &mut icd)
             .coalesce()
             .await;
 
@@ -473,5 +514,118 @@ where
         let _ = ot.enable_ipv6(false);
 
         result
+    }
+}
+
+/// OpenThread's default child timeout, in seconds (`OPENTHREAD_CONFIG_MLE_CHILD_TIMEOUT_DEFAULT`).
+const CHILD_TIMEOUT_DEFAULT_S: u32 = 240;
+
+/// The margin added on top of the slowest polling interval when sizing the child timeout: two
+/// missed polls plus some slack.
+const CHILD_TIMEOUT_MARGIN_S: u32 = 30;
+
+/// OpenThread's default child-supervision interval, in seconds
+/// (`OPENTHREAD_CONFIG_CHILD_SUPERVISION_INTERVAL`): the child asks its parent for a supervision
+/// message at least this often. Left at its default here.
+const CHILD_SUPERVISION_INTERVAL_S: u32 = 129;
+
+/// OpenThread's default child-supervision check timeout, in seconds
+/// (`OPENTHREAD_CONFIG_CHILD_SUPERVISION_CHECK_TIMEOUT`).
+const CHILD_SUPERVISION_CHECK_TIMEOUT_DEFAULT_S: u32 = 190;
+
+/// Configure the node as a Sleepy End Device (receiver off when idle, MTD, stable network data
+/// only) and size its keep-alives from the slowest polling interval the ICD will ever use.
+fn configure_sed(ot: &OpenThread<'_>, icd: &Icd) -> Result<(), Error> {
+    let params = icd.net_params();
+
+    ot.set_link_mode(false, false, false)
+        .map_err(to_matter_err)?;
+
+    ot.set_child_timeout(child_timeout_s(params.max_poll_interval_ms));
+
+    apply_icd_params(ot, &params)
+}
+
+/// Apply the current ICD polling interval to OpenThread.
+fn apply_icd_params(ot: &OpenThread<'_>, params: &IcdNetParams) -> Result<(), Error> {
+    info!(
+        "Thread SED: {:?} / {:?}, polling every {} ms",
+        params.power_mode, params.operating_mode, params.poll_interval_ms
+    );
+
+    ot.set_poll_period(params.poll_interval_ms)
+        .map_err(to_matter_err)?;
+
+    ot.set_child_supervision_check_timeout(child_supervision_check_timeout_s(
+        params.poll_interval_ms,
+    ));
+
+    Ok(())
+}
+
+/// Follow the ICD power mode: re-apply the polling interval whenever it changes.
+///
+/// Never completes; a no-op (that never completes either) without an ICD.
+async fn run_icd(ot: &OpenThread<'_>, icd: Option<&Icd>) -> Result<(), Error> {
+    let Some(icd) = icd else {
+        core::future::pending::<()>().await;
+        unreachable!()
+    };
+
+    loop {
+        icd.wait_net_changed().await;
+
+        apply_icd_params(ot, &icd.net_params())?;
+    }
+}
+
+/// The child timeout that fits a polling interval: the parent must not evict the child between
+/// two polls, so the timeout exceeds the interval by a margin - but is never shorter than
+/// OpenThread's default.
+fn child_timeout_s(poll_period_ms: u32) -> u32 {
+    poll_period_ms
+        .div_ceil(1000)
+        .saturating_add(CHILD_TIMEOUT_MARGIN_S)
+        .max(CHILD_TIMEOUT_DEFAULT_S)
+}
+
+/// The child-supervision check timeout that matches a polling interval, never below
+/// OpenThread's default.
+///
+/// A sleepy child only gets the parent's queued supervision message when it polls, so the
+/// longest normal gap between frames from the parent is the supervision interval plus one
+/// polling interval. With a check timeout below that gap (e.g. the 190 s default against a
+/// 900 s interval), every idle period ends in a false "supervision timeout" and a needless
+/// Child Update Request. One more polling interval is added as margin for a missed poll.
+fn child_supervision_check_timeout_s(poll_period_ms: u32) -> u16 {
+    CHILD_SUPERVISION_INTERVAL_S
+        .saturating_add(poll_period_ms.div_ceil(1000).saturating_mul(2))
+        .clamp(
+            CHILD_SUPERVISION_CHECK_TIMEOUT_DEFAULT_S,
+            u32::from(u16::MAX),
+        ) as u16
+}
+
+#[cfg(test)]
+mod test {
+    use super::{child_supervision_check_timeout_s, child_timeout_s};
+
+    #[test]
+    fn supervision_check_timeout_follows_the_poll_period() {
+        // Short polls keep OpenThread's default.
+        assert_eq!(child_supervision_check_timeout_s(200), 190);
+        assert_eq!(child_supervision_check_timeout_s(15_000), 190);
+        // Long polls add the interval and two poll periods.
+        assert_eq!(child_supervision_check_timeout_s(900_000), 1_929);
+        // Partial seconds round up.
+        assert_eq!(child_supervision_check_timeout_s(100_500), 331);
+        // Very long polls saturate.
+        assert_eq!(child_supervision_check_timeout_s(40_000_000), u16::MAX);
+    }
+
+    #[test]
+    fn child_timeout_exceeds_the_poll_period() {
+        assert_eq!(child_timeout_s(15_000), 240);
+        assert_eq!(child_timeout_s(600_000), 630);
     }
 }

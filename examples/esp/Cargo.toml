@@ -34,6 +34,16 @@ name = "light_thread_coex"
 required-features = ["thread"]
 harness = false
 
+[[bin]]
+name = "trv_battery_thread"
+required-features = ["thread", "case-resumption"]
+harness = false
+
+[[bin]]
+name = "temp_sensor_battery_thread"
+required-features = ["thread", "case-resumption", "persistent-subscriptions"]
+harness = false
+
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization
@@ -48,6 +58,7 @@ overflow-checks = false
 
 [patch.crates-io]
 #rs-matter = { git = "https://github.com/project-chip/rs-matter" }
+rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "icd-extensions" }
 #rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack" }
 #mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
 openthread = { git = "https://github.com/esp-rs/openthread" }
@@ -56,6 +67,7 @@ openthread-sys = { git = "https://github.com/esp-rs/openthread" }
 #nimble-rs-sys = { git = "https://github.com/sysgrok/nimble-rs" }
 #nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 #nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154" }
+
 #esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
 #esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
 #esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
@@ -78,6 +90,12 @@ esp32s3 = ["esp-rtos/esp32s3", "esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-
 esp32h2 = ["esp-rtos/esp32h2", "esp-hal/esp32h2", "esp-backtrace/esp32h2", "esp-println/esp32h2", "esp-radio/esp32h2", "esp-storage/esp32h2", "esp-bootloader-esp-idf/esp32h2", "esp-metadata-generated/esp32h2", "portable-atomic/critical-section", "thread"]
 wifi = ["rs-matter-embassy/embassy-net", "rs-matter-embassy/rustcrypto"]
 thread = ["rs-matter-embassy/openthread", "rs-matter-embassy/mbedtls", "rs-matter-embassy/openthread-heap-int-8192"]
+# Resume CASE sessions across reboots and sleeps instead of a full Sigma1/2/3 handshake: saves
+# radio time on every wake-up of a battery device, and the persisted records are small.
+case-resumption = ["rs-matter-embassy/case-resumption"]
+# Persist the subscriptions, so that a device rebooting on every wake-up (a deep-sleeping ICD)
+# resumes reporting without the controller having to subscribe again.
+persistent-subscriptions = ["rs-matter-embassy/persistent-subscriptions"]
 
 [dependencies]
 log = "0.4"
