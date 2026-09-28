@@ -2,7 +2,7 @@ use core::pin::pin;
 
 use embassy_futures::select::select4;
 
-use openthread::{OpenThread, Radio};
+use openthread::{Capabilities, OpenThread, Radio};
 
 use rs_matter_stack::matter::dm::clusters::icd_mgmt::{Icd, IcdNetParams};
 use rs_matter_stack::matter::persist::KvBlobStoreAccess;
@@ -535,6 +535,8 @@ const CHILD_SUPERVISION_CHECK_TIMEOUT_DEFAULT_S: u32 = 190;
 
 /// Configure the node as a Sleepy End Device (receiver off when idle, MTD, stable network data
 /// only) and size its keep-alives from the slowest polling interval the ICD will ever use.
+///
+/// Starts out data-polling; `run_icd` switches to CSL once the radio is up, if it can.
 fn configure_sed(ot: &OpenThread<'_>, icd: &Icd) -> Result<(), Error> {
     let params = icd.net_params();
 
@@ -543,18 +545,43 @@ fn configure_sed(ot: &OpenThread<'_>, icd: &Icd) -> Result<(), Error> {
 
     ot.set_child_timeout(child_timeout_s(params.max_poll_interval_ms));
 
-    apply_icd_params(ot, &params)
+    apply_icd_params(ot, &params, false)
 }
 
-/// Apply the current ICD polling interval to OpenThread.
-fn apply_icd_params(ot: &OpenThread<'_>, params: &IcdNetParams) -> Result<(), Error> {
+/// Apply the current ICD polling interval to OpenThread: as the CSL period if the radio can
+/// do CSL (`csl`), else as the data-poll period.
+///
+/// A CSL child listens at its parent's transmit times instead of polling, so the "polling
+/// interval" becomes the period between its receive windows - same reachability, no poll
+/// transmission per listen. OpenThread caps the CSL period at ~10.5 s; a longer idle interval
+/// (a LIT's) is listened at that cap, which is still cheaper than one poll per interval.
+fn apply_icd_params(ot: &OpenThread<'_>, params: &IcdNetParams, csl: bool) -> Result<(), Error> {
     info!(
-        "Thread SED: {:?} / {:?}, polling every {} ms",
-        params.power_mode, params.operating_mode, params.poll_interval_ms
+        "Thread SED: {:?} / {:?}, {} every {} ms",
+        params.power_mode,
+        params.operating_mode,
+        if csl { "listening (CSL)" } else { "polling" },
+        params.poll_interval_ms
     );
 
-    ot.set_poll_period(params.poll_interval_ms)
-        .map_err(to_matter_err)?;
+    if csl {
+        // Whole 10-symbol units, within OpenThread's range.
+        const CSL_UNIT_US: u32 = 160;
+
+        let period_us = (params.poll_interval_ms as u64 * 1000)
+            .min(OpenThread::CSL_MAX_PERIOD_US as u64) as u32
+            / CSL_UNIT_US
+            * CSL_UNIT_US;
+
+        ot.set_csl_period(period_us.max(CSL_UNIT_US))
+            .map_err(to_matter_err)?;
+
+        // With CSL on, OpenThread's automatic poll period is the CSL keep-alive.
+        ot.set_poll_period(0).map_err(to_matter_err)?;
+    } else {
+        ot.set_poll_period(params.poll_interval_ms)
+            .map_err(to_matter_err)?;
+    }
 
     ot.set_child_supervision_check_timeout(child_supervision_check_timeout_s(
         params.poll_interval_ms,
@@ -572,10 +599,21 @@ async fn run_icd(ot: &OpenThread<'_>, icd: Option<&Icd>) -> Result<(), Error> {
         unreachable!()
     };
 
-    loop {
-        icd.wait_net_changed().await;
+    // Whether the radio can do CSL is only known once it is up.
+    ot.wait_radio_ready().await;
 
-        apply_icd_params(ot, &icd.net_params())?;
+    let csl = ot
+        .radio_caps()
+        .is_some_and(|caps| caps.contains(Capabilities::RECEIVE_TIMING));
+
+    if csl {
+        info!("Thread SED: the radio supports timed receive, using CSL instead of data polls");
+    }
+
+    loop {
+        apply_icd_params(ot, &icd.net_params(), csl)?;
+
+        icd.wait_net_changed().await;
     }
 }
 

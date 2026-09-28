@@ -11,6 +11,13 @@ This page explains what a "sleepy" Matter device is, which of the two Matter pro
   Long Idle Time ICD, the deep-sleep model: a temperature sensor that takes one reading per
   wake-up.
 
+The radiator valve exists for the nRF52840 too,
+[`examples/nrf/src/bin/trv_battery_thread.rs`](../examples/nrf/src/bin/trv_battery_thread.rs),
+and it is the golden case for a SIT device: the same Matter side on a radio with timed
+receive, so it *listens* with CSL instead of polling (see below), which makes a **500 ms**
+idle interval affordable at a **single-digit µA** average. No sleep code is needed there: the
+Embassy executor's idle is already the nRF's System ON sleep.
+
 The two are deliberately the same physical quantity: one device must *react* to what
 controllers send it, the other only *reports*. That difference, not the battery, is what picks
 the profile.
@@ -51,6 +58,7 @@ profiles through the **ICD Management** cluster on the root endpoint:
 | Controller support needed | none beyond SED support | the controller *registers* as a Check-In client |
 | Typical product | actuators a user expects to react: radiator valves, locks, blinds | slow sensors: soil moisture, temperature, air quality |
 | Sleep model on the ESP32-C6 | light sleep between polls | deep sleep between wake-ups |
+| Sleep model on the nRF | System ON idle between CSL samples, sub-second `SII` | deep sleep between wake-ups |
 
 A LIT-capable device without any registered client **operates as SIT** (it polls at least
 every 15 s) so that plain controllers can commission and use it. The `OperatingMode`
@@ -62,7 +70,9 @@ The state machine both profiles share:
   (`ActiveModeThreshold`), on a `StayActiveRequest`, on a user trigger, and for as long as a
   commissioning window is open. The device polls fast (`SAI`) and must not sleep deeply.
 - **Idle mode** otherwise, for at most `IdleModeDuration`. The device polls slowly (`SII`) and
-  may sleep as deeply as it likes.
+  may sleep as deeply as it likes. Note that `IdleModeDuration` bounds reachability only for
+  a LIT; a SIT is reachable within `SII` regardless, so the SIT examples just set it to the
+  15 s a SIT may at most be idle for.
 - On every idle → active transition (and on boot), a LIT sends a **Check-In** message to each
   registered client whose subscription is gone, so the client can re-subscribe while the
   device is awake.
@@ -120,11 +130,28 @@ a full attach.
 - The OpenThread persister keeps the active dataset, the network and parent info, the SLAAC
   key and the SRP state across reboots.
 
-What is Thread-specific is only the last step, the mapping of a polling interval onto the
-OpenThread data-poll period. A Wifi ICD would map the same `net_params()` onto the station's
-power-save mode and listen interval (esp-radio's `PowerSaveMode` plus DTIM skipping), which
-is not implemented yet. An Ethernet ICD is not a thing: a wired link cannot poll, and a wired
-device is mains-powered anyway.
+What is Thread-specific is only the last step, the mapping of a polling interval onto
+OpenThread. On a radio with timed receive (the nRF ones, through `nrf-802154`) that mapping
+is the *CSL period* rather than the data-poll period: a Thread 1.2 CSL child opens a receive
+window of a few hundred microseconds at its parent's transmit times instead of polling. The
+parent still delivers a frame only at the child's next window, so the latency is the same as
+with polling at the same interval; what changes is the price of the interval. A data poll is a
+transmission plus an ACK wait, milliseconds of radio at several mA, so polling faster than
+every 15 s or so costs tens of µA. A CSL sample costs about as much as the nRF's own sleep
+floor even at 500 ms:
+
+| Idle interval | Polling (data polls) | Listening (CSL) |
+|---|---|---|
+| 15 s | ~2 µA | ~0.1 µA |
+| 500 ms | ~30-40 µA | ~3-4 µA |
+
+That is why the nRF radiator valve advertises a 500 ms `SII` while the C6 one advertises the
+15 s a polling SIT device ends up with. Against a Thread 1.1 parent, or on a radio without
+timed receive (the ESP32-C6 today), OpenThread polls instead; the application does not see
+the difference, but it should then not advertise a sub-second `SII`. A Wifi ICD would map the same
+`net_params()` onto the station's power-save mode and listen interval (esp-radio's
+`PowerSaveMode` plus DTIM skipping), which is not implemented yet. An Ethernet ICD is not a
+thing: a wired link cannot poll, and a wired device is mains-powered anyway.
 
 **The application** owns the sleep itself, because only it knows the hardware:
 

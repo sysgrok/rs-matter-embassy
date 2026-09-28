@@ -145,14 +145,14 @@ jobs:
             dir: examples/nrf
             triple: thumbv7em-none-eabi
             config: defmtlogs-optz-ltofat
-            flags: ""
+            flags: "--features case-resumption"
             reports: "nrf52_light_eth:light_eth nrf52_light_thread:light_thread"
           - name: nrf52
             backend: nimble
             dir: examples/nrf
             triple: thumbv7em-none-eabi
             config: defmtlogs-optz-ltofat-nimble
-            flags: "--no-default-features --features nrf52840,nimble"
+            flags: "--no-default-features --features nrf52840,nimble,case-resumption"
             reports: "nrf52_light_eth:light_eth nrf52_light_thread:light_thread"
           # Only `light_thread_coex` builds here: the other two examples drive the
           # `embassy-nrf` IEEE 802.15.4 radio, which is an nRF52-only affair. Not

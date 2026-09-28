@@ -114,11 +114,17 @@ const RESET_SECS: u64 = 3;
 
 /// The ICD mode timings this device advertises.
 ///
-/// A SIT device: it may idle for up to a minute between its own wake-ups, stays active for a
-/// second after each one, and for a second after any Matter message. Nothing here bounds the
-/// *polling* interval - that is the `SII` in `BASIC_INFO`, capped to 15 s by the stack.
+/// A SIT device: it stays active for a second after boot, and for a second after any Matter
+/// message, so that a multi-message exchange does not fall back to slow polling halfway
+/// through. Nothing here bounds the *polling* interval - that is the `SII` in `BASIC_INFO`,
+/// capped to 15 s by the stack.
+///
+/// `idle_mode_duration_s` has no real role for a SIT device: it is how long a LIT may stay
+/// unreachable before it wakes up on its own and sends its Check-Ins, while a SIT is reachable
+/// within `SII` all along. The state machine still honors it (every idle period ends in a
+/// short active one), so it is simply set to the polling interval.
 const ICD_MODE: IcdModeConfig = IcdModeConfig {
-    idle_mode_duration_s: 60,
+    idle_mode_duration_s: 15,
     active_mode_duration_ms: 1000,
     active_mode_threshold_ms: 1000,
     user_active_mode_trigger_hint: 0,

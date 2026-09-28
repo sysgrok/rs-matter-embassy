@@ -35,7 +35,7 @@ use rs_matter_embassy::matter::dm::devices::test::{
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node};
-use rs_matter_embassy::matter::persist::DummyKvBlobStore;
+use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
 use rs_matter_embassy::stack::rand::reseeding_csprng;
@@ -177,6 +177,7 @@ async fn main(_s: Spawner) {
     let on_off = on_off::OnOffHandler::new_standalone(
         Dataver::new_rand(&mut weak_rand),
         LIGHT_ENDPOINT_ID,
+        VENDOR_KEYS_START + 0x10,
         TestOnOffDeviceLogic::new(true),
     );
 
@@ -197,7 +198,7 @@ async fn main(_s: Spawner) {
         // Our on-off cluster, on Endpoint 1
         .chain(
             |e, c| e == LIGHT_ENDPOINT_ID && c == TestOnOffDeviceLogic::CLUSTER.id,
-            on_off::HandlerAsyncAdaptor(&on_off),
+            Async(on_off::HandlerAdaptor(&on_off)),
         )
         // Each Endpoint needs a Descriptor cluster too
         // Just use the one that `rs-matter` provides out of the box

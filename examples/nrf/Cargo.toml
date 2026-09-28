@@ -16,6 +16,10 @@ name = "light_thread_coex"
 harness = false
 
 [[bin]]
+name = "trv_battery_thread"
+required-features = ["case-resumption"]
+
+[[bin]]
 name = "light_eth"
 harness = false
 required-features = ["nrf52840"]
@@ -37,15 +41,22 @@ overflow-checks = false
 rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "icd-extensions" }
 #rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack" }
 #mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
-openthread = { git = "https://github.com/esp-rs/openthread" }
-openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+#openthread = { git = "https://github.com/esp-rs/openthread" }
+#openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+openthread = { git = "https://github.com/sysgrok/openthread", branch = "csl" }
+openthread-sys = { git = "https://github.com/sysgrok/openthread", branch = "csl" }
 #nimble-rs = { git = "https://github.com/sysgrok/nimble-rs" }
 #nimble-rs-sys = { git = "https://github.com/sysgrok/nimble-rs" }
 #nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 #nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "csl" }
+nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154", branch = "csl" }
 
 [features]
 default = ["nrf52840", "trouble"]
+# Resume CASE sessions instead of a full handshake: saves radio time on every wake-up of a
+# battery device (see `trv_battery_thread`).
+case-resumption = ["rs-matter-embassy/case-resumption"]
 trouble = ["rs-matter-embassy/trouble"]
 nimble = ["rs-matter-embassy/nimble"]
 nrf52840 = ["rs-matter-embassy/nrf52840", "embassy-nrf/nrf52840", "embassy-nrf/time-driver-rtc1"]
