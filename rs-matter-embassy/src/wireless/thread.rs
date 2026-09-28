@@ -805,7 +805,7 @@ async fn run_thread_diag(ot: &OpenThread<'_>) -> Result<(), Error> {
         let role = ot.device_role();
         if last != Some(role) {
             last = Some(role);
-            info!("Thread device role: {role:?}");
+            info!("Thread device role: {:?}", role);
         }
     }
 }
