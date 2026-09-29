@@ -58,14 +58,15 @@ use esp_storage::FlashStorage;
 
 use log::{info, warn};
 
-use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, Rng};
+use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
 use rs_matter_embassy::matter::dm::clusters::decl::temperature_measurement::{
     self, ClusterHandler as _,
 };
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
 use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{
-    ClusterHandler as _, Icd, IcdMgmtHandler, IcdModeConfig, IcdPowerMode,
+    ClusterHandler as _, Icd, IcdModeConfig, IcdPowerMode, LitIcd, LitIcdMgmtHandler,
+    OperatingModeEnum,
 };
 use rs_matter_embassy::matter::dm::devices::test::{
     DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
@@ -100,7 +101,7 @@ macro_rules! mk_static {
 /// The amount of memory for allocating all `rs-matter-stack` futures created during
 /// the execution of the `run*` methods.
 /// This does NOT include the rest of the Matter stack.
-const BUMP_SIZE: usize = 20000;
+const BUMP_SIZE: usize = 23000;
 
 /// Heap strictly necessary only for Thread+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
 const HEAP_SIZE: usize = 100 * 1024;
@@ -121,6 +122,8 @@ const SLEEP_SECS: u32 = 300;
 /// A LIT device: it idles for `SLEEP_SECS` between its own wake-ups, stays active for five
 /// seconds after each one (enough for a registered client to re-subscribe after the Check-In)
 /// and for five seconds after any Matter message (the spec minimum for LIT).
+///
+/// Until a client registers with it, though, it operates as a SIT - see `ICD_SIT_SLOW_POLL_MS`.
 const ICD_MODE: IcdModeConfig = IcdModeConfig {
     idle_mode_duration_s: SLEEP_SECS,
     active_mode_duration_ms: 5000,
@@ -129,6 +132,13 @@ const ICD_MODE: IcdModeConfig = IcdModeConfig {
     user_active_mode_trigger_hint: 0x0004,
     user_active_mode_trigger_instruction: "Pull GPIO4 low to wake the device",
 };
+
+/// How often the device polls while it operates as a SIT, i.e. until a client registers for
+/// Check-Ins with it: it then stays up (see `deep_sleep_when_idle`) and polls every 5 s, well
+/// under the 15 s a SIT may take, since that is the phase where somebody is waiting to reach
+/// it - the commissioner about to register, or a controller that does not know about LIT
+/// devices at all. Also the `SII` it advertises meanwhile.
+const ICD_SIT_SLOW_POLL_MS: u32 = 5000;
 
 /// How long to wait after entering idle mode before deep-sleeping, so that the background
 /// persistence tasks (fabrics, subscriptions, OpenThread settings) flush to flash first.
@@ -164,7 +174,7 @@ async fn main(_s: Spawner) {
     }
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
+    esp_rtos::start(timg0.timer0); // TEMPORARY (local esp-hal clone): no `FROM_CPU_INTR0` there
 
     // The user trigger: GPIO4, pulled up, wakes the chip when pulled low. Configured for the
     // low-power path (the one that works with the digital GPIO peripheral powered down), and
@@ -188,9 +198,9 @@ async fn main(_s: Spawner) {
 
     let mut weak_rand = crypto.weak_rand().unwrap();
 
-    // TODO
-    let mut ieee_eui64 = [0; 8];
-    weak_rand.fill_bytes(&mut ieee_eui64);
+    // The factory EUI-64: this device reboots on every wake-up, and a random one would register
+    // a new SRP host on each of them.
+    let ieee_eui64 = EspThreadDriver::ieee_eui64();
 
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
@@ -199,9 +209,15 @@ async fn main(_s: Spawner) {
         EmbassyThreadMatterStack::init(&BASIC_INFO, TEST_DEV_COMM, &TEST_DEV_ATT),
     );
 
-    // The shared ICD state: the registrations, the Check-In counter and the power mode state
-    // machine. Backs the ICD Management cluster handler, and is followed by the Thread driver.
-    let icd: &'static Icd = mk_static!(Icd).init_with(Icd::init(ICD_COUNTER_EPOCH, ICD_MODE));
+    // The shared LIT ICD state: the registrations, the Check-In counter and the power mode state
+    // machine. Backs the ICD Management cluster handler; the Thread driver and the deep-sleep
+    // logic follow its power mode state machine.
+    let lit: &'static LitIcd = mk_static!(LitIcd).init_with(LitIcd::init(
+        ICD_COUNTER_EPOCH,
+        ICD_MODE,
+        ICD_SIT_SLOW_POLL_MS,
+    ));
+    let icd = lit.icd();
 
     // One reading per wake-up. The wake-up counter lives in RTC RAM, which deep sleep keeps.
     let wake_count = {
@@ -235,7 +251,7 @@ async fn main(_s: Spawner) {
         // power mode state machine and sends the Check-In messages.
         .chain(
             |e, c| e == ROOT_ENDPOINT_ID && c == ICD_MGMT_CLUSTER.id,
-            Async(IcdMgmtHandler::new(Dataver::new_rand(&mut weak_rand), icd).adapt()),
+            Async(LitIcdMgmtHandler::new(Dataver::new_rand(&mut weak_rand), lit).adapt()),
         )
         // Our temperature sensor, on Endpoint 1
         .chain(
@@ -379,7 +395,11 @@ impl temperature_measurement::ClusterHandler for TemperatureSensor {
 /// Deep-sleep whenever the ICD enters idle mode, until the next poll is due.
 ///
 /// Only once the device is commissioned: an uncommissioned device has a commissioning window
-/// open (which keeps the ICD active anyway) or nothing to sleep for.
+/// open (which keeps the ICD active anyway) or nothing to sleep for. And only while operating
+/// as a LIT: until a client registers for Check-Ins, a LIT-capable device operates as a SIT,
+/// which has to poll its parent every 15 s at most - a deep sleep of that length plus the
+/// reboot it ends in (Thread re-attach, SRP re-registration and all) would break that bound
+/// and cost more than staying up; that mode is left to OpenThread's own sleepy polling.
 ///
 /// Never returns: a deep sleep ends in a reboot.
 async fn deep_sleep_when_idle(
@@ -390,6 +410,12 @@ async fn deep_sleep_when_idle(
     loop {
         icd.wait_idle().await;
 
+        if icd.operating_mode() == OperatingModeEnum::SIT {
+            // No client registered: stay up, and look again at the next idle period.
+            icd.wait_active().await;
+            continue;
+        }
+
         // Let the persistence tasks flush whatever the active period changed.
         embassy_time::Timer::after_millis(SLEEP_SETTLE_MS).await;
 
@@ -399,8 +425,7 @@ async fn deep_sleep_when_idle(
         }
 
         // Sleep until the next poll is due - never longer than the idle period, whichever
-        // comes first. A LIT polls once per idle period; a LIT-capable device without
-        // registered clients (operating as SIT) is capped to 15 s by the state machine.
+        // comes first: a LIT polls once per idle period.
         let poll_ms = icd.net_params().poll_interval_ms as u64;
         let idle_ms = icd
             .idle_until()
@@ -427,6 +452,11 @@ async fn deep_sleep_when_idle(
 /// The `SAI` / `SII` (session active / idle intervals) are what the device advertises to
 /// controllers *and* the polling intervals of the Thread Sleepy End Device: 300 ms while
 /// the ICD is active, the sleep period while idle (a LIT is reachable once per idle period).
+///
+/// Both are the values of the device's LIT operation. Until a client registers with the ICD
+/// Management cluster the device operates as a SIT, and the stack then caps both the actual
+/// polling interval and the advertised `SII` to `ICD_SIT_SLOW_POLL_MS`; nothing here needs to
+/// know about it.
 const BASIC_INFO: BasicInfoConfig = BasicInfoConfig {
     sai: Some(300),
     sii: Some(SLEEP_SECS * 1000),
@@ -444,8 +474,9 @@ const DEV_TYPE_TEMPERATURE_SENSOR: DeviceType = DeviceType {
     drev: 2,
 };
 
-/// The ICD Management cluster metadata, exactly as served by `IcdMgmtHandler`.
-const ICD_MGMT_CLUSTER: Cluster<'static> = IcdMgmtHandler::CLUSTER;
+/// The ICD Management cluster metadata, exactly as served by `LitIcdMgmtHandler`: the Check-In
+/// Protocol, Long Idle Time and User Active Mode Trigger features.
+const ICD_MGMT_CLUSTER: Cluster<'static> = LitIcdMgmtHandler::CLUSTER;
 
 /// The Matter Temperature Sensor Node.
 ///

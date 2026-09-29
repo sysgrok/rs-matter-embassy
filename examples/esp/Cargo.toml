@@ -58,7 +58,7 @@ overflow-checks = false
 
 [patch.crates-io]
 #rs-matter = { git = "https://github.com/project-chip/rs-matter" }
-rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "icd-extensions" }
+rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "p-sub-fix" }
 #rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack" }
 #mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
 #openthread = { git = "https://github.com/esp-rs/openthread" }
@@ -79,6 +79,38 @@ openthread-sys = { git = "https://github.com/sysgrok/openthread", branch = "csl"
 #esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
 #esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
 #esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
+
+# TEMPORARY: the local esp-hal clone (branch `coex-fix-802154`), for testing the BLE + 802.15.4
+# coexistence fix in `esp-radio` (the modem power domain, its reset pulse, the BT baseband init and
+# the shared modem clocks are refcounted across BLE and the 802.15.4 driver).
+#
+# Every esp-* crate that `esp-radio` reaches through its in-repo path dependencies has to come from
+# the clone as well, or two copies of `esp-hal` end up in the graph. Not patched: `esp-metadata-
+# generated` and `esp-config` (the clone is at esp-metadata-generated 0.6 and its `esp-config` is
+# tied to it, while the examples want 0.5; a second copy of those two build-time crates is harmless).
+# The clone's `esp-hal` says 1.2.0, so the lock file has to be moved to the clone as a set:
+#   cargo update -p esp-hal --precise 1.2.0
+#   cargo update -p esp-radio -p esp-rtos -p esp-phy -p esp-radio-rtos-driver -p esp-sync \
+#       -p esp-rom-sys -p esp-hal-procmacros -p esp-riscv-rt -p xtensa-lx-rt -p esp-alloc \
+#       -p esp-backtrace -p esp-println -p esp-storage -p esp-bootloader-esp-idf
+# The clone's `esp-hal` no longer hands out `FROM_CPU_INTR0` (the scheduler runs off the CLINT
+# software interrupt there) and its `esp-rtos` `start*` functions lost that argument, hence the
+# TEMPORARY edits in the `esp_rtos::start*` calls of the examples built for this test.
+esp-hal = { path = "/home/ivan/dev/esp-hal/esp-hal" }
+esp-rtos = { path = "/home/ivan/dev/esp-hal/esp-rtos" }
+esp-radio = { path = "/home/ivan/dev/esp-hal/esp-radio" }
+esp-alloc = { path = "/home/ivan/dev/esp-hal/esp-alloc" }
+esp-backtrace = { path = "/home/ivan/dev/esp-hal/esp-backtrace" }
+esp-println = { path = "/home/ivan/dev/esp-hal/esp-println" }
+esp-storage = { path = "/home/ivan/dev/esp-hal/esp-storage" }
+esp-bootloader-esp-idf = { path = "/home/ivan/dev/esp-hal/esp-bootloader-esp-idf" }
+esp-phy = { path = "/home/ivan/dev/esp-hal/esp-phy" }
+esp-radio-rtos-driver = { path = "/home/ivan/dev/esp-hal/esp-radio-rtos-driver" }
+esp-sync = { path = "/home/ivan/dev/esp-hal/esp-sync" }
+esp-rom-sys = { path = "/home/ivan/dev/esp-hal/esp-rom-sys" }
+esp-hal-procmacros = { path = "/home/ivan/dev/esp-hal/esp-hal-procmacros" }
+esp-riscv-rt = { path = "/home/ivan/dev/esp-hal/esp-riscv-rt" }
+xtensa-lx-rt = { path = "/home/ivan/dev/esp-hal/xtensa-lx-rt" }
 
 [features]
 default = ["esp32c6", "trouble"]

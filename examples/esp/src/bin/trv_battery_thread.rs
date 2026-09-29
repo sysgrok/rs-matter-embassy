@@ -17,10 +17,11 @@
 //! is what decides the battery life.
 //!
 //! What this example wires up:
-//! - the ICD Management cluster on the root endpoint, backed by a shared `Icd` state;
+//! - the ICD Management cluster of a SIT-only device on the root endpoint (no features, just
+//!   the mode timings), backed by the shared `Icd` power mode state machine;
 //! - the Thread driver following that state: the node polls fast (`SAI`) while the ICD is in
 //!   active mode and slowly (`SII`, capped to 15 s for SIT) while idle;
-//! - a flash-backed KV store, so the fabrics, the ICD registrations, the CASE resumption
+//! - a flash-backed KV store, so the fabrics, the CASE resumption
 //!   records, the thermostat's setpoints and the OpenThread attachment state survive a reboot;
 //! - CASE session resumption (the `case-resumption` feature), so a controller coming back after
 //!   a while re-establishes its session with one round trip instead of a full handshake;
@@ -59,7 +60,7 @@ use esp_storage::FlashStorage;
 
 use log::{info, warn};
 
-use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, Rng};
+use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::app::thermostat::{
     self, ControlSequenceOfOperationEnum, RelayStateBitmap, SystemModeEnum, ThermostatHooks,
 };
@@ -67,7 +68,7 @@ use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
 use rs_matter_embassy::matter::dm::clusters::decl::thermostat as thermostat_cluster;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
 use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{
-    ClusterHandler as _, Icd, IcdMgmtHandler, IcdModeConfig,
+    ClusterHandler as _, Icd, IcdModeConfig, SitIcdMgmtHandler,
 };
 use rs_matter_embassy::matter::dm::devices::test::{
     DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
@@ -101,7 +102,7 @@ macro_rules! mk_static {
 /// The amount of memory for allocating all `rs-matter-stack` futures created during
 /// the execution of the `run*` methods.
 /// This does NOT include the rest of the Matter stack.
-const BUMP_SIZE: usize = 20000;
+const BUMP_SIZE: usize = 23000;
 
 /// Heap strictly necessary only for Thread+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
 const HEAP_SIZE: usize = 100 * 1024;
@@ -116,8 +117,8 @@ const RESET_SECS: u64 = 3;
 ///
 /// A SIT device: it stays active for a second after boot, and for a second after any Matter
 /// message, so that a multi-message exchange does not fall back to slow polling halfway
-/// through. Nothing here bounds the *polling* interval - that is the `SII` in `BASIC_INFO`,
-/// capped to 15 s by the stack.
+/// through. The *polling* interval is the `SII` in `BASIC_INFO` (15 s, the most a SIT may
+/// take).
 ///
 /// `idle_mode_duration_s` has no real role for a SIT device: it is how long a LIT may stay
 /// unreachable before it wakes up on its own and sends its Check-Ins, while a SIT is reachable
@@ -130,10 +131,6 @@ const ICD_MODE: IcdModeConfig = IcdModeConfig {
     user_active_mode_trigger_hint: 0,
     user_active_mode_trigger_instruction: "",
 };
-
-/// How far ahead the persisted Check-In counter boundary jumps: this many Check-Ins may be sent
-/// between two flash writes.
-const ICD_COUNTER_EPOCH: u32 = 100;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -156,11 +153,8 @@ async fn main(_s: Spawner) {
     let sleep = esp_rtos::sleep::configure(peripherals.LPWR);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start_with_idle_hook(
-        timg0.timer0,
-        peripherals.FROM_CPU_INTR0,
-        sleep.light_sleep_hook,
-    );
+    // TEMPORARY (local esp-hal clone): no `FROM_CPU_INTR0` argument there
+    esp_rtos::start_with_idle_hook(timg0.timer0, sleep.light_sleep_hook);
 
     // Create the crypto provider, using the `esp-hal` TRNG/ADC1 as the source of randomness for a reseeding CSPRNG.
     let _trng_source = esp_hal::rng::TrngSource::new(peripherals.RNG, peripherals.ADC1);
@@ -171,9 +165,9 @@ async fn main(_s: Spawner) {
 
     let mut weak_rand = crypto.weak_rand().unwrap();
 
-    // TODO
-    let mut ieee_eui64 = [0; 8];
-    weak_rand.fill_bytes(&mut ieee_eui64);
+    // The factory EUI-64, so that the node keeps its SRP host (and hardware address) across
+    // reboots - the SRP key it registers with is persisted along with the rest.
+    let ieee_eui64 = EspThreadDriver::ieee_eui64();
 
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
@@ -182,9 +176,9 @@ async fn main(_s: Spawner) {
         EmbassyThreadMatterStack::init(&BASIC_INFO, TEST_DEV_COMM, &TEST_DEV_ATT),
     );
 
-    // The shared ICD state: the registrations, the Check-In counter and the power mode state
-    // machine. Backs the ICD Management cluster handler, and is followed by the Thread driver.
-    let icd: &'static Icd = mk_static!(Icd).init_with(Icd::init(ICD_COUNTER_EPOCH, ICD_MODE));
+    // The ICD power mode state machine. Backs the ICD Management cluster handler, and is
+    // followed by the Thread driver. A SIT device has no registrations and no Check-In counter.
+    let icd: &'static Icd = mk_static!(Icd).init_with(Icd::init(ICD_MODE));
 
     // The radiator valve: a heating-only Thermostat. The handler owns and persists the
     // setpoints and the mode; the logic below is the (simulated) valve itself.
@@ -207,11 +201,11 @@ async fn main(_s: Spawner) {
                 &mut weak_rand,
             )),
         )
-        // The ICD Management cluster, on Endpoint 0 as well. Its `run` hook drives the ICD
-        // power mode state machine and sends the Check-In messages.
+        // The ICD Management cluster of a SIT device, on Endpoint 0 as well: no features, just
+        // the mode timings. Its `run` hook drives the ICD power mode state machine.
         .chain(
             |e, c| e == ROOT_ENDPOINT_ID && c == ICD_MGMT_CLUSTER.id,
-            Async(IcdMgmtHandler::new(Dataver::new_rand(&mut weak_rand), icd).adapt()),
+            Async(SitIcdMgmtHandler::new(Dataver::new_rand(&mut weak_rand), icd).adapt()),
         )
         // Our thermostat cluster, on Endpoint 1
         .chain(
@@ -224,7 +218,7 @@ async fn main(_s: Spawner) {
             Async(desc::DescHandler::new(Dataver::new_rand(&mut weak_rand)).adapt()),
         );
 
-    // A flash-backed KV BLOB store: an ICD has to remember its fabrics, its ICD registrations,
+    // A flash-backed KV BLOB store: an ICD has to remember its fabrics,
     // its CASE resumption records and its Thread attachment across reboots.
     let mut pt_buf = [0u8; PARTITION_TABLE_MAX_LEN];
     let mut store = get_persistent_store(peripherals.FLASH, &mut pt_buf[..]);
@@ -394,8 +388,9 @@ impl ThermostatHooks for RadiatorValve {
     }
 }
 
-/// The ICD Management cluster metadata, exactly as served by `IcdMgmtHandler`.
-const ICD_MGMT_CLUSTER: Cluster<'static> = IcdMgmtHandler::CLUSTER;
+/// The ICD Management cluster metadata, exactly as served by `SitIcdMgmtHandler`: a SIT-only
+/// device, which claims no ICD features and advertises no `ICD` DNS-SD TXT key.
+const ICD_MGMT_CLUSTER: Cluster<'static> = SitIcdMgmtHandler::CLUSTER;
 
 /// The Matter Thermostat (radiator valve) Node.
 ///

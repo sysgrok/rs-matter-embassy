@@ -48,7 +48,7 @@ use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
 use rs_matter_embassy::matter::dm::clusters::decl::thermostat as thermostat_cluster;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
 use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{
-    ClusterHandler as _, Icd, IcdMgmtHandler, IcdModeConfig,
+    ClusterHandler as _, Icd, IcdModeConfig, SitIcdMgmtHandler,
 };
 use rs_matter_embassy::matter::dm::devices::test::{
     DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
@@ -122,8 +122,8 @@ bind_interrupts!(struct Irqs {
 ///
 /// A SIT device: it stays active for a second after boot, and for a second after any Matter
 /// message, so that a multi-message exchange does not fall back to the slow listening period
-/// halfway through. Nothing here bounds how quickly the device can be reached - that is the
-/// `SII` in `TEST_BASIC_INFO`.
+/// halfway through. How quickly the device can be reached is the `SII` in `TEST_BASIC_INFO`
+/// (500 ms).
 ///
 /// `idle_mode_duration_s` has no real role for a SIT device: it is how long a LIT may stay
 /// unreachable before it wakes up on its own and sends its Check-Ins, while a SIT is reachable
@@ -136,10 +136,6 @@ const ICD_MODE: IcdModeConfig = IcdModeConfig {
     user_active_mode_trigger_hint: 0,
     user_active_mode_trigger_instruction: "",
 };
-
-/// How far ahead the persisted Check-In counter boundary jumps: this many Check-Ins may be sent
-/// between two flash writes.
-const ICD_COUNTER_EPOCH: u32 = 100;
 
 const BUMP_SIZE: usize = 21000;
 
@@ -269,9 +265,9 @@ async fn main(_s: Spawner) {
         ),
     );
 
-    // The shared ICD state: the registrations, the Check-In counter and the power mode state
-    // machine. Backs the ICD Management cluster handler, and is followed by the Thread driver.
-    let icd: &'static Icd = mk_static!(Icd).init_with(Icd::init(ICD_COUNTER_EPOCH, ICD_MODE));
+    // The ICD power mode state machine. Backs the ICD Management cluster handler, and is
+    // followed by the Thread driver. A SIT device has no registrations and no Check-In counter.
+    let icd: &'static Icd = mk_static!(Icd).init_with(Icd::init(ICD_MODE));
 
     let thread_driver = NrfThreadMpslRadioDriver::new(
         p.RADIO,
@@ -306,11 +302,11 @@ async fn main(_s: Spawner) {
                 &mut weak_rand,
             )),
         )
-        // The ICD Management cluster, on Endpoint 0 as well. Its `run` hook drives the ICD
-        // power mode state machine and sends the Check-In messages.
+        // The ICD Management cluster of a SIT device, on Endpoint 0 as well: no features, just
+        // the mode timings. Its `run` hook drives the ICD power mode state machine.
         .chain(
             |e, c| e == ROOT_ENDPOINT_ID && c == ICD_MGMT_CLUSTER.id,
-            Async(IcdMgmtHandler::new(Dataver::new_rand(&mut weak_rand), icd).adapt()),
+            Async(SitIcdMgmtHandler::new(Dataver::new_rand(&mut weak_rand), icd).adapt()),
         )
         // Our thermostat cluster, on Endpoint 1
         .chain(
@@ -473,8 +469,9 @@ impl ThermostatHooks for RadiatorValve {
     }
 }
 
-/// The ICD Management cluster metadata, exactly as served by `IcdMgmtHandler`.
-const ICD_MGMT_CLUSTER: Cluster<'static> = IcdMgmtHandler::CLUSTER;
+/// The ICD Management cluster metadata, exactly as served by `SitIcdMgmtHandler`: a SIT-only
+/// device, which claims no ICD features and advertises no `ICD` DNS-SD TXT key.
+const ICD_MGMT_CLUSTER: Cluster<'static> = SitIcdMgmtHandler::CLUSTER;
 
 /// The Matter Thermostat (radiator valve) Node.
 ///

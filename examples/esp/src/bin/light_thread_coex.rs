@@ -61,7 +61,7 @@ macro_rules! mk_static {
 ///
 /// If - for your platform - this size is not enough, increase it until
 /// the program runs without panics during the stack initialization.
-const BUMP_SIZE: usize = 20000;
+const BUMP_SIZE: usize = 22000;
 
 /// Heap strictly necessary only for Thread+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
 const HEAP_SIZE: usize = 100 * 1024;
@@ -85,7 +85,7 @@ async fn main(_s: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
+    esp_rtos::start(timg0.timer0); // TEMPORARY (local esp-hal clone): no `FROM_CPU_INTR0` there
 
     // Create the crypto provider, using the `esp-hal` TRNG/ADC1 as the source of randomness for a reseeding CSPRNG.
     let _trng_source = esp_hal::rng::TrngSource::new(peripherals.RNG, peripherals.ADC1);

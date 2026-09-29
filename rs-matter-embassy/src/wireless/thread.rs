@@ -236,9 +236,10 @@ where
         }
     }
 
-    /// Make the Thread node a Sleepy End Device following the ICD power mode of the given ICD
-    /// Management cluster state - the same `Icd` instance that backs the application's
-    /// `IcdMgmtHandler` on the root endpoint.
+    /// Make the Thread node a Sleepy End Device following the given ICD power mode state
+    /// machine - the same `Icd` instance that backs the application's ICD Management handler on
+    /// the root endpoint: the `SitIcdMgmtHandler` of a SIT-only device, or the `LitIcdMgmtHandler`
+    /// of a LIT-capable one (pass its `LitIcd::icd`).
     ///
     /// The node then keeps its receiver off between data polls and polls its parent at the ICD
     /// polling interval: the fast (`SAI`) one while the ICD is in active mode, the slow (`SII`)
@@ -610,8 +611,18 @@ async fn run_icd(ot: &OpenThread<'_>, icd: Option<&Icd>) -> Result<(), Error> {
         info!("Thread SED: the radio supports timed receive, using CSL instead of data polls");
     }
 
+    // The state machine signals every change of its own state, including the active deadline
+    // moving out on each message received, which leaves the net params as they were. Only a
+    // change of those is worth (re-)programming OpenThread for - and logging.
+    let mut applied: Option<IcdNetParams> = None;
+
     loop {
-        apply_icd_params(ot, &icd.net_params(), csl)?;
+        let params = icd.net_params();
+
+        if applied.as_ref() != Some(&params) {
+            apply_icd_params(ot, &params, csl)?;
+            applied = Some(params);
+        }
 
         icd.wait_net_changed().await;
     }
