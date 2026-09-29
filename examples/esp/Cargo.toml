@@ -57,8 +57,7 @@ opt-level = "s"
 overflow-checks = false
 
 [patch.crates-io]
-#rs-matter = { git = "https://github.com/project-chip/rs-matter" }
-rs-matter = { git = "https://github.com/sysgrok/rs-matter", branch = "p-sub-fix" }
+rs-matter = { git = "https://github.com/project-chip/rs-matter" }
 #rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack" }
 #mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
 #openthread = { git = "https://github.com/esp-rs/openthread" }
