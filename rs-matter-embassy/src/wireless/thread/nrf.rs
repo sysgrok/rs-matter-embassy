@@ -36,6 +36,8 @@ use rs_matter_stack::matter::crypto::{CryptoRng, Rng, TryCryptoRng, TryRng};
 use rs_matter_stack::matter::error::{Error, ErrorCode};
 use rs_matter_stack::rand::RngAdaptor;
 
+use crate::wireless::PreexistingBleDriver;
+
 #[cfg(feature = "_nrf52")]
 use embassy_nrf::interrupt::typelevel::Handler;
 #[cfg(feature = "_nrf52")]
@@ -754,7 +756,9 @@ where
         // See the note in `ThreadDriver::run`: MPSL's low-priority processor must
         // be driven for the radio timeslots to be serviced.
         let mut mpsl_run = pin!(mpsl.run());
-        let mut task = pin!(task.run(radio, controller));
+        // The SoftDevice Controller stays up for the whole run; the stack starts
+        // and stops advertising on it as commissioning windows come and go.
+        let mut task = pin!(task.run(radio, PreexistingBleDriver::new(&controller)));
 
         let Either::Second(res) = select(&mut mpsl_run, &mut task).await;
 
