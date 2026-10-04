@@ -20,8 +20,8 @@ openthread-sys = { git = "https://github.com/sysgrok/openthread", branch = "csl"
 #nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154" }
 nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "csl" }
 nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154", branch = "csl" }
-#esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-#esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
+#esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+#esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
 
 [profile.release]
 opt-level = "z"
