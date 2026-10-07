@@ -118,59 +118,59 @@ jobs:
             triple: riscv32imac-unknown-none-elf
             config: infologs-optz-ltofat
             flags: "--features thread,case-resumption,persistent-subscriptions"
-            reports: "esp_light_eth2:light_eth2 esp_light_thread:light_thread"
+            reports: "esp_light_eth2:light_eth2 esp_light_thread:light_thread esp_light_thread_coex:light_thread_coex esp_trv_battery_thread:trv_battery_thread esp_temp_sensor_battery_thread:temp_sensor_battery_thread"
           - name: esp-thread
             backend: nimble
             dir: examples/esp
             triple: riscv32imac-unknown-none-elf
             config: infologs-optz-ltofat-nimble
             flags: "--no-default-features --features esp32c6,thread,nimble,case-resumption,persistent-subscriptions"
-            reports: "esp_light_eth2:light_eth2 esp_light_thread:light_thread"
+            reports: "esp_light_eth2:light_eth2 esp_light_thread:light_thread esp_light_thread_coex:light_thread_coex esp_trv_battery_thread:trv_battery_thread esp_temp_sensor_battery_thread:temp_sensor_battery_thread"
           - name: esp-wifi
             backend: trouble
             dir: examples/esp
             triple: riscv32imac-unknown-none-elf
             config: infologs-optz-ltofat
             flags: "--features wifi"
-            reports: "esp_light_eth:light_eth esp_light_wifi:light_wifi"
+            reports: "esp_light_eth:light_eth esp_light_wifi:light_wifi esp_light_wifi_persistent:light_wifi_persistent"
           - name: esp-wifi
             backend: nimble
             dir: examples/esp
             triple: riscv32imac-unknown-none-elf
             config: infologs-optz-ltofat-nimble
             flags: "--no-default-features --features esp32c6,wifi,nimble"
-            reports: "esp_light_eth:light_eth esp_light_wifi:light_wifi"
+            reports: "esp_light_eth:light_eth esp_light_wifi:light_wifi esp_light_wifi_persistent:light_wifi_persistent"
           - name: nrf52
             backend: trouble
             dir: examples/nrf
             triple: thumbv7em-none-eabi
             config: defmtlogs-optz-ltofat
             flags: "--features case-resumption"
-            reports: "nrf52_light_eth:light_eth nrf52_light_thread:light_thread"
+            reports: "nrf52_light_eth:light_eth nrf52_light_thread:light_thread nrf52_light_thread_coex:light_thread_coex nrf52_trv_battery_thread:trv_battery_thread"
           - name: nrf52
             backend: nimble
             dir: examples/nrf
             triple: thumbv7em-none-eabi
             config: defmtlogs-optz-ltofat-nimble
             flags: "--no-default-features --features nrf52840,nimble,case-resumption"
-            reports: "nrf52_light_eth:light_eth nrf52_light_thread:light_thread"
-          # Only `light_thread_coex` builds here: the other two examples drive the
-          # `embassy-nrf` IEEE 802.15.4 radio, which is an nRF52-only affair. Not
-          # size-tracked, hence the empty `reports`.
+            reports: "nrf52_light_eth:light_eth nrf52_light_thread:light_thread nrf52_light_thread_coex:light_thread_coex nrf52_trv_battery_thread:trv_battery_thread"
+          # Only `light_thread_coex` and `trv_battery_thread` build here: the other
+          # two examples drive the `embassy-nrf` IEEE 802.15.4 radio, which is an
+          # nRF52-only affair.
           - name: nrf54l
             backend: trouble
             dir: examples/nrf
             triple: thumbv8m.main-none-eabihf
             config: defmtlogs-optz-ltofat
-            flags: "--no-default-features --features nrf54l15,trouble --target thumbv8m.main-none-eabihf"
-            reports: ""
+            flags: "--no-default-features --features nrf54l15,trouble,case-resumption --target thumbv8m.main-none-eabihf"
+            reports: "nrf54l_light_thread_coex:light_thread_coex nrf54l_trv_battery_thread:trv_battery_thread"
           - name: nrf54l
             backend: nimble
             dir: examples/nrf
             triple: thumbv8m.main-none-eabihf
             config: defmtlogs-optz-ltofat-nimble
-            flags: "--no-default-features --features nrf54l15,nimble --target thumbv8m.main-none-eabihf"
-            reports: ""
+            flags: "--no-default-features --features nrf54l15,nimble,case-resumption --target thumbv8m.main-none-eabihf"
+            reports: "nrf54l_light_thread_coex:light_thread_coex nrf54l_trv_battery_thread:trv_battery_thread"
           - name: rp
             backend: trouble
             dir: examples/rp
