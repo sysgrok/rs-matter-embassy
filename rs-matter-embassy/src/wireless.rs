@@ -8,7 +8,9 @@ use crate::stack::network::{Embedding, Network};
 use crate::stack::wireless::{GattTask, WirelessBle};
 use crate::stack::MatterStack;
 
-use crate::ble::{BtpGattContext, BtpGattPeripheral, Controller};
+use crate::ble::{BtpGattContext, BtpGattPeripheral, Controller, ControllerRef};
+use crate::matter::transport::network::btp::{AdvData, Btp};
+use crate::stack::ble::GattPeripheral;
 
 #[cfg(feature = "openthread")]
 pub use thread::*;
@@ -23,7 +25,11 @@ mod thread;
 mod wifi;
 
 #[cfg(feature = "esp")]
+mod esp_ble;
+
+#[cfg(feature = "esp")]
 pub mod esp {
+    pub use super::esp_ble::*;
     #[cfg(feature = "openthread")]
     pub use super::thread::esp_thread::*;
     #[cfg(feature = "embassy-net")]
@@ -196,5 +202,102 @@ where
         let mut peripheral = BtpGattPeripheral::new(controller, self.rand, self.context);
 
         self.task.run(&mut peripheral).await
+    }
+}
+
+/// A `BleDriver` over a pre-existing, already created BLE controller: it lends the controller
+/// (by reference) to every task it runs, so the controller lives for as long as the driver does.
+pub struct PreexistingBleDriver<'a, C>(&'a C);
+
+impl<'a, C> PreexistingBleDriver<'a, C> {
+    /// Create a new instance.
+    pub const fn new(controller: &'a C) -> Self {
+        Self(controller)
+    }
+}
+
+impl<C> BleDriver for PreexistingBleDriver<'_, C>
+where
+    C: Controller,
+{
+    async fn run<T>(&mut self, mut task: T) -> Result<(), Error>
+    where
+        T: BleDriverTask,
+    {
+        task.run(ControllerRef::new(self.0)).await
+    }
+}
+
+/// A `GattPeripheral` that owns a `BleDriver` rather than a BLE controller: the controller is
+/// created by the driver only while the peripheral is being run - i.e., with `rs-matter-stack`,
+/// only while a commissioning window that has to be advertised over BLE is open - and is dropped
+/// (which, for e.g. `esp-radio`, de-initializes the BLE controller) as soon as the run ends.
+///
+/// This is what makes concurrent commissioning viable for a battery-powered (ICD) device: BLE is
+/// up during commissioning only, and the radio is the Thread (or Wifi) one's alone afterwards.
+pub struct BleDriverGattPeripheral<'a, B, R> {
+    ble: B,
+    rand: Option<R>,
+    context: &'a BtpGattContext,
+}
+
+impl<'a, B, R> BleDriverGattPeripheral<'a, B, R> {
+    /// Create a new instance.
+    ///
+    /// # Arguments
+    /// - `ble` - the `BleDriver` creating the BLE controller on demand
+    /// - `rand` - a random number generator, if a random BLE address should be used
+    /// - `context` - the GATT peripheral context
+    pub const fn new(ble: B, rand: Option<R>, context: &'a BtpGattContext) -> Self {
+        Self { ble, rand, context }
+    }
+}
+
+impl<B, R> GattPeripheral for BleDriverGattPeripheral<'_, B, R>
+where
+    B: BleDriver,
+    R: Rng + Copy,
+{
+    async fn run(
+        &mut self,
+        btp: &Btp,
+        service_name: &str,
+        service_adv: &AdvData,
+    ) -> Result<(), Error> {
+        self.ble
+            .run(GattPeripheralRunTask {
+                btp,
+                service_name,
+                service_adv,
+                rand: self.rand,
+                context: self.context,
+            })
+            .await
+    }
+}
+
+/// The `BleDriverTask` behind `BleDriverGattPeripheral`: runs one BTP GATT peripheral on the
+/// controller the driver created.
+struct GattPeripheralRunTask<'a, R> {
+    btp: &'a Btp,
+    service_name: &'a str,
+    service_adv: &'a AdvData,
+    rand: Option<R>,
+    context: &'a BtpGattContext,
+}
+
+impl<R> BleDriverTask for GattPeripheralRunTask<'_, R>
+where
+    R: Rng + Copy,
+{
+    async fn run<C>(&mut self, controller: C) -> Result<(), Error>
+    where
+        C: Controller,
+    {
+        let mut peripheral = BtpGattPeripheral::new(controller, self.rand, self.context);
+
+        peripheral
+            .run(self.btp, self.service_name, self.service_adv)
+            .await
     }
 }

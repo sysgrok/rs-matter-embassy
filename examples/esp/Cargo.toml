@@ -34,6 +34,16 @@ name = "light_thread_coex"
 required-features = ["thread"]
 harness = false
 
+[[bin]]
+name = "trv_battery_thread"
+required-features = ["thread", "case-resumption"]
+harness = false
+
+[[bin]]
+name = "temp_sensor_battery_thread"
+required-features = ["thread", "case-resumption", "persistent-subscriptions"]
+harness = false
+
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization
@@ -47,24 +57,51 @@ opt-level = "s"
 overflow-checks = false
 
 [patch.crates-io]
-#rs-matter = { git = "https://github.com/project-chip/rs-matter" }
+rs-matter = { git = "https://github.com/project-chip/rs-matter" }
 #rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack" }
 #mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
-openthread = { git = "https://github.com/esp-rs/openthread" }
-openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+#openthread = { git = "https://github.com/esp-rs/openthread" }
+#openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+openthread = { git = "https://github.com/sysgrok/openthread", branch = "csl" }
+openthread-sys = { git = "https://github.com/sysgrok/openthread", branch = "csl" }
 #nimble-rs = { git = "https://github.com/sysgrok/nimble-rs" }
 #nimble-rs-sys = { git = "https://github.com/sysgrok/nimble-rs" }
 #nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 #nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154" }
-#esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-#esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-#esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-#esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-#esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-#esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-#esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-#esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
-#esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "0fed45c84c0723ed4e0b7d19c7f3078ed79090c6" }
+
+# esp-hal = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-rtos = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-alloc = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-backtrace = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-println = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-radio = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-radio-rtos-driver = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-storage = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-phy = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-sync = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-rom-sys = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-hal-procmacros = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# esp-riscv-rt = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+# xtensa-lx-rt = { git = "https://github.com/esp-rs/esp-hal", rev = "76a0e71d5ea81fc617383e0fedd72f6b5e8959c7" }
+
+esp-hal = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-rtos = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-alloc = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-backtrace = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-println = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-radio = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-radio-rtos-driver = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-storage = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-bootloader-esp-idf = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-metadata-generated = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-phy = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-sync = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-rom-sys = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-hal-procmacros = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+esp-riscv-rt = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
+xtensa-lx-rt = { git = "https://github.com/ivmarkov/esp-hal", branch = "ieee802154-sleep" }
 
 [features]
 default = ["esp32c6", "trouble"]
@@ -78,6 +115,12 @@ esp32s3 = ["esp-rtos/esp32s3", "esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-
 esp32h2 = ["esp-rtos/esp32h2", "esp-hal/esp32h2", "esp-backtrace/esp32h2", "esp-println/esp32h2", "esp-radio/esp32h2", "esp-storage/esp32h2", "esp-bootloader-esp-idf/esp32h2", "esp-metadata-generated/esp32h2", "portable-atomic/critical-section", "thread"]
 wifi = ["rs-matter-embassy/embassy-net", "rs-matter-embassy/rustcrypto"]
 thread = ["rs-matter-embassy/openthread", "rs-matter-embassy/mbedtls", "rs-matter-embassy/openthread-heap-int-8192"]
+# Resume CASE sessions across reboots and sleeps instead of a full Sigma1/2/3 handshake: saves
+# radio time on every wake-up of a battery device, and the persisted records are small.
+case-resumption = ["rs-matter-embassy/case-resumption"]
+# Persist the subscriptions, so that a device rebooting on every wake-up (a deep-sleeping ICD)
+# resumes reporting without the controller having to subscribe again.
+persistent-subscriptions = ["rs-matter-embassy/persistent-subscriptions"]
 
 [dependencies]
 log = "0.4"
