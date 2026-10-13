@@ -125,19 +125,20 @@ bind_interrupts!(struct Irqs {
 /// halfway through. How quickly the device can be reached is the `SII` in `TEST_BASIC_INFO`
 /// (500 ms).
 ///
-/// `idle_mode_duration_s` has no real role for a SIT device: it is how long a LIT may stay
-/// unreachable before it wakes up on its own and sends its Check-Ins, while a SIT is reachable
-/// within `SII` all along. The state machine still honors it (every idle period ends in a
-/// short active one), so it is simply set to the 15 s a SIT may at most be idle for.
+/// `idle_mode_duration_s` is how long the device stays idle before it goes active on its own; a
+/// SIT stays reachable within its `SII` throughout. Subscriptions to the device get it as their
+/// max interval, their keep-alive reports go out a few seconds before it runs out, and idle mode
+/// ends by then at the latest: with a minute, the device wakes up on its own about once a
+/// minute, keep-alives included.
 const ICD_MODE: IcdModeConfig = IcdModeConfig {
-    idle_mode_duration_s: 15,
+    idle_mode_duration_s: 60,
     active_mode_duration_ms: 1000,
     active_mode_threshold_ms: 1000,
     user_active_mode_trigger_hint: 0,
     user_active_mode_trigger_instruction: "",
 };
 
-const BUMP_SIZE: usize = 21000;
+const BUMP_SIZE: usize = 23000;
 
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();
