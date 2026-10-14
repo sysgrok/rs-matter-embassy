@@ -36,8 +36,6 @@ use rs_matter_stack::matter::crypto::{CryptoRng, Rng, TryCryptoRng, TryRng};
 use rs_matter_stack::matter::error::{Error, ErrorCode};
 use rs_matter_stack::rand::RngAdaptor;
 
-use crate::wireless::PreexistingBleDriver;
-
 #[cfg(feature = "_nrf52")]
 use embassy_nrf::interrupt::typelevel::Handler;
 #[cfg(feature = "_nrf52")]
@@ -461,31 +459,74 @@ impl<'a, 'd> NrfThreadRustRadioRunner<'a, 'd> {
     }
 }
 
+/// The source of the 32.768 kHz low-frequency clock, which MPSL, the BLE controller and the
+/// IEEE 802.15.4 driver time all radio activity with.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum NrfLfClock {
+    /// The internal RC oscillator: available on every board, but MPSL has to recalibrate it
+    /// every few seconds - starting the high-frequency crystal each time - and it is only
+    /// accurate to ±250 ppm, which a Thread CSL receiver (a Synchronized Sleepy End Device)
+    /// has to size its receive windows for.
+    Rc,
+    /// An external 32.768 kHz crystal.
+    Xtal {
+        /// The crystal's accuracy, in ppm (typically 20).
+        accuracy_ppm: u8,
+    },
+}
+
+impl NrfLfClock {
+    /// The clock's accuracy, in ppm.
+    const fn accuracy_ppm(&self) -> u8 {
+        match self {
+            Self::Rc => nrf_mpsl::raw::MPSL_DEFAULT_CLOCK_ACCURACY_PPM as u8,
+            Self::Xtal { accuracy_ppm } => *accuracy_ppm,
+        }
+    }
+
+    /// The MPSL configuration for the clock.
+    fn mpsl_cfg(&self) -> nrf_mpsl::raw::mpsl_clock_lfclk_cfg_t {
+        let (source, rc_ctiv, rc_temp_ctiv) = match self {
+            Self::Rc => (
+                nrf_mpsl::raw::MPSL_CLOCK_LF_SRC_RC as u8,
+                nrf_mpsl::raw::MPSL_RECOMMENDED_RC_CTIV as u8,
+                nrf_mpsl::raw::MPSL_RECOMMENDED_RC_TEMP_CTIV as u8,
+            ),
+            // The calibration intervals must be 0 for anything but the RC oscillator.
+            Self::Xtal { .. } => (nrf_mpsl::raw::MPSL_CLOCK_LF_SRC_XTAL as u8, 0, 0),
+        };
+
+        nrf_mpsl::raw::mpsl_clock_lfclk_cfg_t {
+            source,
+            rc_ctiv,
+            rc_temp_ctiv,
+            accuracy_ppm: self.accuracy_ppm() as u16,
+            skip_wait_lfclk_started: nrf_mpsl::raw::MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED != 0,
+        }
+    }
+}
+
 /// An MPSL driver helper.
 struct MpslDriver<'d> {
     p: NrfMpslPeripherals<'d>,
+    lf_clock: NrfLfClock,
 }
 
 impl<'d> MpslDriver<'d> {
     fn new(p: NrfMpslPeripherals<'d>) -> Self {
-        Self { p }
+        Self {
+            p,
+            lf_clock: NrfLfClock::Rc,
+        }
     }
 
     async fn create_mpsl(&mut self) -> Result<MultiprotocolServiceLayer<'_>, Error> {
         yield_radio_to_mpsl().await;
 
-        let lfclk_cfg = nrf_mpsl::raw::mpsl_clock_lfclk_cfg_t {
-            source: nrf_mpsl::raw::MPSL_CLOCK_LF_SRC_RC as u8,
-            rc_ctiv: nrf_mpsl::raw::MPSL_RECOMMENDED_RC_CTIV as u8,
-            rc_temp_ctiv: nrf_mpsl::raw::MPSL_RECOMMENDED_RC_TEMP_CTIV as u8,
-            accuracy_ppm: nrf_mpsl::raw::MPSL_DEFAULT_CLOCK_ACCURACY_PPM as u16,
-            skip_wait_lfclk_started: nrf_mpsl::raw::MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED != 0,
-        };
-
         MultiprotocolServiceLayer::new::<irqs::MpslLowPrio, _>(
             reborrow_mpsl(&mut self.p),
             NrfBleControllerInterrupts,
-            lfclk_cfg,
+            self.lf_clock.mpsl_cfg(),
         )
         .map_err(to_matter_err)
     }
@@ -520,6 +561,46 @@ impl<'d> SdcDriver<'d> {
     }
 }
 
+/// A `BleDriver` creating the SoftDevice Controller on top of an MPSL instance which is
+/// already up.
+///
+/// The controller only exists while a task runs - with `rs-matter-stack`, while a commissioning
+/// window is advertised over BLE - and dropping it (`sdc_disable`) stops whatever it was still
+/// doing, advertising included: the BLE host has no chance to stop that itself, as its future is
+/// dropped together with the task's.
+struct SdcBleDriver<'a, 'm, 'd, R> {
+    mpsl: &'a MultiprotocolServiceLayer<'m>,
+    sdc: &'a mut SdcDriver<'d>,
+    rand: R,
+}
+
+impl<'a, 'm, 'd, R> SdcBleDriver<'a, 'm, 'd, R> {
+    fn new(mpsl: &'a MultiprotocolServiceLayer<'m>, sdc: &'a mut SdcDriver<'d>, rand: R) -> Self {
+        Self { mpsl, sdc, rand }
+    }
+}
+
+impl<R> super::BleDriver for SdcBleDriver<'_, '_, '_, R>
+where
+    R: CryptoRng + Copy, /*+ Send*/
+{
+    async fn run<T>(&mut self, mut task: T) -> Result<(), Error>
+    where
+        T: super::BleDriverTask,
+    {
+        // TODO: Externalize as resources
+        // Mem is roughly MAC_CONNECTIONS * L2CAP_MTU * L2CAP_TXQ * L2CAP_RXQ
+        let mut sdc_mem = nrf_sdc::Mem::<3084>::new();
+        let mut rand = RngAdaptor::new(SendHack(self.rand));
+
+        let controller = self
+            .sdc
+            .create_controller(self.mpsl, &mut sdc_mem, &mut rand)?;
+
+        task.run(controller).await
+    }
+}
+
 /// An IEEE 802.15.4 driver helper.
 struct IEEE802154Driver<'d> {
     radio: Peri<'d, RADIO>,
@@ -531,16 +612,23 @@ impl<'d> IEEE802154Driver<'d> {
         Self { radio, p }
     }
 
+    /// Create the radio; `csl_accuracy_ppm` is the accuracy of the low-frequency clock, which
+    /// it reports as its CSL clock accuracy.
     fn create_radio<'t>(
         &'t mut self,
         mpsl: &'t MultiprotocolServiceLayer<'_>,
+        csl_accuracy_ppm: u8,
     ) -> Result<nrf_802154::OpenThreadRadio<'t>, Error> {
         Ok(nrf_802154::OpenThreadRadio::new(nrf_802154::Radio::new(
             self.radio.reborrow(),
             reborrow_ieee802154(&mut self.p),
             NrfThreadMpslRadioInterrupts,
             mpsl,
-        )))
+        ))
+        .with_csl_timing(
+            csl_accuracy_ppm,
+            nrf_802154::OpenThreadRadio::DEFAULT_CSL_UNCERTAINTY,
+        ))
     }
 }
 
@@ -593,6 +681,13 @@ impl<'d, R> NrfThreadRustRadioDriver<'d, R> {
             runner,
         )
     }
+
+    /// Clock the radio activity off the given low-frequency clock, rather than the internal RC
+    /// oscillator. A board with a 32.768 kHz crystal should use it: see [`NrfLfClock`].
+    pub fn with_lf_clock(mut self, lf_clock: NrfLfClock) -> Self {
+        self.mpsl.lf_clock = lf_clock;
+        self
+    }
 }
 
 #[cfg(feature = "_nrf52")]
@@ -619,23 +714,18 @@ impl<R> super::BleDriver for NrfThreadRustRadioDriver<'_, R>
 where
     R: CryptoRng + Copy, /*+ Send*/
 {
-    async fn run<T>(&mut self, mut task: T) -> Result<(), Error>
+    async fn run<T>(&mut self, task: T) -> Result<(), Error>
     where
         T: super::BleDriverTask,
     {
         let mpsl = self.mpsl.create_mpsl().await?;
 
-        // TODO: Externalize as resources
-        // Mem is roughly MAC_CONNECTIONS * L2CAP_MTU * L2CAP_TXQ * L2CAP_RXQ
-        let mut sdc_mem = nrf_sdc::Mem::<3084>::new();
-        let mut rand = RngAdaptor::new(SendHack(self.rand));
-
-        let controller = self.sdc.create_controller(&mpsl, &mut sdc_mem, &mut rand)?;
+        let mut ble = SdcBleDriver::new(&mpsl, &mut self.sdc, self.rand);
 
         // See the note in `ThreadDriver::run`: MPSL's low-priority processor must
         // be driven for the radio timeslots to be serviced.
         let mut mpsl_run = pin!(mpsl.run());
-        let mut task = pin!(task.run(controller));
+        let mut task = pin!(ble.run(task));
 
         let Either::Second(res) = select(&mut mpsl_run, &mut task).await;
 
@@ -682,6 +772,13 @@ impl<'d, R> NrfThreadMpslRadioDriver<'d, R> {
             rand,
         }
     }
+
+    /// Clock the radio activity off the given low-frequency clock, rather than the internal RC
+    /// oscillator. A board with a 32.768 kHz crystal should use it: see [`NrfLfClock`].
+    pub fn with_lf_clock(mut self, lf_clock: NrfLfClock) -> Self {
+        self.mpsl.lf_clock = lf_clock;
+        self
+    }
 }
 
 impl<R> super::ThreadDriver for NrfThreadMpslRadioDriver<'_, R> {
@@ -689,9 +786,11 @@ impl<R> super::ThreadDriver for NrfThreadMpslRadioDriver<'_, R> {
     where
         A: super::ThreadDriverTask,
     {
+        let csl_accuracy_ppm = self.mpsl.lf_clock.accuracy_ppm();
+
         let mpsl = self.mpsl.create_mpsl().await?;
 
-        let radio = self.ieee802154.create_radio(&mpsl)?;
+        let radio = self.ieee802154.create_radio(&mpsl, csl_accuracy_ppm)?;
 
         // MPSL's low-priority work processor (`mpsl.run()` -> `mpsl_low_priority_process()`)
         // MUST be driven, or the 802.15.4 timeslot session is never serviced: a
@@ -710,23 +809,18 @@ impl<R> super::BleDriver for NrfThreadMpslRadioDriver<'_, R>
 where
     R: CryptoRng + Copy, /*+ Send*/
 {
-    async fn run<T>(&mut self, mut task: T) -> Result<(), Error>
+    async fn run<T>(&mut self, task: T) -> Result<(), Error>
     where
         T: super::BleDriverTask,
     {
         let mpsl = self.mpsl.create_mpsl().await?;
 
-        // TODO: Externalize as resources
-        // Mem is roughly MAC_CONNECTIONS * L2CAP_MTU * L2CAP_TXQ * L2CAP_RXQ
-        let mut sdc_mem = nrf_sdc::Mem::<3084>::new();
-        let mut rand = RngAdaptor::new(SendHack(self.rand));
-
-        let controller = self.sdc.create_controller(&mpsl, &mut sdc_mem, &mut rand)?;
+        let mut ble = SdcBleDriver::new(&mpsl, &mut self.sdc, self.rand);
 
         // See the note in `ThreadDriver::run`: MPSL's low-priority processor must
         // be driven for the radio timeslots to be serviced.
         let mut mpsl_run = pin!(mpsl.run());
-        let mut task = pin!(task.run(controller));
+        let mut task = pin!(ble.run(task));
 
         let Either::Second(res) = select(&mut mpsl_run, &mut task).await;
 
@@ -742,23 +836,21 @@ where
     where
         A: super::ThreadCoexDriverTask,
     {
+        let csl_accuracy_ppm = self.mpsl.lf_clock.accuracy_ppm();
+
         let mpsl = self.mpsl.create_mpsl().await?;
 
-        // TODO: Externalize as resources
-        // Mem is roughly MAC_CONNECTIONS * L2CAP_MTU * L2CAP_TXQ * L2CAP_RXQ
-        let mut sdc_mem = nrf_sdc::Mem::<3084>::new();
-        let mut rand = RngAdaptor::new(SendHack(self.rand));
+        let radio = self.ieee802154.create_radio(&mpsl, csl_accuracy_ppm)?;
 
-        let controller = self.sdc.create_controller(&mpsl, &mut sdc_mem, &mut rand)?;
-
-        let radio = self.ieee802154.create_radio(&mpsl)?;
+        // Unlike MPSL and the 802.15.4 radio, the SoftDevice Controller does not stay up for
+        // the whole run: the stack runs it for each commissioning window advertised over BLE,
+        // so once the device is commissioned, the radio is Thread's alone.
+        let ble = SdcBleDriver::new(&mpsl, &mut self.sdc, self.rand);
 
         // See the note in `ThreadDriver::run`: MPSL's low-priority processor must
         // be driven for the radio timeslots to be serviced.
         let mut mpsl_run = pin!(mpsl.run());
-        // The SoftDevice Controller stays up for the whole run; the stack starts
-        // and stops advertising on it as commissioning windows come and go.
-        let mut task = pin!(task.run(radio, PreexistingBleDriver::new(&controller)));
+        let mut task = pin!(task.run(radio, ble));
 
         let Either::Second(res) = select(&mut mpsl_run, &mut task).await;
 

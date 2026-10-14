@@ -91,7 +91,7 @@ bind_interrupts!(struct Irqs {
     AAR00_CCM00 => CcmInterruptHandler;
 });
 
-const BUMP_SIZE: usize = 22000;
+const BUMP_SIZE: usize = 23000;
 
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();

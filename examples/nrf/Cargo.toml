@@ -5,15 +5,16 @@ edition = "2021"
 resolver = "2"
 
 # Both examples below drive the `embassy-nrf` IEEE 802.15.4 radio directly, which
-# only exists on the nRF52 family.
+# only exists on the nRF52 family. All but `trv_battery_thread` log over RTT only.
 [[bin]]
 name = "light_thread"
 harness = false
-required-features = ["nrf52840"]
+required-features = ["nrf52840", "log-rtt"]
 
 [[bin]]
 name = "light_thread_coex"
 harness = false
+required-features = ["log-rtt"]
 
 [[bin]]
 name = "trv_battery_thread"
@@ -22,7 +23,7 @@ required-features = ["case-resumption"]
 [[bin]]
 name = "light_eth"
 harness = false
-required-features = ["nrf52840"]
+required-features = ["nrf52840", "log-rtt"]
 
 [profile.dev]
 opt-level = "z"
@@ -52,7 +53,18 @@ nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "csl" }
 nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154", branch = "csl" }
 
 [features]
-default = ["nrf52840", "trouble"]
+default = ["nrf52840", "trouble", "log-rtt"]
+# defmt logs over RTT, i.e. through the debug probe.
+log-rtt = ["rtt-target/defmt"]
+# defmt logs over UART instead (`trv_battery_thread` on the nRF52840 only), for measuring the
+# power draw: RTT needs an attached debugger, which keeps the chip's debug power domain on.
+# TX only, on P1.11 (the XIAO nRF52840's D6), 115200 baud. It replaces `log-rtt`, so build it
+# with `--no-default-features`.
+log-uart = ["dep:critical-section"]
+# The Seeed XIAO nRF52840 board (`trv_battery_thread` only): run the core supply off the chip's
+# DC/DC converter (the XIAO has its inductor), and put its onboard QSPI flash, which the example
+# does not use, into deep power-down instead of leaving its chip select floating.
+xiao = []
 # Resume CASE sessions instead of a full handshake: saves radio time on every wake-up of a
 # battery device (see `trv_battery_thread`).
 case-resumption = ["rs-matter-embassy/case-resumption"]
@@ -72,13 +84,17 @@ embassy-sync = { version = "0.8", features = ["defmt"] }
 defmt = "1"
 embedded-alloc = "0.7"
 rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", default-features = false, features = ["openthread", "defmt", "mbedtls", "openthread-heap-int-8192"] }
+# The CSL receiver (a Synchronized Sleepy End Device): without it OpenThread drops the radio's
+# timed-receive capability, and `trv_battery_thread` polls its parent instead of listening.
+openthread = { version = "0.4", default-features = false, features = ["csl-receiver"] }
 tinyrlibc = { version = "0.5", default-features = false, features = ["alloc", "strstr", "strcmp", "strncmp", "isupper", "memchr", "utoa", "strtoul"] }
 
 cortex-m = "0.7.6"
 cortex-m-rt = "0.7"
 
-rtt-target = { version = "0.6", features = ["defmt"] }
+rtt-target = "0.6"
 panic-rtt-target = "0.2"
 
 static_cell = "2"
 portable-atomic = { version = "1.5", features = ["critical-section"] }
+critical-section = { version = "1", optional = true }
