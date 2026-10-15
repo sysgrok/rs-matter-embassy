@@ -549,6 +549,13 @@ fn configure_sed(ot: &OpenThread<'_>, icd: &Icd) -> Result<(), Error> {
     apply_icd_params(ot, &params, false)
 }
 
+/// How often a CSL child polls its parent, only to stay synchronized with it.
+///
+/// A poll costs a short transmission and an ACK; going without one costs a sample window that
+/// grows with the drift of both clocks - by tens of microseconds per second without a sync, in
+/// every window.
+const CSL_SYNC_POLL_PERIOD_MS: u32 = 10_000;
+
 /// Apply the current ICD polling interval to OpenThread: as the CSL period if the radio can
 /// do CSL (`csl`), else as the data-poll period.
 ///
@@ -577,8 +584,14 @@ fn apply_icd_params(ot: &OpenThread<'_>, params: &IcdNetParams, csl: bool) -> Re
         ot.set_csl_period(period_us.max(CSL_UNIT_US))
             .map_err(to_matter_err)?;
 
-        // With CSL on, OpenThread's automatic poll period is the CSL keep-alive.
-        ot.set_poll_period(0).map_err(to_matter_err)?;
+        // With CSL on, the parent reaches the child in its sample windows, so receiving needs
+        // no data polls. Polling every now and then still pays off: each poll carries the CSL
+        // IE and is answered with an enhanced ACK, which re-synchronizes the child with the
+        // parent - and OpenThread widens every sample window by the clock drift accumulated
+        // since the last synchronization, so that without it an idle child keeps the receiver
+        // on for longer and longer.
+        ot.set_poll_period(CSL_SYNC_POLL_PERIOD_MS)
+            .map_err(to_matter_err)?;
     } else {
         ot.set_poll_period(params.poll_interval_ms)
             .map_err(to_matter_err)?;
