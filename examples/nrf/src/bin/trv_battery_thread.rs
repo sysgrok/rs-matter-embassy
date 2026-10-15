@@ -6,14 +6,18 @@
 //! for a SIT device: **reachable within a second, on a battery**. Two things make that
 //! possible here:
 //!
-//! - **The radio listens instead of polling.** `nrf-802154` supports timed receive, so the
-//!   Thread driver maps the ICD intervals onto a CSL (Coordinated Sampled Listening) period:
-//!   the node announces a listening schedule and its Thread 1.2+ parent transmits into the
-//!   sub-millisecond receive windows, no data-poll transmission needed. A data poll is a
-//!   transmission plus an ACK wait, milliseconds of radio time; a CSL sample is a few hundred
-//!   microseconds of receive. That is what makes a 1 s idle interval affordable on a battery,
-//!   so the device can stay reachable within a second *all the time*.
-//!   Against a Thread 1.1 parent OpenThread falls back to polling on its own.
+//! - **The radio listens rather than polls** (the `csl` feature, on by default).
+//!   `nrf-802154` supports timed receive, so the Thread driver maps the ICD intervals onto a
+//!   CSL (Coordinated Sampled Listening) period: the node announces a listening schedule and
+//!   its Thread 1.2+ parent transmits into its short receive windows; the node itself only
+//!   transmits now and then, to stay synchronized. Without `csl` the node polls its parent at
+//!   the same intervals instead: a data request and its ACK each time.
+//!   At a one-second interval and 0 dBm the two cost about the same - a poll's short
+//!   transmission against a receive window that OpenThread widens with the clock drift since
+//!   the last synchronization, and both wake the CPU and the radio's crystal alike. CSL pulls
+//!   ahead with a higher transmit power, a shorter interval or a busy network (polls are traffic
+//!   on the air for every sleepy node); polling does not depend on the parent's CSL support at
+//!   all. Against a Thread 1.1 parent OpenThread falls back to polling on its own.
 //! - **The MCU really sleeps.** `embassy-executor` parks the core with `WFE` whenever nothing
 //!   is runnable, and on the nRF that is System ON idle with the RAM retained, a few µA. With
 //!   the radio off between samples nothing else keeps the chip awake, so the device idles at
@@ -400,11 +404,12 @@ async fn main(_s: Spawner) {
 /// Basic info about our device.
 ///
 /// The `SAI` / `SII` (session active / idle intervals) are what the device advertises to
-/// controllers *and* the CSL periods of the Thread node: it listens every 300 ms while the
-/// ICD is active and every second while idle. The idle interval is what a controller waits
-/// for, so it is the reaction time of the valve; with CSL a one-second one is affordable,
-/// where polling pushes towards the 15 s that a SIT may use at most. The controllers also
-/// derive their retransmission timing from these, so they must be what the radio really does.
+/// controllers *and* the CSL periods (or poll periods, without `csl`) of the Thread node: it
+/// listens every 300 ms while the ICD is active and every second while idle. The idle interval
+/// is what a controller waits for, so it is the reaction time of the valve - and the main knob
+/// for the battery, as the radio work once per interval is the bulk of the idle current. The
+/// controllers also derive their retransmission timing from these, so they must be what the
+/// radio really does.
 const TEST_BASIC_INFO: BasicInfoConfig = BasicInfoConfig {
     sai: Some(300),
     sii: Some(1000),

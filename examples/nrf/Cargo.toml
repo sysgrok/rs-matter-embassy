@@ -60,7 +60,7 @@ nrf-802154 = { path = "../../../nrf-802154/nrf-802154" }
 nrf-802154-sys = { path = "../../../nrf-802154/nrf-802154-sys" }
 
 [features]
-default = ["nrf52840", "trouble", "log-rtt"]
+default = ["nrf52840", "trouble", "log-rtt", "csl"]
 # defmt logs over RTT, i.e. through the debug probe.
 log-rtt = ["rtt-target/defmt"]
 # defmt logs over UART instead (`trv_battery_thread` on the nRF52840 only), for measuring the
@@ -72,6 +72,11 @@ log-uart = ["dep:critical-section"]
 # DC/DC converter (the XIAO has its inductor), and put its onboard QSPI flash, which the example
 # does not use, into deep power-down instead of leaving its chip select floating.
 xiao = []
+# A sleepy Thread node (`trv_battery_thread`) listens for its parent with CSL (a Synchronized
+# Sleepy End Device) rather than polling it: see that example for the trade-off. Without it
+# OpenThread drops the radio's timed-receive capability, and the node polls its parent at the same
+# intervals instead.
+csl = ["openthread/csl-receiver"]
 # Resume CASE sessions instead of a full handshake: saves radio time on every wake-up of a
 # battery device (see `trv_battery_thread`).
 case-resumption = ["rs-matter-embassy/case-resumption"]
@@ -91,9 +96,8 @@ embassy-sync = { version = "0.8", features = ["defmt"] }
 defmt = "1"
 embedded-alloc = "0.7"
 rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", default-features = false, features = ["openthread", "defmt", "mbedtls", "openthread-heap-int-8192"] }
-# The CSL receiver (a Synchronized Sleepy End Device): without it OpenThread drops the radio's
-# timed-receive capability, and `trv_battery_thread` polls its parent instead of listening.
-openthread = { version = "0.4", default-features = false, features = ["csl-receiver"] }
+# Only for its `csl-receiver` feature (see `csl`).
+openthread = { version = "0.4", default-features = false }
 tinyrlibc = { version = "0.5", default-features = false, features = ["alloc", "strstr", "strcmp", "strncmp", "isupper", "memchr", "utoa", "strtoul"] }
 
 cortex-m = "0.7.6"
