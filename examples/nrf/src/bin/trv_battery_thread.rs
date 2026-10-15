@@ -143,10 +143,13 @@ bind_interrupts!(struct Irqs {
 /// `idle_mode_duration_s` is how long the device stays idle before it goes active on its own; a
 /// SIT stays reachable within its `SII` throughout. Subscriptions to the device get it as their
 /// max interval, their keep-alive reports go out a few seconds before it runs out, and idle mode
-/// ends by then at the latest: with a minute, the device wakes up on its own about once a
-/// minute, keep-alives included.
+/// ends by then at the latest: with three minutes, the device wakes up on its own about every
+/// three minutes, keep-alives included. Each such wake-up is a short exchange with the subscriber
+/// that costs about as much as a quarter of a minute of idling. A longer idle mode saves less and
+/// less, while a subscriber also takes about that long to notice a device gone silent (e.g. with
+/// a flat battery) and to show it as offline.
 const ICD_MODE: IcdModeConfig = IcdModeConfig {
-    idle_mode_duration_s: 60,
+    idle_mode_duration_s: 180,
     active_mode_duration_ms: 1000,
     active_mode_threshold_ms: 1000,
     user_active_mode_trigger_hint: 0,
