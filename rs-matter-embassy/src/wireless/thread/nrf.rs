@@ -510,6 +510,7 @@ impl NrfLfClock {
 struct MpslDriver<'d> {
     p: NrfMpslPeripherals<'d>,
     lf_clock: NrfLfClock,
+    radio_activity_hook: Option<(fn(bool), u16)>,
 }
 
 impl<'d> MpslDriver<'d> {
@@ -517,18 +518,69 @@ impl<'d> MpslDriver<'d> {
         Self {
             p,
             lf_clock: NrfLfClock::Rc,
+            radio_activity_hook: None,
         }
     }
 
     async fn create_mpsl(&mut self) -> Result<MultiprotocolServiceLayer<'_>, Error> {
         yield_radio_to_mpsl().await;
 
-        MultiprotocolServiceLayer::new::<irqs::MpslLowPrio, _>(
+        let mpsl = MultiprotocolServiceLayer::new::<irqs::MpslLowPrio, _>(
             reborrow_mpsl(&mut self.p),
             NrfBleControllerInterrupts,
             self.lf_clock.mpsl_cfg(),
         )
-        .map_err(to_matter_err)
+        .map_err(to_matter_err)?;
+
+        // MPSL takes the radio notification only before any protocol (BLE, IEEE 802.15.4) is
+        // enabled on top of it.
+        if let Some((hook, lead_us)) = self.radio_activity_hook {
+            radio_activity::set_hook(hook, lead_us);
+        }
+
+        Ok(mpsl)
+    }
+}
+
+/// A hook MPSL calls around each radio activity, through its radio notification.
+mod radio_activity {
+    use core::sync::atomic::{AtomicPtr, Ordering};
+
+    // From `mpsl_radio_notification.h`, which `nrf-mpsl-sys` does not generate bindings for.
+    const TYPE_INT_ON_BOTH: u8 = 3;
+    const SOURCE_ACTIVE: u8 = 0;
+
+    extern "C" {
+        fn mpsl_radio_notification_cfg_set(
+            type_: u8,
+            distance_us: u16,
+            cb: Option<unsafe extern "C" fn(source: u8)>,
+        ) -> i32;
+    }
+
+    /// The hook, as a `fn(bool)`.
+    static HOOK: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
+
+    unsafe extern "C" fn notified(source: u8) {
+        let hook = HOOK.load(Ordering::Relaxed);
+
+        if !hook.is_null() {
+            // Safety: only ever stored from a `fn(bool)` (`set_hook`).
+            let hook = unsafe { core::mem::transmute::<*mut (), fn(bool)>(hook) };
+
+            hook(source == SOURCE_ACTIVE);
+        }
+    }
+
+    /// Have MPSL call `hook(true)` `lead_us` before each radio activity and `hook(false)` after it.
+    pub fn set_hook(hook: fn(bool), lead_us: u16) {
+        HOOK.store(hook as *mut (), Ordering::Relaxed);
+
+        let ret =
+            unsafe { mpsl_radio_notification_cfg_set(TYPE_INT_ON_BOTH, lead_us, Some(notified)) };
+        if ret != 0 {
+            warn!("Radio activity hook not set: MPSL error {}", ret);
+        }
     }
 }
 
@@ -688,6 +740,18 @@ impl<'d, R> NrfThreadRustRadioDriver<'d, R> {
         self.mpsl.lf_clock = lf_clock;
         self
     }
+
+    /// Call `hook(true)` `lead_us` microseconds before each radio activity - BLE or IEEE 802.15.4
+    /// alike - and `hook(false)` after it, through MPSL's radio notification: for an RF switch or
+    /// a front-end module on the board that has to be powered for the radio to reach anything,
+    /// but whose control pin MPSL cannot drive in hardware. `lead_us` is between 200 (50 on
+    /// nRF54L) and 5500.
+    ///
+    /// The hook runs in MPSL's interrupt context: it has to be short, and must not block.
+    pub fn with_radio_activity_hook(mut self, hook: fn(bool), lead_us: u16) -> Self {
+        self.mpsl.radio_activity_hook = Some((hook, lead_us));
+        self
+    }
 }
 
 #[cfg(feature = "_nrf52")]
@@ -777,6 +841,18 @@ impl<'d, R> NrfThreadMpslRadioDriver<'d, R> {
     /// oscillator. A board with a 32.768 kHz crystal should use it: see [`NrfLfClock`].
     pub fn with_lf_clock(mut self, lf_clock: NrfLfClock) -> Self {
         self.mpsl.lf_clock = lf_clock;
+        self
+    }
+
+    /// Call `hook(true)` `lead_us` microseconds before each radio activity - BLE or IEEE 802.15.4
+    /// alike - and `hook(false)` after it, through MPSL's radio notification: for an RF switch or
+    /// a front-end module on the board that has to be powered for the radio to reach anything,
+    /// but whose control pin MPSL cannot drive in hardware. `lead_us` is between 200 (50 on
+    /// nRF54L) and 5500.
+    ///
+    /// The hook runs in MPSL's interrupt context: it has to be short, and must not block.
+    pub fn with_radio_activity_hook(mut self, hook: fn(bool), lead_us: u16) -> Self {
+        self.mpsl.radio_activity_hook = Some((hook, lead_us));
         self
     }
 }

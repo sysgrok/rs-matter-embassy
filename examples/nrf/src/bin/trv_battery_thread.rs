@@ -31,7 +31,7 @@
 //!
 //! To measure the power draw, the debug probe has to be detached and the chip power-cycled:
 //! an attached debugger keeps the chip's debug power domain on. Build with the `log-uart`
-//! feature to still get the logs, and with `xiao` on a Seeed XIAO nRF52840 (see `Cargo.toml`).
+//! feature to still get the logs, and with `xiao` on a Seeed XIAO board (see `Cargo.toml`).
 #![no_std]
 #![no_main]
 #![recursion_limit = "256"]
@@ -72,7 +72,7 @@ use rs_matter_embassy::matter::{clusters, devices, with, BasicCommData};
 use rs_matter_embassy::stack::rand::reseeding_csprng;
 #[cfg(feature = "nrf54l15")]
 use rs_matter_embassy::wireless::nrf::CcmInterruptHandler;
-#[cfg(feature = "nrf52840")]
+#[cfg(any(feature = "nrf52840", feature = "xiao"))]
 use rs_matter_embassy::wireless::nrf::NrfLfClock;
 use rs_matter_embassy::wireless::nrf::{
     EguInterruptHandler, LpTimerInterruptHandler, NrfIeee802154Peripherals, NrfMpslPeripherals,
@@ -114,9 +114,6 @@ compile_error!("`log-uart` replaces `log-rtt`: build it with `--no-default-featu
 
 #[cfg(not(any(feature = "log-rtt", feature = "log-uart")))]
 compile_error!("Logging needs either the `log-rtt` or the `log-uart` feature");
-
-#[cfg(all(any(feature = "log-uart", feature = "xiao"), not(feature = "nrf52840")))]
-compile_error!("The `log-uart` and `xiao` features are for the (XIAO) nRF52840");
 
 #[cfg(feature = "nrf54l15")]
 bind_interrupts!(struct Irqs {
@@ -198,11 +195,17 @@ async fn main(_s: Spawner) {
 
     let p = init();
 
-    #[cfg(feature = "log-uart")]
+    #[cfg(all(feature = "log-uart", feature = "nrf52840"))]
     _s.spawn(unwrap!(log_uart::run(p.UARTE0, p.P1_11)));
+    #[cfg(all(feature = "log-uart", feature = "nrf54l15"))]
+    _s.spawn(unwrap!(log_uart::run(p.SERIAL20, p.P1_11)));
 
-    #[cfg(feature = "xiao")]
+    #[cfg(all(feature = "xiao", feature = "nrf52840"))]
     xiao::flash_deep_power_down(p.P0_25, p.P0_21, p.P0_20, p.P0_22, p.P0_23);
+    #[cfg(all(feature = "xiao", feature = "nrf54l15"))]
+    xiao::rf_switch_onboard_antenna(p.P2_03, p.P2_05);
+    #[cfg(all(feature = "xiao", feature = "nrf54l15"))]
+    xiao::crystal_load_capacitors();
 
     // The nRF54L has no standalone `RNG` peripheral; its entropy comes out of the CRACEN crypto engine instead.
     #[cfg(feature = "nrf52840")]
@@ -315,11 +318,17 @@ async fn main(_s: Spawner) {
         Irqs,
     );
 
-    // The XIAO nRF52840 (like the nRF52840 DK) has a 32.768 kHz crystal: the CSL receive
-    // windows are sized by the low-frequency clock's accuracy, and the RC oscillator's ±250 ppm
-    // would widen them (and wake the device for its recalibrations on top).
-    #[cfg(feature = "nrf52840")]
+    // The XIAO nRF52840 (like the nRF52840 DK) and the XIAO nRF54L15 have a 32.768 kHz crystal:
+    // the CSL receive windows are sized by the low-frequency clock's accuracy, and the RC
+    // oscillator's ±250 ppm would widen them (and wake the device for its recalibrations on
+    // top). The nRF54L15 loads the crystal with its internal capacitors, which only the `xiao`
+    // feature sets up for the board.
+    #[cfg(any(feature = "nrf52840", feature = "xiao"))]
     let thread_driver = thread_driver.with_lf_clock(NrfLfClock::Xtal { accuracy_ppm: 20 });
+
+    // The XIAO nRF54L15's RF switch draws ~90 µA when powered: power it only for the radio.
+    #[cfg(all(feature = "xiao", feature = "nrf54l15"))]
+    let thread_driver = thread_driver.with_radio_activity_hook(xiao::rf_switch_power, 200);
 
     // The radiator valve: a heating-only Thermostat. The handler owns and persists the
     // setpoints and the mode; the logic below is the (simulated) valve itself.
@@ -547,7 +556,7 @@ fn init() -> embassy_nrf::Peripherals {
 
     // The XIAO nRF52840 has the inductor of the chip's DC/DC converter: run the core supply off
     // it rather than the LDO, which roughly halves the current of the radio and the CPU.
-    #[cfg(feature = "xiao")]
+    #[cfg(all(feature = "xiao", feature = "nrf52840"))]
     {
         config.dcdc.reg1 = true;
     }
@@ -594,16 +603,24 @@ fn scrub_grtc() {
 
 /// defmt logging over UART rather than RTT.
 ///
-/// The logger only queues the encoded frames; `run` sends them out of UARTE0 (TX only, P1.11,
+/// The logger only queues the encoded frames; `run` sends them out of a UARTE (TX only, P1.11,
 /// 115200 baud), and switches the UARTE off as soon as the queue is empty, so that logging
-/// costs nothing while the device sleeps. On the host:
+/// costs nothing while the device sleeps: UARTE0 on the nRF52840 (the XIAO nRF52840's D6),
+/// UARTE20 on the nRF54L15 (the XIAO nRF54L15's D5).
+///
+/// Not on the XIAO nRF54L15's P1.09, which its onboard probe bridges to USB: measuring the
+/// power draw means running without USB, and then the unpowered probe gets fed through that
+/// pin's input protection and keeps BLE connections from coming up. On the host:
 /// `stty -F <port> 115200 raw -echo && defmt-print -e <elf> < <port>`.
 #[cfg(feature = "log-uart")]
 mod log_uart {
     use core::ptr::{addr_of, addr_of_mut};
     use core::sync::atomic::{AtomicBool, Ordering};
 
-    use embassy_nrf::peripherals::{P1_11, UARTE0};
+    #[cfg(feature = "nrf54l15")]
+    use embassy_nrf::peripherals::{P1_11 as TXD, SERIAL20 as UARTE};
+    #[cfg(feature = "nrf52840")]
+    use embassy_nrf::peripherals::{P1_11 as TXD, UARTE0 as UARTE};
     use embassy_nrf::uarte::{self, UarteTx};
     use embassy_nrf::{bind_interrupts, Peri};
 
@@ -611,7 +628,10 @@ mod log_uart {
     use embassy_sync::pipe::Pipe;
 
     bind_interrupts!(struct Irqs {
-        UARTE0 => uarte::InterruptHandler<UARTE0>;
+        #[cfg(feature = "nrf52840")]
+        UARTE0 => uarte::InterruptHandler<UARTE>;
+        #[cfg(feature = "nrf54l15")]
+        SERIAL20 => uarte::InterruptHandler<UARTE>;
     });
 
     /// The longest frame the logger queues; a longer one is dropped whole.
@@ -627,7 +647,7 @@ mod log_uart {
 
     /// Send the queued frames out of the UART, for as long as the program runs.
     #[embassy_executor::task]
-    pub async fn run(mut uarte: Peri<'static, UARTE0>, mut txd: Peri<'static, P1_11>) {
+    pub async fn run(mut uarte: Peri<'static, UARTE>, mut txd: Peri<'static, TXD>) {
         // EasyDMA only reads RAM, so the frames go out through this buffer.
         let mut chunk = [0; 64];
 
@@ -749,19 +769,101 @@ mod log_uart {
     }
 }
 
-/// The Seeed XIAO nRF52840 board.
+/// The Seeed XIAO nRF52840 and XIAO nRF54L15 boards.
 #[cfg(feature = "xiao")]
 mod xiao {
     use embassy_nrf::gpio::{Level, Output, OutputDrive};
+    #[cfg(feature = "nrf52840")]
     use embassy_nrf::peripherals::{P0_20, P0_21, P0_22, P0_23, P0_25};
+    #[cfg(feature = "nrf54l15")]
+    use embassy_nrf::peripherals::{P2_03, P2_05};
     use embassy_nrf::Peri;
 
-    /// Put the onboard 2 MB QSPI NOR flash, which this example does not use, into deep
-    /// power-down.
+    /// Connect the radio to the XIAO nRF54L15's onboard ceramic antenna.
+    ///
+    /// The board routes the 2.4 GHz path through an RF switch, powered from P2.03, which picks
+    /// the antenna with P2.05 (low: the onboard one, high: the U.FL connector). Unpowered, the
+    /// switch disconnects both: frames from a node close by still get through, but next to
+    /// nothing reaches a parent a few meters away. Powered, it draws ~90 µA by itself, so it is
+    /// left off here, and powered only around each radio activity ([`rf_switch_power`]).
+    #[cfg(feature = "nrf54l15")]
+    pub fn rf_switch_onboard_antenna(power: Peri<'static, P2_03>, select: Peri<'static, P2_05>) {
+        Output::new(power, Level::Low, OutputDrive::Standard).persist();
+        Output::new(select, Level::Low, OutputDrive::Standard).persist();
+    }
+
+    /// Power the RF switch, or not: the hook MPSL calls around each radio activity. It runs in
+    /// MPSL's interrupt context, so it writes the GPIO registers directly.
+    #[cfg(feature = "nrf54l15")]
+    pub fn rf_switch_power(on: bool) {
+        use embassy_nrf::pac;
+
+        if on {
+            pac::P2
+                .outset()
+                .write_value(pac::gpio::regs::Outset(1 << 3));
+        } else {
+            pac::P2
+                .outclr()
+                .write_value(pac::gpio::regs::Outclr(1 << 3));
+        }
+    }
+
+    /// Load the XIAO nRF54L15's crystals - the 32 MHz one and the 32.768 kHz one, both for
+    /// 16 pF - with the chip's internal capacitors, before either is started.
+    ///
+    /// Left at their reset value, both crystals run off their nominal frequency: the 32 MHz one
+    /// clocks the radio's carrier, the 32.768 kHz one CSL's timing. The register values follow
+    /// from the chip's own calibration (FICR), as in Nordic's start-up code.
+    #[cfg(feature = "nrf54l15")]
+    pub fn crystal_load_capacitors() {
+        use embassy_nrf::pac;
+
+        const LOAD_CAPACITANCE_FF: i64 = 16_000;
+
+        // The FICR trims' slope is a 9-bit two's complement value.
+        let slope = |slope: u16| (slope as i64 ^ 0x100) - 0x100;
+        let div_round = |n: i64, d: i64| (n + d / 2) / d;
+
+        let trim = pac::FICR.xosc32ktrim().read();
+        let lfxo = div_round(
+            (2 * LOAD_CAPACITANCE_FF - 12_000) * (slope(trim.slope()) + 392)
+                + ((trim.offset() as i64) << 3) * 1000,
+            512_000,
+        );
+
+        let trim = pac::FICR.xosc32mtrim().read();
+        let hfxo = div_round(
+            ((LOAD_CAPACITANCE_FF - 5_500) * (slope(trim.slope()) + 791)
+                + ((trim.offset() as i64) << 2) * 1000)
+                >> 8,
+            1000,
+        );
+
+        defmt::info!(
+            "Crystal load capacitors: 32 MHz INTCAP {}, 32.768 kHz INTCAP {}",
+            hfxo,
+            lfxo
+        );
+
+        pac::OSCILLATORS
+            .xosc32ki()
+            .intcap()
+            .write(|w| w.set_val(lfxo as u8));
+        pac::OSCILLATORS
+            .xosc32m()
+            .config()
+            .intcap()
+            .write(|w| w.set_val(hfxo as u8));
+    }
+
+    /// Put the XIAO nRF52840's onboard 2 MB QSPI NOR flash, which this example does not use,
+    /// into deep power-down.
     ///
     /// Left alone, its pins stay disconnected on the nRF side and its chip select floats, which
     /// can keep the flash (partly) selected and its input buffers conducting. The command
     /// (0xB9) is bit-banged in SPI mode 0, and the flash's inputs then stay driven.
+    #[cfg(feature = "nrf52840")]
     pub fn flash_deep_power_down(
         csn: Peri<'static, P0_25>,
         sck: Peri<'static, P0_21>,

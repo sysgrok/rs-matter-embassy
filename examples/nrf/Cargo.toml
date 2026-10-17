@@ -60,14 +60,18 @@ nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154", branch = "csl"
 default = ["nrf52840", "trouble", "log-rtt", "csl"]
 # defmt logs over RTT, i.e. through the debug probe.
 log-rtt = ["rtt-target/defmt"]
-# defmt logs over UART instead (`trv_battery_thread` on the nRF52840 only), for measuring the
-# power draw: RTT needs an attached debugger, which keeps the chip's debug power domain on.
-# TX only, on P1.11 (the XIAO nRF52840's D6), 115200 baud. It replaces `log-rtt`, so build it
-# with `--no-default-features`.
+# defmt logs over UART instead (`trv_battery_thread` only), for measuring the power draw: RTT
+# needs an attached debugger, which keeps the chip's debug power domain on. TX only, on P1.11
+# (the XIAO nRF52840's D6, the XIAO nRF54L15's D5), 115200 baud. It replaces `log-rtt`, so build
+# it with `--no-default-features`.
 log-uart = ["dep:critical-section"]
-# The Seeed XIAO nRF52840 board (`trv_battery_thread` only): run the core supply off the chip's
-# DC/DC converter (the XIAO has its inductor), and put its onboard QSPI flash, which the example
-# does not use, into deep power-down instead of leaving its chip select floating.
+# A Seeed XIAO board (`trv_battery_thread` only). XIAO nRF52840: run the core supply off the
+# chip's DC/DC converter (the XIAO has its inductor), and put its onboard QSPI flash, which the
+# example does not use, into deep power-down instead of leaving its chip select floating. XIAO
+# nRF54L15: connect the onboard antenna and power its RF switch - without which the radio hardly
+# reaches anything - around each radio activity only (powered, it draws ~90 µA), and load its two
+# crystals with the chip's internal capacitors, so that the 32.768 kHz one can clock the radio
+# activity rather than the RC oscillator.
 xiao = []
 # A sleepy Thread node (`trv_battery_thread`) listens for its parent with CSL (a Synchronized
 # Sleepy End Device) rather than polling it: see that example for the trade-off. Without it
