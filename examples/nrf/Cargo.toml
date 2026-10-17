@@ -5,20 +5,25 @@ edition = "2021"
 resolver = "2"
 
 # Both examples below drive the `embassy-nrf` IEEE 802.15.4 radio directly, which
-# only exists on the nRF52 family.
+# only exists on the nRF52 family. All but `trv_battery_thread` log over RTT only.
 [[bin]]
 name = "light_thread"
 harness = false
-required-features = ["nrf52840"]
+required-features = ["nrf52840", "log-rtt"]
 
 [[bin]]
 name = "light_thread_coex"
 harness = false
+required-features = ["log-rtt"]
+
+[[bin]]
+name = "trv_battery_thread"
+required-features = ["case-resumption"]
 
 [[bin]]
 name = "light_eth"
 harness = false
-required-features = ["nrf52840"]
+required-features = ["nrf52840", "log-rtt"]
 
 [profile.dev]
 opt-level = "z"
@@ -33,18 +38,49 @@ incremental = false
 overflow-checks = false
 
 [patch.crates-io]
-#rs-matter = { git = "https://github.com/project-chip/rs-matter" }
+rs-matter = { git = "https://github.com/project-chip/rs-matter" }
 #rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack" }
+rs-matter-stack = { git = "https://github.com/sysgrok/rs-matter-stack", branch = "csl" }
 #mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
-openthread = { git = "https://github.com/esp-rs/openthread" }
-openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+#openthread = { git = "https://github.com/esp-rs/openthread" }
+#openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+openthread = { git = "https://github.com/sysgrok/openthread", branch = "csl" }
+openthread-sys = { git = "https://github.com/sysgrok/openthread", branch = "csl" }
 #nimble-rs = { git = "https://github.com/sysgrok/nimble-rs" }
 #nimble-rs-sys = { git = "https://github.com/sysgrok/nimble-rs" }
 #nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 #nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154" }
+nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154", branch = "csl" }
+nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154", branch = "csl" }
+# TEMP: local checkout carrying the uncommitted HP timer fix
+#nrf-802154 = { path = "../../../nrf-802154/nrf-802154" }
+#nrf-802154-sys = { path = "../../../nrf-802154/nrf-802154-sys" }
 
 [features]
-default = ["nrf52840", "trouble"]
+default = ["nrf52840", "trouble", "log-rtt", "csl"]
+# defmt logs over RTT, i.e. through the debug probe.
+log-rtt = ["rtt-target/defmt"]
+# defmt logs over UART instead (`trv_battery_thread` only), for measuring the power draw: RTT
+# needs an attached debugger, which keeps the chip's debug power domain on. TX only, on P1.11
+# (the XIAO nRF52840's D6, the XIAO nRF54L15's D5), 115200 baud. It replaces `log-rtt`, so build
+# it with `--no-default-features`.
+log-uart = ["dep:critical-section"]
+# A Seeed XIAO board (`trv_battery_thread` only). XIAO nRF52840: run the core supply off the
+# chip's DC/DC converter (the XIAO has its inductor), and put its onboard QSPI flash, which the
+# example does not use, into deep power-down instead of leaving its chip select floating. XIAO
+# nRF54L15: connect the onboard antenna and power its RF switch - without which the radio hardly
+# reaches anything - around each radio activity only (powered, it draws ~90 µA), and load its two
+# crystals with the chip's internal capacitors, so that the 32.768 kHz one can clock the radio
+# activity rather than the RC oscillator.
+xiao = []
+# A sleepy Thread node (`trv_battery_thread`) listens for its parent with CSL (a Synchronized
+# Sleepy End Device) rather than polling it: see that example for the trade-off. Without it
+# OpenThread drops the radio's timed-receive capability, and the node polls its parent at the same
+# intervals instead.
+csl = ["openthread/csl-receiver"]
+# Resume CASE sessions instead of a full handshake: saves radio time on every wake-up of a
+# battery device (see `trv_battery_thread`).
+case-resumption = ["rs-matter-embassy/case-resumption"]
 trouble = ["rs-matter-embassy/trouble"]
 nimble = ["rs-matter-embassy/nimble"]
 nrf52840 = ["rs-matter-embassy/nrf52840", "embassy-nrf/nrf52840", "embassy-nrf/time-driver-rtc1"]
@@ -61,13 +97,16 @@ embassy-sync = { version = "0.8", features = ["defmt"] }
 defmt = "1"
 embedded-alloc = "0.7"
 rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", default-features = false, features = ["openthread", "defmt", "mbedtls", "openthread-heap-int-8192"] }
+# Only for its `csl-receiver` feature (see `csl`).
+openthread = { version = "0.4", default-features = false }
 tinyrlibc = { version = "0.5", default-features = false, features = ["alloc", "strstr", "strcmp", "strncmp", "isupper", "memchr", "utoa", "strtoul"] }
 
 cortex-m = "0.7.6"
 cortex-m-rt = "0.7"
 
-rtt-target = { version = "0.6", features = ["defmt"] }
+rtt-target = "0.6"
 panic-rtt-target = "0.2"
 
 static_cell = "2"
 portable-atomic = { version = "1.5", features = ["critical-section"] }
+critical-section = { version = "1", optional = true }

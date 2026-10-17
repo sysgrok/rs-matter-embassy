@@ -1,12 +1,8 @@
-use bt_hci::controller::ExternalController;
-
-use esp_radio::ble::controller::BleConnector;
-
 use openthread::esp::EspRadio;
 
 use rs_matter_stack::matter::error::Error;
 
-use crate::wireless::SLOTS;
+use crate::wireless::esp::EspBleDriver;
 
 /// A `ThreadRadio` implementation for the ESP32 family of chips.
 pub struct EspThreadDriver<'d> {
@@ -39,6 +35,25 @@ impl<'d> EspThreadDriver<'d> {
         self.rx_queue_size = Some(rx_queue_size);
         self
     }
+
+    /// The IEEE EUI-64 of the chip's IEEE 802.15.4 radio, derived from the factory eFuse MAC
+    /// address the way ESP-IDF does it (`esp_read_mac` with `ESP_MAC_IEEE802154`): the base
+    /// MAC's OUI, the two `MAC_EXT` eFuse bytes, then the base MAC's device bytes - e.g.
+    /// `60:55:f9` + `ff:fe` + `f7:2c:a2`.
+    ///
+    /// Stable across reboots, unlike a random one, so the SRP host name derived from it (and
+    /// the hardware address the node reports) stay the same - which is what a device that
+    /// deep-sleeps, and hence reboots, between wake-ups needs, or else every wake-up registers
+    /// a new host with the SRP server.
+    pub fn ieee_eui64() -> [u8; 8] {
+        let base = esp_hal::efuse::base_mac_address();
+        let base = base.as_bytes();
+        let ext = esp_hal::efuse::read_field_le::<[u8; 2]>(esp_hal::efuse::MAC_EXT);
+
+        [
+            base[0], base[1], base[2], ext[0], ext[1], base[3], base[4], base[5],
+        ]
+    }
 }
 
 impl super::ThreadDriver for EspThreadDriver<'_> {
@@ -63,11 +78,6 @@ impl super::ThreadCoexDriver for EspThreadDriver<'_> {
     where
         A: super::ThreadCoexDriverTask,
     {
-        let ble_controller = ExternalController::<_, SLOTS>::new(unwrap!(BleConnector::new(
-            self.bt_peripheral.reborrow(),
-            Default::default(),
-        )));
-
         let radio = EspRadio::new(openthread::esp::Ieee802154::new(
             self.radio_peripheral.reborrow(),
         ));
@@ -76,20 +86,20 @@ impl super::ThreadCoexDriver for EspThreadDriver<'_> {
             None => radio,
         };
 
-        task.run(radio, ble_controller).await
+        // The BLE controller is created (and the `esp-radio` BLE stack initialized) only while
+        // the task actually runs BLE - see `EspBleDriver`.
+        task.run(radio, EspBleDriver::new(self.bt_peripheral.reborrow()))
+            .await
     }
 }
 
 impl super::BleDriver for EspThreadDriver<'_> {
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
         A: super::BleDriverTask,
     {
-        let ble_controller = ExternalController::<_, SLOTS>::new(unwrap!(BleConnector::new(
-            self.bt_peripheral.reborrow(),
-            Default::default(),
-        )));
-
-        task.run(ble_controller).await
+        EspBleDriver::new(self.bt_peripheral.reborrow())
+            .run(task)
+            .await
     }
 }

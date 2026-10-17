@@ -1,10 +1,6 @@
-use bt_hci::controller::ExternalController;
-
-use esp_radio::ble::controller::BleConnector;
-
 use crate::matter::error::Error;
 use crate::wifi::esp::EspWifiController;
-use crate::wireless::SLOTS;
+use crate::wireless::esp::EspBleDriver;
 
 /// A `WifiDriver` implementation for the ESP32 family of chips.
 pub struct EspWifiDriver<'d> {
@@ -65,11 +61,6 @@ impl super::WifiCoexDriver for EspWifiDriver<'_> {
     where
         A: super::WifiCoexDriverTask,
     {
-        let ble_ctl = ExternalController::<_, SLOTS>::new(unwrap!(BleConnector::new(
-            self.bt_peripheral.reborrow(),
-            Default::default(),
-        )));
-
         // Wi-Fi power management while the station is disconnected starves the BLE controller:
         // BLE advertisements never go on air while Wi-Fi is up but not (yet) connected, which is
         // exactly the situation during concurrent commissioning. esp-radio hard-coded this to
@@ -87,25 +78,24 @@ impl super::WifiCoexDriver for EspWifiDriver<'_> {
         // with `AuthenticationExpired`, so restore the previous level.
         unwrap!(controller.set_max_tx_power(80));
 
+        // The BLE controller is created (and the `esp-radio` BLE stack initialized) only while
+        // the task actually runs BLE - see `EspBleDriver`.
         task.run(
             esp_radio::wifi::Interface::station(),
             EspWifiController::new(controller),
-            ble_ctl,
+            EspBleDriver::new(self.bt_peripheral.reborrow()),
         )
         .await
     }
 }
 
 impl super::BleDriver for EspWifiDriver<'_> {
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
         A: super::BleDriverTask,
     {
-        let ble_controller = ExternalController::<_, SLOTS>::new(unwrap!(BleConnector::new(
-            self.bt_peripheral.reborrow(),
-            Default::default(),
-        )));
-
-        task.run(ble_controller).await
+        EspBleDriver::new(self.bt_peripheral.reborrow())
+            .run(task)
+            .await
     }
 }

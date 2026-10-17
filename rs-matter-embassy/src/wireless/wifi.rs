@@ -2,7 +2,7 @@ use core::pin::pin;
 
 use embassy_futures::select::select;
 
-use crate::ble::{BtpGattContext, BtpGattPeripheral, Controller, ControllerRef};
+use crate::ble::{BtpGattContext, Controller};
 use crate::enet::{create_enet_stack, EnetNetif, EnetStack};
 use crate::eth::EmbassyNetContext;
 use crate::matter::crypto::Rng;
@@ -16,7 +16,10 @@ use crate::matter::utils::select::Coalesce;
 use crate::stack::network::{Embedding, Network};
 use crate::stack::wireless::{self, Gatt, GattTask};
 
-use super::{BleDriver, BleDriverTask, BleDriverTaskImpl, EmbassyWirelessMatterStack};
+use super::{
+    BleDriver, BleDriverGattPeripheral, BleDriverTask, BleDriverTaskImpl,
+    EmbassyWirelessMatterStack, PreexistingBleDriver,
+};
 
 #[cfg(feature = "esp")]
 pub mod esp_wifi;
@@ -54,27 +57,32 @@ where
 }
 
 /// A trait representing a task that needs access to the Wifi driver and controller,
-/// as well as to the BLe controller to perform its work
+/// as well as to a BLE driver to perform its work.
+///
+/// The task gets a `BleDriver` rather than a BLE controller, so that the BLE controller can be
+/// created only while BLE is needed (i.e. while a commissioning window is advertised) and torn
+/// down afterwards. A driver that has a pre-existing controller can hand out
+/// `PreexistingBleDriver`.
 pub trait WifiCoexDriverTask {
-    /// Run the task with the given Wifi driver, Wifi controller and BLE controller
-    async fn run<D, C, B>(&mut self, wifi_driver: D, net_ctl: C, ble_ctl: B) -> Result<(), Error>
+    /// Run the task with the given Wifi driver, Wifi controller and BLE driver
+    async fn run<D, C, B>(&mut self, wifi_driver: D, net_ctl: C, ble: B) -> Result<(), Error>
     where
         D: embassy_net::driver::Driver,
         C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
-        B: Controller;
+        B: BleDriver;
 }
 
 impl<T> WifiCoexDriverTask for &mut T
 where
     T: WifiCoexDriverTask,
 {
-    async fn run<D, C, B>(&mut self, wifi_driver: D, net_ctl: C, ble_ctl: B) -> Result<(), Error>
+    async fn run<D, C, B>(&mut self, wifi_driver: D, net_ctl: C, ble: B) -> Result<(), Error>
     where
         D: embassy_net::driver::Driver,
         C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
-        B: Controller,
+        B: BleDriver,
     {
-        (*self).run(wifi_driver, net_ctl, ble_ctl).await
+        (*self).run(wifi_driver, net_ctl, ble).await
     }
 }
 
@@ -165,11 +173,11 @@ impl<D, C, B> BleDriver for PreexistingWifiDriver<D, C, B>
 where
     B: Controller,
 {
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
         A: BleDriverTask,
     {
-        task.run(ControllerRef::new(&self.2)).await
+        PreexistingBleDriver::new(&self.2).run(task).await
     }
 }
 
@@ -183,7 +191,7 @@ where
     where
         A: WifiCoexDriverTask,
     {
-        task.run(&mut self.0, &self.1, ControllerRef::new(&self.2))
+        task.run(&mut self.0, &self.1, PreexistingBleDriver::new(&self.2))
             .await
     }
 }
@@ -356,11 +364,11 @@ where
     A: wireless::WifiCoexTask,
     R: Rng + Copy,
 {
-    async fn run<D, C, B>(&mut self, wifi_driver: D, net_ctl: C, ble_ctl: B) -> Result<(), Error>
+    async fn run<D, C, B>(&mut self, wifi_driver: D, net_ctl: C, ble: B) -> Result<(), Error>
     where
         D: embassy_net::driver::Driver,
         C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
-        B: Controller,
+        B: BleDriver,
     {
         let mut resources = self.context.resources.lock().await;
         let mut mdns = self.context.mdns.lock().await;
@@ -377,8 +385,10 @@ where
 
         let net_stack = EnetStack::new(stack, buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
-        let mut peripheral = BtpGattPeripheral::new(
-            ble_ctl,
+        // The BLE controller is created only while the stack runs the peripheral, i.e. while a
+        // commissioning window is advertised over BLE.
+        let mut peripheral = BleDriverGattPeripheral::new(
+            ble,
             self.use_ble_random_addr.then_some(self.rand),
             self.ble_context,
         );
