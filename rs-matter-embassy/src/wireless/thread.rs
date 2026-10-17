@@ -14,7 +14,7 @@ use crate::matter::error::Error;
 use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::select::Coalesce;
 use crate::matter::utils::sync::IfMutex;
-use crate::ot::{to_matter_err, OtNetCtl, OtNetStack, OtPersist};
+use crate::ot::{radio_to_matter_err, to_matter_err, OtNetCtl, OtNetStack, OtPersist};
 use crate::ot::{OtMatterResources, OtMdns, OtNetif};
 use crate::stack::network::{Embedding, Network};
 use crate::stack::wireless::{self, Gatt, GattTask};
@@ -380,7 +380,7 @@ where
     K: KvBlobStoreAccess,
     C: CryptoRng + Copy,
 {
-    async fn run<R>(&mut self, radio: R) -> Result<(), Error>
+    async fn run<R>(&mut self, mut radio: R) -> Result<(), Error>
     where
         R: Radio,
     {
@@ -393,8 +393,11 @@ where
         let mut settings = persister.settings();
         let mut rand = self.rand;
 
+        let radio_caps = radio.init().await.map_err(radio_to_matter_err)?;
+
         let ot = OpenThread::new_with_udp_srp(
             self.ieee_eui64,
+            &radio_caps,
             &mut rand,
             &mut settings,
             &mut resources.ot,
@@ -452,7 +455,7 @@ where
     K: KvBlobStoreAccess,
     C: CryptoRng + Copy,
 {
-    async fn run<R, B>(&mut self, radio: R, ble: B) -> Result<(), Error>
+    async fn run<R, B>(&mut self, mut radio: R, ble: B) -> Result<(), Error>
     where
         R: Radio,
         B: BleDriver,
@@ -466,8 +469,11 @@ where
         let mut settings = persister.settings();
         let mut rand = self.rand;
 
+        let radio_caps = radio.init().await.map_err(radio_to_matter_err)?;
+
         let ot = OpenThread::new_with_udp_srp(
             self.ieee_eui64,
+            &radio_caps,
             &mut rand,
             &mut settings,
             &mut resources.ot,
@@ -613,12 +619,7 @@ async fn run_icd(ot: &OpenThread<'_>, icd: Option<&Icd>) -> Result<(), Error> {
         unreachable!()
     };
 
-    // Whether the radio can do CSL is only known once it is up.
-    ot.wait_radio_ready().await;
-
-    let csl = ot
-        .radio_caps()
-        .is_some_and(|caps| caps.contains(Capabilities::RECEIVE_TIMING));
+    let csl = ot.radio_caps().contains(Capabilities::RECEIVE_TIMING);
 
     if csl {
         info!("Thread SED: the radio supports timed receive, using CSL instead of data polls");

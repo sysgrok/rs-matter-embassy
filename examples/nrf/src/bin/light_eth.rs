@@ -45,7 +45,7 @@ use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
 use rs_matter_embassy::ot::openthread::nrf::NrfRadio;
 use rs_matter_embassy::ot::openthread::{
     EmbassyTimeTimer, MacRadio, MacRadioResources, OpenThread, PhyRadioRunner, ProxyRadio,
-    ProxyRadioResources, RamSettings,
+    ProxyRadioResources, Radio, RamSettings,
 };
 use rs_matter_embassy::ot::{OtMatterResources, OtMdns, OtNetStack, OtNetif};
 use rs_matter_embassy::stack::eth::EthMatterStack;
@@ -150,7 +150,7 @@ async fn main(_s: Spawner) {
         &TEST_DEV_ATT,
     ));
 
-    let (radio_proxy, radio_runner) =
+    let (mut radio_proxy, radio_runner) =
         ProxyRadio::new(mk_static!(ProxyRadioResources, ProxyRadioResources::new()));
     let radio = NrfRadio::new(embassy_nrf::radio::ieee802154::Radio::new(p.RADIO, Irqs));
 
@@ -169,8 +169,11 @@ async fn main(_s: Spawner) {
     let mut ot_settings = RamSettings::new(&mut ot_resources.settings_buf);
     let mut ot_rng = crypto.rand().unwrap();
 
+    let radio_caps = unwrap!(radio_proxy.init().await);
+
     let ot = unwrap!(OpenThread::new_with_udp_srp(
         ieee_eui64,
+        &radio_caps,
         &mut ot_rng,
         &mut ot_settings,
         &mut ot_resources.ot,

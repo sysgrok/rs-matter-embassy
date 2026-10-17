@@ -41,7 +41,7 @@ use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::select::Coalesce;
 use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
 use rs_matter_embassy::ot::openthread::esp::EspRadio;
-use rs_matter_embassy::ot::openthread::{OpenThread, RamSettings};
+use rs_matter_embassy::ot::openthread::{OpenThread, Radio, RamSettings};
 use rs_matter_embassy::ot::{OtMatterResources, OtMdns, OtNetStack, OtNetif};
 use rs_matter_embassy::stack::eth::EthMatterStack;
 use rs_matter_embassy::stack::rand::reseeding_csprng;
@@ -126,8 +126,12 @@ async fn main(_s: Spawner) {
 
     let mut ot_settings = RamSettings::new(&mut ot_resources.settings_buf);
 
+    let mut radio = EspRadio::new(Ieee802154::new(peripherals.IEEE802154));
+    let radio_caps = radio.init().await.unwrap();
+
     let ot = OpenThread::new_with_udp_srp(
         ieee_eui64,
+        &radio_caps,
         &mut ot_rng,
         &mut ot_settings,
         &mut ot_resources.ot,
@@ -137,8 +141,7 @@ async fn main(_s: Spawner) {
     .unwrap();
 
     let mut ot_runner = pin!(async {
-        ot.run(EspRadio::new(Ieee802154::new(peripherals.IEEE802154)))
-            .await;
+        ot.run(radio).await;
         #[allow(unreachable_code)]
         Ok(())
     });

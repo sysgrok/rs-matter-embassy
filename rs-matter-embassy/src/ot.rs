@@ -1174,3 +1174,9 @@ pub(crate) fn to_matter_err(err: OtError) -> Error {
 
     ErrorCode::NoNetworkInterface.into()
 }
+
+pub(crate) fn radio_to_matter_err<E: core::fmt::Debug>(err: E) -> Error {
+    error!("Radio error: {:?}", debug2format!(err));
+
+    ErrorCode::NoNetworkInterface.into()
+}
