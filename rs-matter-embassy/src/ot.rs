@@ -29,8 +29,8 @@ use crate::matter::dm::clusters::net_comm::{
     NetCtl, NetCtlError, NetworkScanInfo, NetworkType, WirelessCreds,
 };
 use crate::matter::dm::clusters::thread_diag::{
-    NeighborTable, NetworkFaultEnum, OperationalDatasetComponents, RouteTable, RoutingRoleEnum,
-    SecurityPolicy, ThreadDiag,
+    MacCounters, MleCounters, NeighborTable, NetworkFaultEnum, OperationalDatasetComponents,
+    RouteTable, RoutingRoleEnum, SecurityPolicy, ThreadDiag,
 };
 use crate::matter::dm::clusters::wifi_diag::WirelessDiag;
 use crate::matter::dm::networks::NetChangeNotif;
@@ -218,7 +218,7 @@ impl NetifDiag for OtNetif<'_> {
             operational: status.ip6_enabled && status.role.is_connected(),
             offprem_svc_reachable_ipv4: None,
             offprem_svc_reachable_ipv6: None,
-            hw_addr: &self.0.ieee_eui64(),
+            hw_addr: &self.0.ext_address().to_be_bytes(),
             ipv4_addrs: &[],
             ipv6_addrs: &addrs,
             netif_type: InterfaceTypeEnum::Thread,
@@ -609,6 +609,68 @@ impl ThreadDiag for OtNetCtl<'_> {
         // OpenThread does not track Matter network faults; the reference
         // implementation (connectedhomeip) likewise always reports an empty list.
         Ok(())
+    }
+
+    fn mac_counters(
+        &self,
+        f: &mut dyn FnMut(Option<&MacCounters>) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let c = self.0.mac_counters();
+
+        f(Some(&MacCounters {
+            tx_total_count: c.tx_total,
+            tx_unicast_count: c.tx_unicast,
+            tx_broadcast_count: c.tx_broadcast,
+            tx_ack_requested_count: c.tx_ack_requested,
+            tx_acked_count: c.tx_acked,
+            tx_no_ack_requested_count: c.tx_no_ack_requested,
+            tx_data_count: c.tx_data,
+            tx_data_poll_count: c.tx_data_poll,
+            tx_beacon_count: c.tx_beacon,
+            tx_beacon_request_count: c.tx_beacon_request,
+            tx_other_count: c.tx_other,
+            tx_retry_count: c.tx_retry,
+            tx_direct_max_retry_expiry_count: Some(c.tx_direct_max_retry_expiry),
+            tx_indirect_max_retry_expiry_count: Some(c.tx_indirect_max_retry_expiry),
+            tx_err_cca_count: c.tx_err_cca,
+            tx_err_abort_count: c.tx_err_abort,
+            tx_err_busy_channel_count: c.tx_err_busy_channel,
+            rx_total_count: c.rx_total,
+            rx_unicast_count: c.rx_unicast,
+            rx_broadcast_count: c.rx_broadcast,
+            rx_data_count: c.rx_data,
+            rx_data_poll_count: c.rx_data_poll,
+            rx_beacon_count: c.rx_beacon,
+            rx_beacon_request_count: c.rx_beacon_request,
+            rx_other_count: c.rx_other,
+            rx_address_filtered_count: c.rx_address_filtered,
+            rx_dest_addr_filtered_count: c.rx_dest_addr_filtered,
+            rx_duplicated_count: c.rx_duplicated,
+            rx_err_no_frame_count: c.rx_err_no_frame,
+            rx_err_unknown_neighbor_count: c.rx_err_unknown_neighbor,
+            rx_err_invalid_src_addr_count: c.rx_err_invalid_src_addr,
+            rx_err_sec_count: c.rx_err_sec,
+            rx_err_fcs_count: c.rx_err_fcs,
+            rx_err_other_count: c.rx_err_other,
+        }))
+    }
+
+    fn mle_counters(
+        &self,
+        f: &mut dyn FnMut(Option<&MleCounters>) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let c = self.0.mle_counters();
+
+        f(Some(&MleCounters {
+            detached_role_count: c.detached_role,
+            child_role_count: c.child_role,
+            router_role_count: c.router_role,
+            leader_role_count: c.leader_role,
+            attach_attempt_count: c.attach_attempts,
+            partition_id_change_count: c.partition_id_changes,
+            better_partition_attach_attempt_count: c.better_partition_attach_attempts,
+            parent_change_count: c.parent_changes,
+        }))
     }
 }
 
@@ -1024,12 +1086,36 @@ impl Mdns for OtMdns<'_, '_> {
     }
 }
 
-/// The `KvBlobStore` key used to persist OpenThread's SRP ECDSA key
+/// The `KvBlobStore` key under which the persisted subset of the OpenThread settings is
+/// stored, as one blob of `[key: u16 LE][len: u16 LE][value]` records.
+const OT_SETTINGS_KEY: u16 = VENDOR_KEYS_START;
+
+/// The OpenThread settings that survive a reboot.
 ///
-/// While persisting other keys is optional, this one _must_ get persisted,
-/// or else - upon device restart - it will fail to re-register its SRP services
-/// in the SRP server.
-const OT_SRP_ECDSA_KEY: u16 = VENDOR_KEYS_START;
+/// - `SrpEcdsaKey` _must_ be persisted, or else - upon device restart - the node fails to
+///   re-register its SRP services (the SRP server sees a different key for the same host).
+/// - `ActiveDataset`, `NetworkInfo` and `ParentInfo` let OpenThread restore its previous
+///   attachment on start-up: with a still-valid child entry at the parent (child timeout not
+///   yet elapsed) it re-attaches with a single `Child Update Request` exchange instead of a
+///   full attach (discovery, `Parent Request`, `Child ID Request`). That is what makes a
+///   deep-sleeping Sleepy End Device - one that reboots on every wake-up - viable. Restoring
+///   the MAC/MLE frame counters from `NetworkInfo` also keeps the node's frames accepted by
+///   its neighbors after the reboot.
+/// - `KeySlaacIidSecretKey` keeps the node's SLAAC IPv6 addresses stable across reboots.
+/// - `SrpClientInfo` remembers the SRP server the node registered with.
+const PERSISTED_SETTINGS: &[SettingsKey] = &[
+    SettingsKey::ActiveDataset,
+    SettingsKey::NetworkInfo,
+    SettingsKey::ParentInfo,
+    SettingsKey::KeySlaacIidSecretKey,
+    SettingsKey::SrpEcdsaKey,
+    SettingsKey::SrpClientInfo,
+];
+
+/// Whether `key` is one of the persisted settings.
+fn is_persisted_setting(key: u16) -> bool {
+    PERSISTED_SETTINGS.iter().any(|k| *k as u16 == key)
+}
 
 /// A struct for implementing persistance of `openthread` settings - volatitle and
 /// non-volatile (for selected keys)
@@ -1053,13 +1139,8 @@ where
                 settings_buf,
                 |change| match change {
                     RamSettingsChange::Added { key, .. }
-                    | RamSettingsChange::Removed { key, .. }
-                        if key == SettingsKey::SrpEcdsaKey as u16 =>
-                    {
-                        true
-                    }
+                    | RamSettingsChange::Removed { key, .. } => is_persisted_setting(key),
                     RamSettingsChange::Clear => true,
-                    _ => false,
                 },
             )),
             kv,
@@ -1073,22 +1154,27 @@ where
         &self.settings
     }
 
-    /// Load (a selected subset of) the settings from the `KvBlobStore` non-volatile storage
+    /// Load the persisted subset of the settings (see `PERSISTED_SETTINGS`) from the
+    /// `KvBlobStore` non-volatile storage
     pub fn load(&self) -> Result<(), Error> {
         self.kv.access(|kv, buf| {
-            if let Some(data) = kv.load(OT_SRP_ECDSA_KEY, buf)? {
+            if let Some(data) = kv.load(OT_SETTINGS_KEY, buf)? {
                 self.settings.with(|settings| {
                     let mut offset = 0;
 
-                    while offset < data.len() {
+                    while offset + 4 <= data.len() {
                         let key = u16::from_le_bytes([data[offset], data[offset + 1]]);
-                        offset += 2;
+                        let len = u16::from_le_bytes([data[offset + 2], data[offset + 3]]) as usize;
+                        offset += 4;
 
-                        let value = &data[offset..];
+                        let Some(value) = data.get(offset..offset + len) else {
+                            warn!("Truncated persisted OpenThread settings; ignoring the rest");
+                            break;
+                        };
 
                         unwrap!(settings.add(key, value));
 
-                        offset += value.len();
+                        offset += len;
                     }
                 });
             }
@@ -1097,7 +1183,8 @@ where
         })
     }
 
-    /// Store (a selected subset of) the settings to the `KvBlobStore` non-volatile storage
+    /// Store the persisted subset of the settings (see `PERSISTED_SETTINGS`) to the
+    /// `KvBlobStore` non-volatile storage
     pub fn store(&self) -> Result<(), Error> {
         self.kv.access(|kv, buf| {
             let offset = self.settings.with(|settings| {
@@ -1105,12 +1192,14 @@ where
 
                 for (key, value) in settings
                     .iter()
-                    .filter(|(key, _)| *key == SettingsKey::SrpEcdsaKey as u16)
+                    .filter(|(key, _)| is_persisted_setting(*key))
                 {
-                    assert!(value.len() + 2 <= buf.len() - offset);
+                    assert!(value.len() + 4 <= buf.len() - offset);
 
                     buf[offset..offset + 2].copy_from_slice(&key.to_le_bytes());
-                    offset += 2;
+                    buf[offset + 2..offset + 4]
+                        .copy_from_slice(&(value.len() as u16).to_le_bytes());
+                    offset += 4;
 
                     buf[offset..offset + value.len()].copy_from_slice(value);
                     offset += value.len();
@@ -1121,7 +1210,7 @@ where
 
             let (data, buf) = buf.split_at_mut(offset);
 
-            kv.store(OT_SRP_ECDSA_KEY, data, buf)
+            kv.store(OT_SETTINGS_KEY, data, buf)
         })
     }
 
@@ -1144,6 +1233,12 @@ pub(crate) fn to_net_matter_err(err: OtError) -> NetCtlError {
 
 pub(crate) fn to_matter_err(err: OtError) -> Error {
     error!("OpenThread error: {:?}", err);
+
+    ErrorCode::NoNetworkInterface.into()
+}
+
+pub(crate) fn radio_to_matter_err<E: core::fmt::Debug>(err: E) -> Error {
+    error!("Radio error: {:?}", debug2format!(err));
 
     ErrorCode::NoNetworkInterface.into()
 }

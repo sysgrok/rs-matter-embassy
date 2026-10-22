@@ -46,7 +46,7 @@ use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node};
 use rs_matter_embassy::matter::error::Error;
-use rs_matter_embassy::matter::persist::KvBlobStore;
+use rs_matter_embassy::matter::persist::{KvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::select::Coalesce;
 use rs_matter_embassy::matter::{clusters, devices};
@@ -111,7 +111,7 @@ async fn main(_s: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
+    esp_rtos::start(timg0.timer0); // TEMPORARY (local esp-hal clone): no `FROM_CPU_INTR0` there
 
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
@@ -134,6 +134,7 @@ async fn main(_s: Spawner) {
     let on_off = on_off::OnOffHandler::new_standalone(
         Dataver::new_rand(&mut weak_rand),
         LIGHT_ENDPOINT_ID,
+        VENDOR_KEYS_START + 0x10,
         TestOnOffDeviceLogic::new(true),
     );
 
@@ -154,7 +155,7 @@ async fn main(_s: Spawner) {
         // Our on-off cluster, on Endpoint 1
         .chain(
             |e, c| e == LIGHT_ENDPOINT_ID && c == TestOnOffDeviceLogic::CLUSTER.id,
-            on_off::HandlerAsyncAdaptor(&on_off),
+            Async(on_off::HandlerAdaptor(&on_off)),
         )
         // Each Endpoint needs a Descriptor cluster too
         // Just use the one that `rs-matter` provides out of the box
@@ -255,12 +256,15 @@ const NODE: Node = Node {
 /// You can alter this function to persist to a different partition,
 /// or to use a completely different storage backend, as long as you return an implementation of `KvBlobStore`.
 fn get_persistent_store<'d>(
-    flash: esp_hal::peripherals::FLASH<'d>,
+    mut flash: esp_hal::peripherals::FLASH<'d>,
     mut buf: impl BorrowMut<[u8]>,
 ) -> impl KvBlobStore + 'd {
-    let mut flash = FlashStorage::new(flash);
     let pt_buf = &mut buf.borrow_mut()[..PARTITION_TABLE_MAX_LEN];
-    let pt = read_partition_table(&mut flash, pt_buf).unwrap();
+    let pt = read_partition_table(
+        &mut esp_hal::flash::Flash::new(flash.reborrow(), Default::default()).unwrap(),
+        pt_buf,
+    )
+    .unwrap();
     let nvs = pt
         .find_partition(PartitionType::Data(DataPartitionSubType::Nvs))
         .unwrap()
@@ -275,7 +279,7 @@ fn get_persistent_store<'d>(
         end
     );
 
-    SeqMapKvBlobStore::new(BlockingAsync::new(flash), start..end)
+    SeqMapKvBlobStore::new(BlockingAsync::new(FlashStorage::new(flash)), start..end)
 }
 
 async fn wait_pin_low(mut pin: Input<'_>) -> Result<(), Error> {

@@ -18,7 +18,12 @@ use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::sync::{DynBase, IfMutex};
 
 /// An adaptor from the `cyw43` Wifi controller API to the `rs-matter` Wifi controller API
-pub struct Cyw43WifiController<'a>(IfMutex<Control<'a>>, Mutex<Cell<bool>>);
+pub struct Cyw43WifiController<'a>(
+    IfMutex<Control<'a>>,
+    Mutex<Cell<bool>>,
+    // The RSSI as of the last connection check, as `Control::get_rssi` is async
+    Mutex<Cell<Option<i8>>>,
+);
 
 impl<'a> Cyw43WifiController<'a> {
     /// Create a new instance of the `Cyw43WifiController` type.
@@ -26,7 +31,11 @@ impl<'a> Cyw43WifiController<'a> {
     /// # Arguments
     /// - `controller` - The `cyw43` Wifi controller instance.
     pub const fn new(controller: Control<'a>) -> Self {
-        Self(IfMutex::new(controller), Mutex::new(Cell::new(false)))
+        Self(
+            IfMutex::new(controller),
+            Mutex::new(Cell::new(false)),
+            Mutex::new(Cell::new(None)),
+        )
     }
 }
 
@@ -94,6 +103,7 @@ impl NetCtl for Cyw43WifiController<'_> {
 
         ctl.leave().await;
         self.1.lock(|connected| connected.set(false));
+        self.2.lock(|rssi| rssi.set(None));
         info!("Disconnected from current Wifi AP (if any)");
 
         ctl.join(ssid, JoinOptions::new(pass)) // TODO: Try with something else besides Wpa2Wpa3
@@ -116,11 +126,19 @@ impl NetCtl for Cyw43WifiController<'_> {
 impl NetChangeNotif for Cyw43WifiController<'_> {
     async fn wait_changed(&self) {
         let fetch_connected = || async {
-            let _ctl = self.0.lock().await;
+            let mut ctl = self.0.lock().await;
 
             // TODO: Cyw43 Control does not have a way to check if we are connected or not
             // Need to upstream a way to check that or else we cannot detect Wifi disconnection events
             let new_connected = self.1.lock(|connected| connected.get());
+
+            let rssi = if new_connected {
+                Some(ctl.get_rssi().await.clamp(-120, 0) as i8)
+            } else {
+                None
+            };
+            self.2.lock(|cached| cached.set(rssi));
+
             self.1.lock(|connected| {
                 if connected.get() != new_connected {
                     warn!(
@@ -173,7 +191,11 @@ impl WifiDiag for Cyw43WifiController<'_> {
     }
 
     fn rssi(&self) -> Result<Nullable<i8>, Error> {
-        Ok(Nullable::none())
+        Ok(self
+            .2
+            .lock(|rssi| rssi.get())
+            .map(Nullable::some)
+            .unwrap_or(Nullable::none()))
     }
 }
 

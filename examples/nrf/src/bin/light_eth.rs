@@ -38,14 +38,14 @@ use rs_matter_embassy::matter::dm::devices::test::{
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node};
-use rs_matter_embassy::matter::persist::DummyKvBlobStore;
+use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::select::Coalesce;
 use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
 use rs_matter_embassy::ot::openthread::nrf::NrfRadio;
 use rs_matter_embassy::ot::openthread::{
     EmbassyTimeTimer, MacRadio, MacRadioResources, OpenThread, PhyRadioRunner, ProxyRadio,
-    ProxyRadioResources, RamSettings,
+    ProxyRadioResources, Radio, RamSettings,
 };
 use rs_matter_embassy::ot::{OtMatterResources, OtMdns, OtNetStack, OtNetif};
 use rs_matter_embassy::stack::eth::EthMatterStack;
@@ -150,7 +150,7 @@ async fn main(_s: Spawner) {
         &TEST_DEV_ATT,
     ));
 
-    let (radio_proxy, radio_runner) =
+    let (mut radio_proxy, radio_runner) =
         ProxyRadio::new(mk_static!(ProxyRadioResources, ProxyRadioResources::new()));
     let radio = NrfRadio::new(embassy_nrf::radio::ieee802154::Radio::new(p.RADIO, Irqs));
 
@@ -169,8 +169,11 @@ async fn main(_s: Spawner) {
     let mut ot_settings = RamSettings::new(&mut ot_resources.settings_buf);
     let mut ot_rng = crypto.rand().unwrap();
 
+    let radio_caps = unwrap!(radio_proxy.init().await);
+
     let ot = unwrap!(OpenThread::new_with_udp_srp(
         ieee_eui64,
+        &radio_caps,
         &mut ot_rng,
         &mut ot_settings,
         &mut ot_resources.ot,
@@ -195,6 +198,7 @@ async fn main(_s: Spawner) {
     let on_off = on_off::OnOffHandler::new_standalone(
         Dataver::new_rand(&mut weak_rand),
         LIGHT_ENDPOINT_ID,
+        VENDOR_KEYS_START + 0x10,
         TestOnOffDeviceLogic::new(true),
     );
 
@@ -212,7 +216,7 @@ async fn main(_s: Spawner) {
         // Our on-off cluster, on Endpoint 1
         .chain(
             |e, c| e == LIGHT_ENDPOINT_ID && c == TestOnOffDeviceLogic::CLUSTER.id,
-            on_off::HandlerAsyncAdaptor(&on_off),
+            Async(on_off::HandlerAdaptor(&on_off)),
         )
         // Each Endpoint needs a Descriptor cluster too
         // Just use the one that `rs-matter` provides out of the box
@@ -236,6 +240,8 @@ async fn main(_s: Spawner) {
         OtNetStack::new(ot.clone()),
         // The Matter stack needs access to the netif so as to detect network going up/down
         OtNetif::new(ot.clone()),
+        // No Ethernet diagnostics, as the netif is not really Ethernet
+        &(),
         // The Matter stack needs an mDNS to run
         OtMdns::new(ot.clone(), &mut ot_resources.mdns_buf),
         // The crypto provider
