@@ -33,7 +33,7 @@ use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node};
 use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
-use rs_matter_embassy::matter::{clusters, devices, BasicCommData, root_endpoint};
+use rs_matter_embassy::matter::{clusters, devices, root_endpoint, BasicCommData};
 use rs_matter_embassy::stack::rand::reseeding_csprng;
 #[cfg(feature = "nrf54l15")]
 use rs_matter_embassy::wireless::nrf::CcmInterruptHandler;
