@@ -313,7 +313,16 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 /// The Matter Light device Node
 const NODE: Node = Node {
     endpoints: &[
-        root_endpoint!(thread, thread_diag(mle_counts, mac_counts)),
+        root_endpoint!(
+            thread,
+            thread_diag(
+                mle_counts,
+                mac_counts,
+                active_timestamp,
+                pending_timestamp,
+                delay
+            )
+        ),
         Endpoint::new(
             LIGHT_ENDPOINT_ID,
             devices!(DEV_TYPE_ON_OFF_LIGHT),
