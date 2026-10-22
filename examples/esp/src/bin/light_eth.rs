@@ -40,7 +40,7 @@ use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node
 use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::select::Coalesce;
-use rs_matter_embassy::matter::{clusters, devices};
+use rs_matter_embassy::matter::{clusters, devices, root_endpoint};
 use rs_matter_embassy::stack::rand::reseeding_csprng;
 use rs_matter_embassy::stack::utils::futures::IntoFaillble;
 
@@ -230,7 +230,7 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 /// The Matter Light device Node
 const NODE: Node = Node {
     endpoints: &[
-        EmbassyEthMatterStack::<0, ()>::root_endpoint(),
+        root_endpoint!(eth, eth_diag(carrier_detect, packet_counts)),
         Endpoint::new(
             LIGHT_ENDPOINT_ID,
             devices!(DEV_TYPE_ON_OFF_LIGHT),

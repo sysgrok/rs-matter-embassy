@@ -199,6 +199,8 @@ async fn main(_s: Spawner) {
         OtNetStack::new(ot.clone()),
         // The Matter stack needs access to the netif so as to detect network going up/down
         OtNetif::new(ot.clone()),
+        // No Ethernet diagnostics, as the netif is not really Ethernet
+        &(),
         // The Matter stack needs an mDNS instance to run
         OtMdns::new(ot.clone(), &mut ot_resources.mdns_buf),
         // The crypto provider

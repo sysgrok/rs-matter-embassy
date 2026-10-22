@@ -35,7 +35,7 @@ use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node};
 use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
-use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
+use rs_matter_embassy::matter::{clusters, devices, BasicCommData, root_endpoint};
 use rs_matter_embassy::stack::rand::reseeding_csprng;
 use rs_matter_embassy::wireless::esp::EspThreadDriver;
 use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
@@ -202,7 +202,7 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 /// The Matter Light device Node
 const NODE: Node = Node {
     endpoints: &[
-        EmbassyThreadMatterStack::<0, ()>::root_endpoint(),
+        root_endpoint!(thread, thread_diag(mle_counts, mac_counts)),
         Endpoint::new(
             LIGHT_ENDPOINT_ID,
             devices!(DEV_TYPE_ON_OFF_LIGHT),

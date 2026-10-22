@@ -29,8 +29,8 @@ use crate::matter::dm::clusters::net_comm::{
     NetCtl, NetCtlError, NetworkScanInfo, NetworkType, WirelessCreds,
 };
 use crate::matter::dm::clusters::thread_diag::{
-    NeighborTable, NetworkFaultEnum, OperationalDatasetComponents, RouteTable, RoutingRoleEnum,
-    SecurityPolicy, ThreadDiag,
+    MacCounters, MleCounters, NeighborTable, NetworkFaultEnum, OperationalDatasetComponents,
+    RouteTable, RoutingRoleEnum, SecurityPolicy, ThreadDiag,
 };
 use crate::matter::dm::clusters::wifi_diag::WirelessDiag;
 use crate::matter::dm::networks::NetChangeNotif;
@@ -218,7 +218,7 @@ impl NetifDiag for OtNetif<'_> {
             operational: status.ip6_enabled && status.role.is_connected(),
             offprem_svc_reachable_ipv4: None,
             offprem_svc_reachable_ipv6: None,
-            hw_addr: &self.0.ieee_eui64(),
+            hw_addr: &self.0.ext_address().to_be_bytes(),
             ipv4_addrs: &[],
             ipv6_addrs: &addrs,
             netif_type: InterfaceTypeEnum::Thread,
@@ -609,6 +609,68 @@ impl ThreadDiag for OtNetCtl<'_> {
         // OpenThread does not track Matter network faults; the reference
         // implementation (connectedhomeip) likewise always reports an empty list.
         Ok(())
+    }
+
+    fn mac_counters(
+        &self,
+        f: &mut dyn FnMut(Option<&MacCounters>) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let c = self.0.mac_counters();
+
+        f(Some(&MacCounters {
+            tx_total_count: c.tx_total,
+            tx_unicast_count: c.tx_unicast,
+            tx_broadcast_count: c.tx_broadcast,
+            tx_ack_requested_count: c.tx_ack_requested,
+            tx_acked_count: c.tx_acked,
+            tx_no_ack_requested_count: c.tx_no_ack_requested,
+            tx_data_count: c.tx_data,
+            tx_data_poll_count: c.tx_data_poll,
+            tx_beacon_count: c.tx_beacon,
+            tx_beacon_request_count: c.tx_beacon_request,
+            tx_other_count: c.tx_other,
+            tx_retry_count: c.tx_retry,
+            tx_direct_max_retry_expiry_count: Some(c.tx_direct_max_retry_expiry),
+            tx_indirect_max_retry_expiry_count: Some(c.tx_indirect_max_retry_expiry),
+            tx_err_cca_count: c.tx_err_cca,
+            tx_err_abort_count: c.tx_err_abort,
+            tx_err_busy_channel_count: c.tx_err_busy_channel,
+            rx_total_count: c.rx_total,
+            rx_unicast_count: c.rx_unicast,
+            rx_broadcast_count: c.rx_broadcast,
+            rx_data_count: c.rx_data,
+            rx_data_poll_count: c.rx_data_poll,
+            rx_beacon_count: c.rx_beacon,
+            rx_beacon_request_count: c.rx_beacon_request,
+            rx_other_count: c.rx_other,
+            rx_address_filtered_count: c.rx_address_filtered,
+            rx_dest_addr_filtered_count: c.rx_dest_addr_filtered,
+            rx_duplicated_count: c.rx_duplicated,
+            rx_err_no_frame_count: c.rx_err_no_frame,
+            rx_err_unknown_neighbor_count: c.rx_err_unknown_neighbor,
+            rx_err_invalid_src_addr_count: c.rx_err_invalid_src_addr,
+            rx_err_sec_count: c.rx_err_sec,
+            rx_err_fcs_count: c.rx_err_fcs,
+            rx_err_other_count: c.rx_err_other,
+        }))
+    }
+
+    fn mle_counters(
+        &self,
+        f: &mut dyn FnMut(Option<&MleCounters>) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let c = self.0.mle_counters();
+
+        f(Some(&MleCounters {
+            detached_role_count: c.detached_role,
+            child_role_count: c.child_role,
+            router_role_count: c.router_role,
+            leader_role_count: c.leader_role,
+            attach_attempt_count: c.attach_attempts,
+            partition_id_change_count: c.partition_id_changes,
+            better_partition_attach_attempt_count: c.better_partition_attach_attempts,
+            parent_change_count: c.parent_changes,
+        }))
     }
 }
 

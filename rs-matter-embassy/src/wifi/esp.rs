@@ -31,6 +31,29 @@ impl<'a> EspWifiController<'a> {
     pub const fn new(controller: WifiController<'a>) -> Self {
         Self(IfMutex::new(controller), Mutex::new(Cell::new(false)))
     }
+
+    /// The AP the station is associated with.
+    ///
+    /// `None` if not associated, or while a scan or a connect holds the controller.
+    fn ap_info(&self) -> Option<ApInfo> {
+        // Not returning `AccessPointInfo` as is, because its module differs across `esp-radio` versions
+        let ap_info = self.0.try_lock().ok()?.ap_info().ok()?;
+
+        Some(ApInfo {
+            bssid: ap_info.bssid,
+            channel: ap_info.channel,
+            signal_strength: ap_info.signal_strength,
+            auth_method: ap_info.auth_method,
+        })
+    }
+}
+
+/// The parts of the `esp-radio` `AccessPointInfo` the Wi-Fi diagnostics need
+struct ApInfo {
+    bssid: [u8; 6],
+    channel: u8,
+    signal_strength: i8,
+    auth_method: Option<AuthenticationMethod>,
 }
 
 impl NetCtl for EspWifiController<'_> {
@@ -199,39 +222,46 @@ impl WirelessDiag for EspWifiController<'_> {
 
 impl WifiDiag for EspWifiController<'_> {
     fn bssid(&self, f: &mut dyn FnMut(Option<&[u8]>) -> Result<(), Error>) -> Result<(), Error> {
-        // TODO: How to get the BSSID?
-        // let ctl = unwrap!(self.0.try_lock());
+        let ap_info = self.ap_info();
 
-        // let connected = ctl.is_connected().unwrap_or(false);
-        // if connected {
-        //     let conf = ctl.configuration().map_err(to_err)?;
-
-        //     match conf {
-        //         Configuration::Client(ClientConfiguration { bssid, .. })
-        //         | Configuration::Mixed(ClientConfiguration { bssid, .. }, _) => {
-        //             f(bssid.as_ref().map(|bssid| bssid.as_slice()))
-        //         }
-        //         _ => f(None),
-        //     }
-        // } else {
-        f(None)
-        // }
+        f(ap_info.as_ref().map(|ap_info| ap_info.bssid.as_slice()))
     }
 
     fn security_type(&self) -> Result<Nullable<SecurityTypeEnum>, Error> {
-        Ok(Nullable::none())
+        let Some(ap_info) = self.ap_info() else {
+            return Ok(Nullable::none());
+        };
+
+        // Mixed modes do not tell which of the two is in use
+        let security_type = match ap_info.auth_method {
+            Some(AuthenticationMethod::None) => SecurityTypeEnum::None,
+            Some(AuthenticationMethod::Wep) => SecurityTypeEnum::WEP,
+            Some(AuthenticationMethod::Wpa) => SecurityTypeEnum::WPA,
+            Some(AuthenticationMethod::Wpa2Personal) => SecurityTypeEnum::WPA2,
+            Some(AuthenticationMethod::Wpa3Personal) => SecurityTypeEnum::WPA3,
+            _ => SecurityTypeEnum::Unspecified,
+        };
+
+        Ok(Nullable::some(security_type))
     }
 
     fn wi_fi_version(&self) -> Result<Nullable<WiFiVersionEnum>, Error> {
+        // `esp-radio` does not report the negotiated PHY mode
         Ok(Nullable::none())
     }
 
     fn channel_number(&self) -> Result<Nullable<u16>, Error> {
-        Ok(Nullable::none())
+        Ok(self
+            .ap_info()
+            .map(|ap_info| Nullable::some(ap_info.channel as _))
+            .unwrap_or(Nullable::none()))
     }
 
     fn rssi(&self) -> Result<Nullable<i8>, Error> {
-        Ok(Nullable::none())
+        Ok(self
+            .ap_info()
+            .map(|ap_info| Nullable::some(ap_info.signal_strength))
+            .unwrap_or(Nullable::none()))
     }
 }
 

@@ -416,12 +416,15 @@ const NODE: Node = Node {
 ///
 /// If no such partition is found, the function will panic.
 fn get_persistent_store<'d>(
-    flash: esp_hal::peripherals::FLASH<'d>,
+    mut flash: esp_hal::peripherals::FLASH<'d>,
     mut buf: impl BorrowMut<[u8]>,
 ) -> impl KvBlobStore + 'd {
-    let mut flash = FlashStorage::new(flash);
     let pt_buf = &mut buf.borrow_mut()[..PARTITION_TABLE_MAX_LEN];
-    let pt = read_partition_table(&mut flash, pt_buf).unwrap();
+    let pt = read_partition_table(
+        &mut esp_hal::flash::Flash::new(flash.reborrow(), Default::default()).unwrap(),
+        pt_buf,
+    )
+    .unwrap();
     let nvs = pt
         .find_partition(PartitionType::Data(DataPartitionSubType::Nvs))
         .unwrap()
@@ -436,7 +439,7 @@ fn get_persistent_store<'d>(
         end
     );
 
-    SeqMapKvBlobStore::new(BlockingAsync::new(flash), start..end)
+    SeqMapKvBlobStore::new(BlockingAsync::new(FlashStorage::new(flash)), start..end)
 }
 
 /// Resolve once the BOOT pin is held low for `RESET_SECS`.
