@@ -672,6 +672,31 @@ impl ThreadDiag for OtNetCtl<'_> {
             parent_change_count: c.parent_changes,
         }))
     }
+
+    fn active_timestamp(&self) -> Result<Option<u64>, Error> {
+        Ok(self
+            .0
+            .active_dataset_diag()
+            .and_then(|diag| diag.active_timestamp)
+            .map(|timestamp| dataset_timestamp(&timestamp)))
+    }
+
+    fn pending_timestamp(&self) -> Result<Option<u64>, Error> {
+        Ok(self
+            .0
+            .pending_dataset_diag()
+            .and_then(|diag| diag.pending_timestamp)
+            .map(|timestamp| dataset_timestamp(&timestamp)))
+    }
+
+    fn delay(&self) -> Result<Option<u32>, Error> {
+        Ok(self.0.pending_dataset_diag().and_then(|diag| diag.delay))
+    }
+}
+
+/// A Thread dataset timestamp as the 64-bit value of its TLV: seconds, ticks and the authoritative bit
+fn dataset_timestamp(timestamp: &openthread::ThreadTimestamp) -> u64 {
+    (timestamp.seconds << 16) | ((timestamp.ticks as u64) << 1) | timestamp.authoritative as u64
 }
 
 /// Pack an `openthread::SecurityPolicy`'s boolean flags into the Matter
