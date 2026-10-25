@@ -9,7 +9,7 @@ use rs_matter_stack::matter::persist::KvBlobStoreAccess;
 
 use crate::ble::{BtpGattContext, Controller};
 use crate::matter::crypto::{CryptoRng, Rng};
-use crate::matter::dm::networks::wireless::Thread;
+use crate::matter::dm::networks::wireless::{Thread, ThreadNetworks};
 use crate::matter::error::Error;
 use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::select::Coalesce;
@@ -17,7 +17,7 @@ use crate::matter::utils::sync::IfMutex;
 use crate::ot::{radio_to_matter_err, to_matter_err, OtNetCtl, OtNetStack, OtPersist};
 use crate::ot::{OtMatterResources, OtMdns, OtNetif};
 use crate::stack::network::{Embedding, Network};
-use crate::stack::wireless::{self, Gatt, GattTask};
+use crate::stack::wireless::{self, Gatt, GattTask, MAX_WIRELESS_NETWORKS};
 
 use super::{
     BleDriver, BleDriverGattPeripheral, BleDriverTask, BleDriverTaskImpl,
@@ -33,8 +33,14 @@ pub mod nrf;
 ///
 /// The difference between this and the `ThreadMatterStack` is that all resources necessary for the
 /// operation of `openthread` as well as the BLE controller and pre-allocated inside the stack.
-pub type EmbassyThreadMatterStack<'a, const B: usize, E = ()> =
-    EmbassyWirelessMatterStack<'a, B, Thread, OtNetContext, E>;
+///
+/// `S` is the networks store of the Thread interface.
+pub type EmbassyThreadMatterStack<
+    'a,
+    const B: usize,
+    E = (),
+    S = ThreadNetworks<MAX_WIRELESS_NETWORKS>,
+> = EmbassyWirelessMatterStack<'a, B, Thread, OtNetContext, E, S>;
 
 /// A trait representing a task that needs access to the Thread radio to perform its work
 pub trait ThreadDriverTask {
@@ -192,16 +198,17 @@ where
     R: CryptoRng + Copy,
 {
     /// Create a new instance of the `EmbassyThread` type.
-    pub fn new<const B: usize, E>(
+    pub fn new<const B: usize, E, S>(
         driver: T,
         rand: R,
         ieee_eui64: [u8; 8],
         kv: K,
-        stack: &'a EmbassyThreadMatterStack<'a, B, E>,
+        stack: &'a EmbassyThreadMatterStack<'a, B, E, S>,
         use_ble_random_addr: bool,
     ) -> Self
     where
         E: Embedding,
+        S: Embedding,
     {
         Self::wrap(
             driver,

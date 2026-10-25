@@ -9,12 +9,12 @@ use crate::matter::crypto::Rng;
 use crate::matter::dm::clusters::gen_diag::InterfaceTypeEnum;
 use crate::matter::dm::clusters::net_comm::NetCtl;
 use crate::matter::dm::clusters::wifi_diag::{WifiDiag, WirelessDiag};
-use crate::matter::dm::networks::wireless::Wifi;
+use crate::matter::dm::networks::wireless::{Wifi, WifiNetworks};
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
 use crate::matter::utils::select::Coalesce;
 use crate::stack::network::{Embedding, Network};
-use crate::stack::wireless::{self, Gatt, GattTask};
+use crate::stack::wireless::{self, Gatt, GattTask, MAX_WIRELESS_NETWORKS};
 
 use super::{
     BleDriver, BleDriverGattPeripheral, BleDriverTask, BleDriverTaskImpl,
@@ -30,8 +30,14 @@ pub mod rp_wifi;
 ///
 /// The difference between this and the `WifiMatterStack` is that all resources necessary for the
 /// operation of `embassy-net` as well as the BLE controller and pre-allocated inside the stack.
-pub type EmbassyWifiMatterStack<'a, const B: usize, E = ()> =
-    EmbassyWirelessMatterStack<'a, B, Wifi, EmbassyNetContext, E>;
+///
+/// `S` is the networks store of the Wifi interface.
+pub type EmbassyWifiMatterStack<
+    'a,
+    const B: usize,
+    E = (),
+    S = WifiNetworks<MAX_WIRELESS_NETWORKS>,
+> = EmbassyWirelessMatterStack<'a, B, Wifi, EmbassyNetContext, E, S>;
 
 /// A trait representing a task that needs access to the Wifi driver and controller to perform its work
 pub trait WifiDriverTask {
@@ -207,14 +213,15 @@ pub struct EmbassyWifi<'a, T, R> {
 
 impl<'a, T, R> EmbassyWifi<'a, T, R> {
     /// Create a new instance of the `EmbassyWifi` type.
-    pub fn new<const B: usize, E>(
+    pub fn new<const B: usize, E, S>(
         driver: T,
         rand: R,
         use_ble_random_addr: bool,
-        stack: &'a EmbassyWifiMatterStack<'a, B, E>,
+        stack: &'a EmbassyWifiMatterStack<'a, B, E, S>,
     ) -> Self
     where
         E: Embedding,
+        S: Embedding,
     {
         Self::wrap(
             driver,
