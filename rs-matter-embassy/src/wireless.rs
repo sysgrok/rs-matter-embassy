@@ -1,11 +1,11 @@
 //! Wireless: Type aliases and state structs for an Embassy Matter stack running over a wireless network (Wifi or Thread) and BLE.
 
 use crate::matter::crypto::Rng;
-use crate::matter::dm::networks::wireless::WirelessNetwork;
+use crate::matter::dm::networks::wireless::{WirelessNetwork, WirelessNetworks};
 use crate::matter::error::Error;
 use crate::matter::utils::init::{init, Init};
 use crate::stack::network::{Embedding, Network};
-use crate::stack::wireless::{GattTask, WirelessBle};
+use crate::stack::wireless::{GattTask, WirelessBle, MAX_WIRELESS_NETWORKS};
 use crate::stack::MatterStack;
 
 use crate::ble::{BtpGattContext, BtpGattPeripheral, Controller, ControllerRef};
@@ -46,12 +46,21 @@ pub mod rp {
 ///
 /// The difference between this and `WirelessMatterStack` is that all resources necessary for the
 /// operation of the BLE controller and pre-allocated inside the stack.
-pub type EmbassyWirelessMatterStack<'a, const B: usize, T, N, E = ()> =
-    MatterStack<'a, B, EmbassyWirelessBle<T, N, E>>;
+///
+/// `S` is the networks store of the Wifi or Thread interface.
+pub type EmbassyWirelessMatterStack<
+    'a,
+    const B: usize,
+    T,
+    N,
+    E = (),
+    S = WirelessNetworks<MAX_WIRELESS_NETWORKS, T>,
+> = MatterStack<'a, B, EmbassyWirelessBle<T, N, E, S>>;
 
 /// A type alias for an Embassy implementation of the `Network` trait for a Matter stack running over
 /// BLE during commissioning, and then over either WiFi or Thread when operating.
-pub type EmbassyWirelessBle<T, N, E = ()> = WirelessBle<T, EmbassyGatt<N, E>>;
+pub type EmbassyWirelessBle<T, N, E = (), S = WirelessNetworks<MAX_WIRELESS_NETWORKS, T>> =
+    WirelessBle<T, EmbassyGatt<N, E>, S>;
 
 #[allow(unused)]
 pub(crate) const SLOTS: usize = 20;
@@ -170,14 +179,16 @@ where
     R: Rng + Copy,
     C: Controller,
 {
-    pub fn new_for_stack<const B: usize, T, E>(
+    pub fn new_for_stack<const B: usize, T, N, E, S>(
         ble_ctl: C,
         rand: Option<R>,
-        stack: &'a crate::wireless::EmbassyWirelessMatterStack<B, T, E>,
+        stack: &'a crate::wireless::EmbassyWirelessMatterStack<B, T, N, E, S>,
     ) -> Self
     where
         T: WirelessNetwork,
+        N: Embedding,
         E: Embedding,
+        S: Embedding,
     {
         Self::new(ble_ctl, rand, stack.network().embedding().ble_context())
     }
