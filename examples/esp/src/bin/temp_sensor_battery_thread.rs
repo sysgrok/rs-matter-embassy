@@ -48,13 +48,14 @@ use esp_backtrace as _;
 use esp_bootloader_esp_idf::partitions::{
     read_partition_table, DataPartitionSubType, PartitionType, PARTITION_TABLE_MAX_LEN,
 };
+use esp_hal::flash::Flash;
 use esp_hal::gpio::{Event, Input, InputConfig, Pull, WakeupConfig};
 use esp_hal::ram;
 use esp_hal::rtc_cntl::sleep::{LowPower, RtcSleepConfig};
 use esp_hal::rtc_cntl::{wakeup_cause, WakeupSource};
 use esp_hal::timer::timg::TimerGroup;
+use esp_hal::Blocking;
 use esp_metadata_generated::memory_range;
-use esp_storage::FlashStorage;
 
 use log::{info, warn};
 
@@ -267,7 +268,8 @@ async fn main(_s: Spawner) {
     // A flash-backed KV BLOB store: an ICD has to remember its fabrics, its ICD registrations,
     // its CASE resumption records and its Thread attachment across reboots.
     let mut pt_buf = [0u8; PARTITION_TABLE_MAX_LEN];
-    let mut store = get_persistent_store(peripherals.FLASH, &mut pt_buf[..]);
+    let mut flash = Flash::new(peripherals.FLASH, Default::default()).unwrap();
+    let mut store = get_persistent_store(&mut flash, &mut pt_buf[..]);
     stack.startup(&crypto, &mut store).await.unwrap();
 
     if stack.matter().has_fabrics() {
@@ -500,31 +502,29 @@ const NODE: Node = Node {
 /// found in the NOR-FLASH of the chip.
 ///
 /// If no such partition is found, the function will panic.
-fn get_persistent_store<'d>(
-    mut flash: esp_hal::peripherals::FLASH<'d>,
+fn get_persistent_store<'a>(
+    flash: &'a mut Flash<'static, Blocking>,
     mut buf: impl BorrowMut<[u8]>,
-) -> impl KvBlobStore + 'd {
+) -> impl KvBlobStore + 'a {
     let pt_buf = &mut buf.borrow_mut()[..PARTITION_TABLE_MAX_LEN];
-    let pt = read_partition_table(
-        &mut esp_hal::flash::Flash::new(flash.reborrow(), Default::default()).unwrap(),
-        pt_buf,
-    )
-    .unwrap();
+    let pt = read_partition_table(flash, pt_buf).unwrap();
     let nvs = pt
         .find_partition(PartitionType::Data(DataPartitionSubType::Nvs))
         .unwrap()
         .unwrap();
 
-    let start = nvs.offset();
-    let end = nvs.offset() + nvs.len();
+    let len = nvs.len();
     info!(
         "Will use NVS partition \"{}\" at {:#x}..{:#x}",
         nvs.label_as_str(),
-        start,
-        end
+        nvs.offset(),
+        nvs.offset() + len
     );
 
-    SeqMapKvBlobStore::new(BlockingAsync::new(FlashStorage::new(flash)), start..end)
+    // Offsets within the partition's region start at 0
+    let region = nvs.as_flash_region(flash).unwrap();
+
+    SeqMapKvBlobStore::new(BlockingAsync::new(region), 0..len)
 }
 
 /// Resolve once the BOOT pin is held low for `RESET_SECS`.

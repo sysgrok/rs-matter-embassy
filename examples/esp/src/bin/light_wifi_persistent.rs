@@ -27,11 +27,12 @@ use esp_backtrace as _;
 use esp_bootloader_esp_idf::partitions::{
     read_partition_table, DataPartitionSubType, PartitionType, PARTITION_TABLE_MAX_LEN,
 };
+use esp_hal::flash::Flash;
 use esp_hal::gpio::{Input, InputConfig, Pull};
 use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
+use esp_hal::Blocking;
 use esp_metadata_generated::memory_range;
-use esp_storage::FlashStorage;
 
 use log::{info, warn};
 
@@ -168,7 +169,8 @@ async fn main(_s: Spawner) {
     // `get_persistent_store` only needs a small scratch buffer to parse the
     // partition table, so we give it a local one of the required size.
     let mut pt_buf = [0u8; PARTITION_TABLE_MAX_LEN];
-    let mut store = get_persistent_store(peripherals.FLASH, &mut pt_buf[..]);
+    let mut flash = Flash::new(peripherals.FLASH, Default::default()).unwrap();
+    let mut store = get_persistent_store(&mut flash, &mut pt_buf[..]);
     stack.startup(&crypto, &mut store).await.unwrap();
 
     if stack.matter().has_fabrics() {
@@ -255,31 +257,29 @@ const NODE: Node = Node {
 ///
 /// You can alter this function to persist to a different partition,
 /// or to use a completely different storage backend, as long as you return an implementation of `KvBlobStore`.
-fn get_persistent_store<'d>(
-    mut flash: esp_hal::peripherals::FLASH<'d>,
+fn get_persistent_store<'a>(
+    flash: &'a mut Flash<'static, Blocking>,
     mut buf: impl BorrowMut<[u8]>,
-) -> impl KvBlobStore + 'd {
+) -> impl KvBlobStore + 'a {
     let pt_buf = &mut buf.borrow_mut()[..PARTITION_TABLE_MAX_LEN];
-    let pt = read_partition_table(
-        &mut esp_hal::flash::Flash::new(flash.reborrow(), Default::default()).unwrap(),
-        pt_buf,
-    )
-    .unwrap();
+    let pt = read_partition_table(flash, pt_buf).unwrap();
     let nvs = pt
         .find_partition(PartitionType::Data(DataPartitionSubType::Nvs))
         .unwrap()
         .unwrap();
 
-    let start = nvs.offset();
-    let end = nvs.offset() + nvs.len();
+    let len = nvs.len();
     info!(
         "Will use NVS partition \"{}\" at {:#x}..{:#x}",
         nvs.label_as_str(),
-        start,
-        end
+        nvs.offset(),
+        nvs.offset() + len
     );
 
-    SeqMapKvBlobStore::new(BlockingAsync::new(FlashStorage::new(flash)), start..end)
+    // Offsets within the partition's region start at 0
+    let region = nvs.as_flash_region(flash).unwrap();
+
+    SeqMapKvBlobStore::new(BlockingAsync::new(region), 0..len)
 }
 
 async fn wait_pin_low(mut pin: Input<'_>) -> Result<(), Error> {
