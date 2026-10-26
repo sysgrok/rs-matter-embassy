@@ -69,20 +69,25 @@ use rs_matter_embassy::matter::dm::clusters::icd_mgmt::{
     ClusterHandler as _, Icd, IcdModeConfig, IcdPowerMode, LitIcd, LitIcdMgmtHandler,
     OperatingModeEnum,
 };
+use rs_matter_embassy::matter::dm::clusters::time_sync::client::TimeSyncClient;
+use rs_matter_embassy::matter::dm::clusters::time_sync::{
+    GranularityEnum, TimeSourceEnum, UtcTime,
+};
 use rs_matter_embassy::matter::dm::devices::test::{
     DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
 };
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ROOT_NODE;
 use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
 use rs_matter_embassy::matter::dm::{
-    Async, Cluster, Dataver, DeviceType, EmptyHandler, Endpoint, Node, ReadContext,
+    Async, AsyncHandler, Cluster, Dataver, DeviceType, EmptyHandler, Endpoint, HandlerContext,
+    MatchContext, Node, ReadContext, ReadReply,
 };
-use rs_matter_embassy::matter::error::Error;
+use rs_matter_embassy::matter::error::{Error, ErrorCode};
 use rs_matter_embassy::matter::persist::KvBlobStore;
 use rs_matter_embassy::matter::tlv::Nullable;
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::select::Coalesce;
-use rs_matter_embassy::matter::{clusters, devices, with};
+use rs_matter_embassy::matter::{clusters, devices, with, Matter};
 use rs_matter_embassy::persist::SeqMapKvBlobStore;
 use rs_matter_embassy::stack::rand::reseeding_csprng;
 use rs_matter_embassy::wireless::esp::EspThreadDriver;
@@ -102,7 +107,7 @@ macro_rules! mk_static {
 /// The amount of memory for allocating all `rs-matter-stack` futures created during
 /// the execution of the `run*` methods.
 /// This does NOT include the rest of the Matter stack.
-const BUMP_SIZE: usize = 23000;
+const BUMP_SIZE: usize = 26000;
 
 /// Heap strictly necessary only for Thread+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
 const HEAP_SIZE: usize = 100 * 1024;
@@ -141,6 +146,10 @@ const ICD_MODE: IcdModeConfig = IcdModeConfig {
 /// devices at all. Also the `SII` it advertises meanwhile.
 const ICD_SIT_SLOW_POLL_MS: u32 = 5000;
 
+/// How long the time restored after deep sleeps may go without being set from a real source
+/// (a controller, or the Trusted Time Source), in microseconds: the sleep timer drifts.
+const TIME_SYNC_EVERY_US: u64 = 24 * 60 * 60 * 1_000_000;
+
 /// How long to wait after entering idle mode before deep-sleeping, so that the background
 /// persistence tasks (fabrics, subscriptions, OpenThread settings) flush to flash first.
 const SLEEP_SETTLE_MS: u64 = 500;
@@ -166,8 +175,12 @@ async fn main(_s: Spawner) {
 
     // Why did we boot: a cold start, the sleep timer, or the user trigger?
     let cause = wakeup_cause();
+    let timer_wake = !cause.is_empty() && !cause.contains(WakeupSource::Gpio);
     if cause.is_empty() {
         info!("Cold boot");
+
+        // SAFETY: the only access to the static, before any task runs.
+        unsafe { core::ptr::addr_of_mut!(SLEPT_CLOCK).write(SleptClock::UNKNOWN) };
     } else if cause.contains(WakeupSource::Gpio) {
         info!("Woken up by the user trigger (GPIO4)");
     } else {
@@ -263,7 +276,9 @@ async fn main(_s: Spawner) {
         .chain(
             |e, c| e == SENSOR_ENDPOINT_ID && c == desc::DescHandler::CLUSTER.id,
             Async(desc::DescHandler::new(Dataver::new_rand(&mut weak_rand)).adapt()),
-        );
+        )
+        // Reads the time from the Trusted Time Source when due; serves no cluster.
+        .chain(|_, _| false, ClockKeeper);
 
     // A flash-backed KV BLOB store: an ICD has to remember its fabrics, its ICD registrations,
     // its CASE resumption records and its Thread attachment across reboots.
@@ -271,6 +286,11 @@ async fn main(_s: Spawner) {
     let mut flash = Flash::new(peripherals.FLASH, Default::default()).unwrap();
     let mut store = get_persistent_store(&mut flash, &mut pt_buf[..]);
     stack.startup(&crypto, &mut store).await.unwrap();
+
+    // The clock, through the deep sleep: the RAM it lived in is gone.
+    if timer_wake {
+        restore_clock(stack.matter());
+    }
 
     if stack.matter().has_fabrics() {
         info!(
@@ -307,7 +327,12 @@ async fn main(_s: Spawner) {
 
         // Deep-sleep as soon as the ICD state machine lets us. (The Thread driver logs every
         // ICD power mode transition, so a serial capture shows the duty cycle.)
-        let mut deep_sleep = pin!(deep_sleep_when_idle(icd, &mut lpwr, &mut wake_pin));
+        let mut deep_sleep = pin!(deep_sleep_when_idle(
+            stack.matter(),
+            icd,
+            &mut lpwr,
+            &mut wake_pin
+        ));
 
         // Run Matter and also wait for a reset signal
         let mut wait_reset = pin!(wait_pin_low(Input::new(
@@ -335,6 +360,63 @@ async fn main(_s: Spawner) {
 /// The wake-up counter, kept in RTC RAM across deep sleeps (zeroed on a cold boot only).
 #[ram(unstable(rtc_fast, persistent))]
 static mut WAKE_COUNT: u32 = 0;
+
+/// The clock across deep sleeps, in RTC RAM: see [`SleptClock`].
+#[ram(unstable(rtc_fast, persistent))]
+static mut SLEPT_CLOCK: SleptClock = SleptClock::UNKNOWN;
+
+/// What the device knew of the UTC time when it went to sleep, and for how long it slept:
+/// a wake-up by the timer took that long, and the time is restored from it.
+#[derive(Clone, Copy)]
+struct SleptClock {
+    /// Matter-epoch microseconds; 0 if it did not know the time.
+    utc_us: u64,
+    sleep_ms: u64,
+    /// Its `GranularityEnum`.
+    granularity: u8,
+    /// When the time was last set from a real source (a controller, or the Trusted Time
+    /// Source), Matter-epoch microseconds; 0 if not since a cold boot.
+    set_utc_us: u64,
+}
+
+impl SleptClock {
+    const UNKNOWN: Self = Self {
+        utc_us: 0,
+        sleep_ms: 0,
+        granularity: 0,
+        set_utc_us: 0,
+    };
+}
+
+/// Reads the time from the Trusted Time Source when the device has none, or has not had it
+/// set from a real source for [`TIME_SYNC_EVERY_US`]: not on every wake-up, which would cost
+/// a CASE session each.
+#[derive(Clone, Copy)]
+struct ClockKeeper;
+
+impl AsyncHandler for ClockKeeper {
+    async fn read(&self, _ctx: impl ReadContext, _reply: impl ReadReply) -> Result<(), Error> {
+        Err(ErrorCode::AttributeNotFound.into())
+    }
+
+    fn bump_dataver(&self, _ctx: impl MatchContext) {}
+
+    async fn run(&self, ctx: impl HandlerContext) -> Result<(), Error> {
+        if time_sync_due(ctx.matter()) {
+            info!("Reading the time from the Trusted Time Source");
+
+            let client = TimeSyncClient::new(ctx.matter(), ctx.crypto());
+            if let Err(e) = client.refresh_once(ctx.kv(), &ctx).await {
+                warn!("No time from the Trusted Time Source: {:?}", e);
+            }
+        }
+
+        core::future::pending().await
+    }
+}
+
+// SAFETY: plain integers, valid for any bit pattern.
+unsafe impl esp_hal::Persistable for SleptClock {}
 
 /// A simulated temperature reading, in centi-degrees Celsius: a slow triangle wave around
 /// 21 °C, one step per wake-up.
@@ -405,6 +487,7 @@ impl temperature_measurement::ClusterHandler for TemperatureSensor {
 ///
 /// Never returns: a deep sleep ends in a reboot.
 async fn deep_sleep_when_idle(
+    matter: &Matter<'_>,
     icd: &Icd,
     lpwr: &mut LowPower<'_>,
     wake_pin: &mut Input<'_>,
@@ -445,8 +528,78 @@ async fn deep_sleep_when_idle(
         // Arm the user trigger. The pad is pulled up, so it does not wake us on its own.
         wake_pin.listen(Event::LowLevel);
 
+        save_clock(matter, sleep_ms);
+
         lpwr.sleep_deep(RtcSleepConfig::deep());
     }
+}
+
+/// Keep what the device knows of the UTC time through a deep sleep of `sleep_ms`.
+fn save_clock(matter: &Matter<'_>, sleep_ms: u64) {
+    // SAFETY: the only access to the static while tasks run, right before the deep sleep.
+    let slept = unsafe { core::ptr::addr_of!(SLEPT_CLOCK).read() };
+
+    let clock = matter.with_state(|state| match state.rtc.utc_time() {
+        UtcTime::Reliable(utc_us) => {
+            // Set this boot by a controller or the Trusted Time Source, not restored.
+            let set = !matches!(
+                state.rtc.utc_time_source(),
+                TimeSourceEnum::None | TimeSourceEnum::Unknown
+            );
+
+            SleptClock {
+                utc_us,
+                sleep_ms,
+                granularity: state.rtc.utc_time_granularity() as u8,
+                set_utc_us: if set { utc_us } else { slept.set_utc_us },
+            }
+        }
+        UtcTime::LastKnown(_) => SleptClock::UNKNOWN,
+    });
+
+    // SAFETY: the only access to the static while tasks run, right before the deep sleep.
+    unsafe { core::ptr::addr_of_mut!(SLEPT_CLOCK).write(clock) };
+}
+
+/// Whether the time is to be read from the Trusted Time Source: the device has none, or it
+/// has not been set from a real source for [`TIME_SYNC_EVERY_US`].
+fn time_sync_due(matter: &Matter<'_>) -> bool {
+    // SAFETY: read-only, while no deep sleep is being prepared.
+    let slept = unsafe { core::ptr::addr_of!(SLEPT_CLOCK).read() };
+
+    match matter.with_state(|state| state.rtc.utc_time()) {
+        UtcTime::Reliable(now_us) => {
+            slept.set_utc_us == 0 || now_us.saturating_sub(slept.set_utc_us) > TIME_SYNC_EVERY_US
+        }
+        UtcTime::LastKnown(_) => true,
+    }
+}
+
+/// Restore the UTC time after a deep sleep that the timer ended: it took as long as asked,
+/// and this boot until now. Its granularity steps down, as for any time set, and its source is
+/// unknown: the sleep timer drifts.
+fn restore_clock(matter: &Matter<'_>) {
+    // SAFETY: the only access to the static while tasks run, before the deep sleep.
+    let slept = unsafe { core::ptr::addr_of!(SLEPT_CLOCK).read() };
+    if slept.utc_us == 0 {
+        return;
+    }
+
+    let utc_us = slept.utc_us + slept.sleep_ms * 1000 + embassy_time::Instant::now().as_micros();
+    let granularity = match slept.granularity {
+        4 => GranularityEnum::MicrosecondsGranularity,
+        3 => GranularityEnum::MillisecondsGranularity,
+        2 => GranularityEnum::SecondsGranularity,
+        _ => GranularityEnum::MinutesGranularity,
+    };
+
+    matter.with_state(|state| {
+        state
+            .rtc
+            .set_utc_time(utc_us, granularity, TimeSourceEnum::Unknown, &())
+    });
+
+    info!("Clock restored after the deep sleep, {:?}", granularity);
 }
 
 /// Basic info about our device.
@@ -488,7 +641,7 @@ const NODE: Node = Node {
         Endpoint::new(
             ROOT_ENDPOINT_ID,
             devices!(DEV_TYPE_ROOT_NODE),
-            clusters!(thread; ICD_MGMT_CLUSTER),
+            clusters!(thread, time_sync(time_sync_client); ICD_MGMT_CLUSTER),
         ),
         Endpoint::new(
             SENSOR_ENDPOINT_ID,

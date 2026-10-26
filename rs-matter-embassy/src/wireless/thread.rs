@@ -548,7 +548,7 @@ const CHILD_SUPERVISION_INTERVAL_S: u32 = 129;
 const CHILD_SUPERVISION_CHECK_TIMEOUT_DEFAULT_S: u32 = 190;
 
 /// Configure the node as a Sleepy End Device (receiver off when idle, MTD, stable network data
-/// only) and size its keep-alives from the slowest polling interval the ICD will ever use.
+/// only), with its keep-alives sized as `apply_icd_params` does.
 ///
 /// Starts out data-polling; `run_icd` switches to CSL once the radio is up, if it can.
 fn configure_sed(ot: &OpenThread<'_>, icd: &Icd) -> Result<(), Error> {
@@ -556,8 +556,6 @@ fn configure_sed(ot: &OpenThread<'_>, icd: &Icd) -> Result<(), Error> {
 
     ot.set_link_mode(false, false, false)
         .map_err(to_matter_err)?;
-
-    ot.set_child_timeout(child_timeout_s(params.max_poll_interval_ms));
 
     apply_icd_params(ot, &params, false)
 }
@@ -577,12 +575,15 @@ const CSL_SYNC_POLL_PERIOD_MS: u32 = 10_000;
 /// transmission per listen. OpenThread caps the CSL period at ~10.5 s; a longer idle interval
 /// (a LIT's) is listened at that cap, which is still cheaper than one poll per interval.
 fn apply_icd_params(ot: &OpenThread<'_>, params: &IcdNetParams, csl: bool) -> Result<(), Error> {
+    let child_timeout_s = child_timeout_s(params.max_poll_interval_ms);
+
     info!(
-        "Thread SED: {:?} / {:?}, {} every {} ms",
+        "Thread SED: {:?} / {:?}, {} every {} ms, child timeout {} s",
         params.power_mode,
         params.operating_mode,
         if csl { "listening (CSL)" } else { "polling" },
-        params.poll_interval_ms
+        params.poll_interval_ms,
+        child_timeout_s
     );
 
     if csl {
@@ -613,6 +614,10 @@ fn apply_icd_params(ot: &OpenThread<'_>, params: &IcdNetParams, csl: bool) -> Re
     ot.set_child_supervision_check_timeout(child_supervision_check_timeout_s(
         params.poll_interval_ms,
     ));
+
+    // From the slowest polling interval the ICD will ever use, which it may only set once it
+    // runs (e.g. from its `SII`), after Thread came up: an attached child tells its parent.
+    ot.set_child_timeout(child_timeout_s);
 
     Ok(())
 }
