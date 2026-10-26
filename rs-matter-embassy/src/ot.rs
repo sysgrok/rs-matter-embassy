@@ -37,8 +37,9 @@ use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
 use crate::matter::error::ErrorCode;
 use crate::matter::persist::VENDOR_KEYS_START;
-use crate::matter::transport::network::mdns::{DottedName, MdnsRemoteService};
+use crate::matter::transport::network::mdns::{DottedName, MdnsRemoteService, MdnsTxt};
 use crate::matter::transport::network::{MatterRemoteService, MAX_RX_PACKET_SIZE};
+use crate::matter::transport::MdnsResponder;
 use crate::matter::utils::init::zeroed;
 use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::select::Coalesce;
@@ -736,8 +737,8 @@ impl<'a, 'd> OtMdns<'a, 'd> {
     /// - **browse**: enumerate commissionable nodes matching a filter, on demand.
     ///
     /// The resolve/browse requests are placed by `rs-matter` into a shared
-    /// rendezvous (see `Transport::wait_mdns_resolve_request` /
-    /// `wait_mdns_browse_request`); the answers are deposited back via
+    /// rendezvous, taken through an `MdnsResponder` (see
+    /// `Transport::mdns_responder`); the answers are deposited back via
     /// `try_deposit_mdns_resolve` / `try_deposit_mdns_browse`.
     pub async fn run(&mut self, matter: &Matter<'_>) -> Result<(), OtError> {
         // Split borrows up front so the three loops don't alias `self`: the
@@ -748,16 +749,48 @@ impl<'a, 'd> OtMdns<'a, 'd> {
         let (resolve_buf, browse_buf) = rest.split_at_mut(MDNS_RESOLVE_BUF_SZ);
 
         let register = Self::run_register(self.ot.clone(), register_buf, matter);
-        let resolve = Self::run_resolve(self.ot.clone(), resolve_buf, matter);
-        let browse = Self::run_browse(self.ot.clone(), browse_buf, matter);
+        let serve = Self::run_serve(self.ot.clone(), resolve_buf, browse_buf, matter);
 
         let mut register = core::pin::pin!(register);
-        let mut resolve = core::pin::pin!(resolve);
-        let mut browse = core::pin::pin!(browse);
+        let mut serve = core::pin::pin!(serve);
 
-        select3(&mut register, &mut resolve, &mut browse)
-            .coalesce()
-            .await
+        select(&mut register, &mut serve).coalesce().await
+    }
+
+    /// Serve the resolve and browse requests while the SRP client has a
+    /// server: that is the one the DNS client queries.
+    async fn run_serve(
+        ot: OpenThread<'_>,
+        resolve_buf: &mut [u8],
+        browse_buf: &mut [u8],
+        matter: &Matter<'_>,
+    ) -> Result<(), OtError> {
+        loop {
+            Self::wait_srp_server(&ot, true).await?;
+
+            let responder = matter.transport().mdns_responder();
+
+            let resolve = Self::run_resolve(ot.clone(), &mut *resolve_buf, &responder, matter);
+            let browse = Self::run_browse(ot.clone(), &mut *browse_buf, &responder, matter);
+            let lost = Self::wait_srp_server(&ot, false);
+
+            let mut resolve = core::pin::pin!(resolve);
+            let mut browse = core::pin::pin!(browse);
+            let mut lost = core::pin::pin!(lost);
+
+            select3(&mut resolve, &mut browse, &mut lost)
+                .coalesce()
+                .await?;
+        }
+    }
+
+    /// Wait until the SRP client has a server (`present`), or no longer has one.
+    async fn wait_srp_server(ot: &OpenThread<'_>, present: bool) -> Result<(), OtError> {
+        while ot.srp_server_addr()?.is_some() != present {
+            ot.srp_wait_changed().await;
+        }
+
+        Ok(())
     }
 
     /// The **respond** loop: (re-)register this node's own Matter mDNS service(s)
@@ -866,13 +899,14 @@ impl<'a, 'd> OtMdns<'a, 'd> {
     async fn run_resolve(
         ot: OpenThread<'_>,
         buf: &mut [u8],
+        responder: &MdnsResponder<'_>,
         matter: &Matter<'_>,
     ) -> Result<(), OtError> {
         // Partition the resolve region into `host name | TXT` scratch.
         let (host_buf, txt_buf) = buf.split_at_mut(MDNS_RESOLVE_HOST_SZ);
 
         loop {
-            let service = matter.transport().wait_mdns_resolve_request().await;
+            let service = responder.wait_resolve_request().await;
 
             // The instance label and DNS-SD service type to query. OpenThread's
             // DNS client is a unicast resolver against the BR's DNS-SD server,
@@ -923,7 +957,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
                                 instance_name: DottedName(instance_name.as_str()),
                                 port: Some(info.port),
                                 addrs: core::iter::once(IpAddr::V6(addr)),
-                                txt: TxtEntries::new(info.txt_data.unwrap_or(&[])),
+                                txt: MdnsTxt::new(info.txt_data.unwrap_or(&[])),
                                 scope_id: 0,
                             },
                             // The OpenThread DNS client resolves via the SRP server,
@@ -946,6 +980,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
     async fn run_browse(
         ot: OpenThread<'_>,
         buf: &mut [u8],
+        responder: &MdnsResponder<'_>,
         matter: &Matter<'_>,
     ) -> Result<(), OtError> {
         // Partition the browse region into `instance label | host name | TXT`.
@@ -953,7 +988,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
         let (host_buf, txt_buf) = rest.split_at_mut(MDNS_BROWSE_HOST_SZ);
 
         loop {
-            let filter = matter.transport().wait_mdns_browse_request().await;
+            let filter = responder.wait_browse_request().await;
 
             // Build the (sub)type browse name in OpenThread's DNS-SD domain.
             // `CommissionableFilter::service_type(.., false)` yields e.g.
@@ -970,12 +1005,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
                     };
 
                     let mut index = 0;
-                    loop {
-                        let label = match response.service_instance(index, &mut *label_buf) {
-                            Ok(Some(label)) => label,
-                            _ => break,
-                        };
-
+                    while let Ok(Some(label)) = response.service_instance(index, &mut *label_buf) {
                         index += 1;
 
                         let Ok(info) = response.service_info(label, &mut *host_buf, &mut *txt_buf)
@@ -1000,7 +1030,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
                                 instance_name: DottedName(instance_name.as_str()),
                                 port: Some(info.port),
                                 addrs: core::iter::once(IpAddr::V6(addr)),
-                                txt: TxtEntries::new(info.txt_data.unwrap_or(&[])),
+                                txt: MdnsTxt::new(info.txt_data.unwrap_or(&[])),
                                 scope_id: 0,
                             });
                     }
@@ -1010,59 +1040,6 @@ impl<'a, 'd> OtMdns<'a, 'd> {
             if let Err(e) = result {
                 warn!("mDNS browse query failed: {:?}", e);
             }
-        }
-    }
-}
-
-/// An iterator over DNS-SD TXT record data (a sequence of length-prefixed
-/// `key` or `key=value` entries) yielding `(key, value)` string pairs.
-///
-/// Entries that are not valid UTF-8 are skipped. An entry with no `=` yields an
-/// empty value. This is the parse-side counterpart to how Matter TXT records are
-/// published, and feeds `rs-matter`'s `MdnsRemoteService` TXT consumers.
-#[derive(Clone)]
-struct TxtEntries<'a> {
-    data: &'a [u8],
-}
-
-impl<'a> TxtEntries<'a> {
-    const fn new(data: &'a [u8]) -> Self {
-        Self { data }
-    }
-}
-
-impl<'a> Iterator for TxtEntries<'a> {
-    type Item = (&'a str, &'a str);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.data.is_empty() {
-                return None;
-            }
-
-            let len = self.data[0] as usize;
-            let rest = &self.data[1..];
-
-            if len > rest.len() {
-                // Malformed: length runs past the buffer. Stop iterating.
-                self.data = &[];
-                return None;
-            }
-
-            let (entry, next) = rest.split_at(len);
-            self.data = next;
-
-            let Ok(entry) = core::str::from_utf8(entry) else {
-                // Skip non-UTF-8 entries.
-                continue;
-            };
-
-            let (key, value) = match entry.split_once('=') {
-                Some((k, v)) => (k, v),
-                None => (entry, ""),
-            };
-
-            return Some((key, value));
         }
     }
 }
