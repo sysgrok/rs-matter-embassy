@@ -44,7 +44,6 @@ use crate::matter::utils::init::zeroed;
 use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::select::Coalesce;
 use crate::matter::utils::storage::Vec;
-use crate::matter::utils::sync::DynBase;
 
 /// Re-export the `openthread` crate
 pub mod openthread {
@@ -195,8 +194,6 @@ impl<'d> OtNetif<'d> {
         Self(ot)
     }
 }
-
-impl DynBase for OtNetif<'_> {}
 
 impl NetifDiag for OtNetif<'_> {
     fn netifs(&self, f: &mut dyn FnMut(&NetifInfo) -> Result<(), Error>) -> Result<(), Error> {
@@ -350,8 +347,6 @@ impl WirelessDiag for OtNetCtl<'_> {
         Ok(status.role.is_connected())
     }
 }
-
-impl DynBase for OtNetCtl<'_> {}
 
 impl OtNetCtl<'_> {
     /// Whether the stack currently has a committed Active Operational Dataset.
