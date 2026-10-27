@@ -96,6 +96,15 @@ jobs:
       - name: Build | Compile
         run: cargo build ${{ matrix.build }}
 
+      # The tests are backend-independent; they run on the default (`trouble`) leg.
+      - name: Build | Clippy - tests
+        if: matrix.backend == 'trouble'
+        run: cargo clippy --tests --no-deps -- -Dwarnings
+
+      - name: Test
+        if: matrix.backend == 'trouble'
+        run: cargo test
+
   # One job per (example set x BLE host backend). Previously all of this ran
   # sequentially in a single job; the split is what keeps the wall clock flat
   # now that every example is also built against NimBLE.

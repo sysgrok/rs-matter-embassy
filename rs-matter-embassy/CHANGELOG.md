@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [?.??.?] - ????-??-??
+* `SeqMapKvBlobStore` tracks the keys in flash, so a missing key (e.g. an unused fabric index) costs no flash scan anymore; on `sequential-storage` 8
+  * Breaking: `SeqMapKvBlobStore::new` is no longer `const`; MSRV is 1.87
 * Fix: a Thread ICD's child timeout follows its slowest polling interval as the ICD sets it, not as it was when Thread came up, so that the parent keeps a LIT child between its polls
 * Fix: `OtMdns` serves resolves and browses only while the SRP client has a server, so that a resolve (e.g. an ICD Check-In) right after boot isn't sent before the node can reach it
 * Thread Network Diagnostics: the MAC and MLE counters (advertise with `thread_diag(mac_counts, mle_counts)`); the hardware address of the Thread interface is its extended address
