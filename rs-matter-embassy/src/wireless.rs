@@ -70,7 +70,7 @@ pub(crate) const SLOTS: usize = 20;
 /// Allows the memory of this context to be statically allocated and cost-initialized.
 ///
 /// Usage:
-/// ```no_run
+/// ```ignore
 /// MatterStack<WirelessBle<Wifi, EmbassyGatt<C, E>>>::new(...);
 /// ```
 ///
