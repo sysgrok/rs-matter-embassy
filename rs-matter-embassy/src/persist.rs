@@ -7,6 +7,8 @@ use embedded_storage_async::nor_flash::MultiwriteNorFlash;
 use rs_matter_stack::matter::error::Error;
 use rs_matter_stack::matter::fabric::MAX_FABRICS;
 use rs_matter_stack::matter::persist::KvBlobStore;
+use rs_matter_stack::matter::utils::futures::block_on;
+use rs_matter_stack::matter::utils::storage::Vec;
 
 use sequential_storage::cache::key_pointers::ArrayKeyPointers;
 use sequential_storage::cache::page_states::CalculatedPageStates;
@@ -123,15 +125,15 @@ where
     S: MultiwriteNorFlash,
 {
     fn load<'a>(&mut self, key: u16, buf: &'a mut [u8]) -> Result<Option<&'a [u8]>, Error> {
-        embassy_futures::block_on(SeqMapKvBlobStore::load(self, key, buf))
+        block_on(SeqMapKvBlobStore::load(self, key, buf))
     }
 
     fn store(&mut self, key: u16, data: &[u8], buf: &mut [u8]) -> Result<(), Error> {
-        embassy_futures::block_on(SeqMapKvBlobStore::store(self, key, data, buf))
+        block_on(SeqMapKvBlobStore::store(self, key, data, buf))
     }
 
     fn remove(&mut self, key: u16, buf: &mut [u8]) -> Result<(), Error> {
-        embassy_futures::block_on(SeqMapKvBlobStore::remove(self, key, buf))
+        block_on(SeqMapKvBlobStore::remove(self, key, buf))
     }
 }
 
@@ -146,14 +148,14 @@ type Storage<S> = MapStorage<
 /// Always a superset of them, so a key not tracked here is surely missing.
 struct Keys {
     state: KeysState,
-    keys: heapless::Vec<u16, MAX_KEYS>,
+    keys: Vec<u16, MAX_KEYS>,
 }
 
 impl Keys {
     const fn new() -> Self {
         Self {
             state: KeysState::Unknown,
-            keys: heapless::Vec::new(),
+            keys: Vec::new(),
         }
     }
 

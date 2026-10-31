@@ -1,7 +1,5 @@
 use core::pin::pin;
 
-use embassy_futures::select::select4;
-
 use openthread::{Capabilities, OpenThread, Radio};
 
 use rs_matter_stack::matter::dm::clusters::icd_mgmt::{Icd, IcdNetParams};
@@ -11,8 +9,8 @@ use crate::ble::{BtpGattContext, Controller};
 use crate::matter::crypto::{CryptoRng, Rng};
 use crate::matter::dm::networks::wireless::{Thread, ThreadNetworks};
 use crate::matter::error::Error;
+use crate::matter::utils::futures::{select4, Coalesce};
 use crate::matter::utils::init::{init, Init};
-use crate::matter::utils::select::Coalesce;
 use crate::matter::utils::sync::IfMutex;
 use crate::ot::{radio_to_matter_err, to_matter_err, OtNetCtl, OtNetStack, OtPersist};
 use crate::ot::{OtMatterResources, OtMdns, OtNetif};

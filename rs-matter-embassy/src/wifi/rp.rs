@@ -16,6 +16,7 @@ use crate::matter::error::{Error, ErrorCode};
 use crate::matter::tlv::Nullable;
 use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::sync::IfMutex;
+use crate::matter::utils::timers::{Duration, Timer};
 
 /// An adaptor from the `cyw43` Wifi controller API to the `rs-matter` Wifi controller API
 pub struct Cyw43WifiController<'a>(
@@ -160,7 +161,7 @@ impl NetChangeNotif for Cyw43WifiController<'_> {
 
             // Cyw43 does not have any means to wait on a state change - nor it has any means to detect disconnection -
             // so here we just wait for 2 seconds
-            embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
+            Timer::after(Duration::from_secs(2)).await;
         }
     }
 }

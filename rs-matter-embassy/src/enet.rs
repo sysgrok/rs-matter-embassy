@@ -6,20 +6,18 @@ use core::net::Ipv6Addr;
 
 use cfg_if::cfg_if;
 
-use embassy_futures::select::select;
-
 use embassy_net::driver::{Driver, HardwareAddress as DriverHardwareAddress};
 use embassy_net::{
     Config, ConfigV6, HardwareAddress, Ipv6Cidr, Runner, Stack, StackResources, StaticConfigV6,
 };
 
-use embassy_time::{Duration, Timer};
-
 use crate::matter::dm::clusters::gen_diag::{InterfaceTypeEnum, NetifDiag, NetifInfo};
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
 use crate::matter::transport::network::{MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE};
+use crate::matter::utils::futures::select;
 use crate::matter::utils::sync::blocking::Mutex;
+use crate::matter::utils::timers::{Duration, Timer};
 use crate::stack::nal::{NetStack, NoopNet};
 
 /// Re-export the `edge-nal-embassy` crate
@@ -188,7 +186,7 @@ pub fn create_enet_config<D: Driver>(driver: &D) -> Config {
     config.ipv6 = ConfigV6::Static(StaticConfigV6 {
         address: Ipv6Cidr::new(create_link_local_ipv6(&mac), 10),
         gateway: None,
-        dns_servers: heapless::Vec::new(),
+        dns_servers: Default::default(),
     });
 
     config

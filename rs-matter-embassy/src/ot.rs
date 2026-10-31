@@ -5,10 +5,6 @@ use core::fmt::Write;
 use core::future::poll_fn;
 use core::net::IpAddr;
 
-use embassy_futures::select::{select, select3};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_time::{Duration, Instant, Timer};
-
 use openthread::{
     Channels, DnsResponse, OpenThread, OtError, OtResources, OtSrpResources, OtUdpResources,
     RamSettings, RamSettingsChange, SettingsKey, SharedRamSettings, SrpConf, SrpService,
@@ -40,10 +36,12 @@ use crate::matter::persist::VENDOR_KEYS_START;
 use crate::matter::transport::network::mdns::{DottedName, MdnsRemoteService, MdnsTxt};
 use crate::matter::transport::network::{MatterRemoteService, MAX_RX_PACKET_SIZE};
 use crate::matter::transport::MdnsResponder;
+use crate::matter::utils::futures::{select, select3, Coalesce};
 use crate::matter::utils::init::zeroed;
 use crate::matter::utils::init::{init, Init};
-use crate::matter::utils::select::Coalesce;
-use crate::matter::utils::storage::Vec;
+use crate::matter::utils::storage::{String, Vec};
+use crate::matter::utils::sync::blocking::raw::MatterRawMutex;
+use crate::matter::utils::timers::{Duration, Instant, Timer};
 
 /// Re-export the `openthread` crate
 pub mod openthread {
@@ -800,7 +798,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
 
             let ieee_eui64 = ot.ieee_eui64();
 
-            let mut hostname = heapless::String::<16>::new();
+            let mut hostname = String::<16>::new();
             unwrap!(
                 write!(
                     hostname,
@@ -850,7 +848,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
             // state back (for the ICD TXT keys) - so expanding a service inside the
             // closure panics on a re-entrant borrow. Collect the published services
             // first, then expand and register them with the borrow released.
-            let mut services = heapless::Vec::<MatterLocalService, MAX_LOCAL_SERVICES>::new();
+            let mut services = Vec::<MatterLocalService, MAX_LOCAL_SERVICES>::new();
 
             unwrap!(matter.mdns_services(|matter_service| {
                 unwrap!(services.push(matter_service));
@@ -907,7 +905,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
             // DNS client is a unicast resolver against the BR's DNS-SD server,
             // which serves the Thread domain `default.service.arpa` (NOT mDNS
             // `local`).
-            let mut label = heapless::String::<33>::new();
+            let mut label = String::<33>::new();
             let service_name = match service {
                 MatterRemoteService::Operational {
                     compressed_fabric_id,
@@ -925,7 +923,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
             // The deposited instance name must match what `rs-matter` expects,
             // i.e. the mDNS `.local` form (see `MatterRemoteService::instance_name`),
             // NOT the `default.service.arpa` name we actually queried.
-            let mut instance_name = heapless::String::<128>::new();
+            let mut instance_name = String::<128>::new();
             service.instance_name(&mut instance_name);
 
             let result = ot
@@ -988,9 +986,9 @@ impl<'a, 'd> OtMdns<'a, 'd> {
             // Build the (sub)type browse name in OpenThread's DNS-SD domain.
             // `CommissionableFilter::service_type(.., false)` yields e.g.
             // `_matterc._udp` or `_L1234._sub._matterc._udp`; append the domain.
-            let mut service_type = heapless::String::<64>::new();
+            let mut service_type = String::<64>::new();
             filter.service_type(&mut service_type, false);
-            let mut service_name = heapless::String::<96>::new();
+            let mut service_name = String::<96>::new();
             let _ = write!(service_name, "{service_type}.default.service.arpa");
 
             let result = ot
@@ -1016,7 +1014,7 @@ impl<'a, 'd> OtMdns<'a, 'd> {
                         // hex-id label + the commissionable service-type suffix in
                         // the `.local` form (the browse deposit matches on the id
                         // label and the TXT records, not the domain).
-                        let mut instance_name = heapless::String::<96>::new();
+                        let mut instance_name = String::<96>::new();
                         let _ = write!(instance_name, "{label}._matterc._udp.local");
 
                         matter
@@ -1092,7 +1090,7 @@ fn is_persisted_setting(key: u16) -> bool {
 /// A struct for implementing persistance of `openthread` settings - volatitle and
 /// non-volatile (for selected keys)
 pub struct OtPersist<'d, K> {
-    settings: SharedRamSettings<'d, NoopRawMutex, fn(RamSettingsChange) -> bool>,
+    settings: SharedRamSettings<'d, MatterRawMutex, fn(RamSettingsChange) -> bool>,
     kv: K,
 }
 
@@ -1122,7 +1120,7 @@ where
     /// Return a reference to the `SharedRamSettings` instance to be used with `openthread`
     pub const fn settings(
         &self,
-    ) -> &SharedRamSettings<'d, NoopRawMutex, fn(RamSettingsChange) -> bool> {
+    ) -> &SharedRamSettings<'d, MatterRawMutex, fn(RamSettingsChange) -> bool> {
         &self.settings
     }
 

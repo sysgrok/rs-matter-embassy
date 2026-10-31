@@ -1,7 +1,5 @@
 use core::pin::pin;
 
-use embassy_futures::select::select;
-
 use crate::ble::{BtpGattContext, Controller};
 use crate::enet::{create_enet_stack, EnetNetif, EnetStack};
 use crate::eth::EmbassyNetContext;
@@ -12,7 +10,7 @@ use crate::matter::dm::clusters::wifi_diag::{WifiDiag, WirelessDiag};
 use crate::matter::dm::networks::wireless::{Wifi, WifiNetworks};
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
-use crate::matter::utils::select::Coalesce;
+use crate::matter::utils::futures::{select, Coalesce};
 use crate::stack::network::{Embedding, Network};
 use crate::stack::wireless::{self, Gatt, GattTask, MAX_WIRELESS_NETWORKS};
 

@@ -19,6 +19,7 @@ use crate::matter::error::{Error, ErrorCode};
 use crate::matter::tlv::Nullable;
 use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::sync::IfMutex;
+use crate::matter::utils::timers::{Duration, Timer};
 
 /// An adaptor from the `esp-wifi` Wifi controller API to the `rs-matter` Wifi controller API
 pub struct EspWifiController<'a>(IfMutex<WifiController<'a>>, Mutex<Cell<bool>>);
@@ -197,7 +198,7 @@ impl NetChangeNotif for EspWifiController<'_> {
                 return;
             }
 
-            embassy_time::Timer::after(embassy_time::Duration::from_secs(2)).await;
+            Timer::after(Duration::from_secs(2)).await;
         }
 
         // Code below is commented out because it is a bit complex to wait on events in the first place and at the

@@ -5,13 +5,12 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 use std::rc::Rc;
 
-use embassy_futures::block_on;
-
 use embedded_storage_async::nor_flash::{
     ErrorType, MultiwriteNorFlash, NorFlash, NorFlashErrorKind, ReadNorFlash,
 };
 
 use rs_matter_embassy::matter::persist::KvBlobStore;
+use rs_matter_embassy::matter::utils::futures::block_on;
 use rs_matter_embassy::persist::SeqMapKvBlobStore;
 
 use sequential_storage::cache::Cache;

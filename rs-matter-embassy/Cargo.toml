@@ -10,7 +10,7 @@ description = "Run rs-matter with embassy"
 repository = "https://github.com/sysgrok/rs-matter-embassy"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-rust-version = "1.87"
+rust-version = "1.92"
 
 [lib]
 test = false
@@ -277,11 +277,8 @@ openthread-heap-int-65528 = ["openthread?/heap-int-65528"]
 log = { version = "0.4", default-features = false, optional = true }
 defmt = { version = "1", optional = true, features = ["ip_in_core"] }
 cfg-if = "1"
-heapless = "0.9"
 enumset = { version = "1", default-features = false }
-embassy-futures = "0.1"
 embassy-sync = "0.8"
-embassy-time = "0.5"
 embedded-io = "0.7"
 scopeguard = { version = "1", default-features = false }
 rs-matter-stack = { version = "0.3", default-features = false }

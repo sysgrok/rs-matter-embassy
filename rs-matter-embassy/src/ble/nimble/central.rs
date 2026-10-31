@@ -15,7 +15,6 @@
 
 use core::cell::Cell;
 
-use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
 use nimble_rs::gap::GapEvent;
@@ -26,8 +25,8 @@ use rs_matter_stack::matter::error::{Error, ErrorCode};
 use rs_matter_stack::matter::transport::network::btp::Btp;
 use rs_matter_stack::matter::transport::network::BtAddr;
 use rs_matter_stack::matter::utils::cell::RefCell;
+use rs_matter_stack::matter::utils::futures::{select, Coalesce};
 use rs_matter_stack::matter::utils::init::{init, Init};
-use rs_matter_stack::matter::utils::select::Coalesce;
 use rs_matter_stack::matter::utils::storage::Vec;
 use rs_matter_stack::matter::utils::sync::blocking::Mutex;
 use rs_matter_stack::matter::utils::sync::Signal;

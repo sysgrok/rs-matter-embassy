@@ -9,8 +9,6 @@ use core::mem::MaybeUninit;
 use core::ops::Deref;
 use core::pin::pin;
 
-use embassy_futures::select::select;
-
 use rs_matter_stack::ble::GattPeripheral;
 use rs_matter_stack::matter::crypto::Rng;
 use rs_matter_stack::matter::error::{Error, ErrorCode};
@@ -18,8 +16,8 @@ use rs_matter_stack::matter::transport::network::btp::{
     AdvData, Btp, C1_CHARACTERISTIC_UUID, C2_CHARACTERISTIC_UUID, MATTER_BLE_SERVICE_UUID16,
 };
 use rs_matter_stack::matter::transport::network::BtAddr;
+use rs_matter_stack::matter::utils::futures::{select, Coalesce};
 use rs_matter_stack::matter::utils::init::{init, Init};
-use rs_matter_stack::matter::utils::select::Coalesce;
 use rs_matter_stack::matter::utils::storage::Vec;
 use rs_matter_stack::matter::utils::sync::{IfMutex, Notification};
 

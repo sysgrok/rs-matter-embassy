@@ -14,7 +14,6 @@ use core::env;
 use core::pin::pin;
 
 use embassy_executor::Spawner;
-use embassy_futures::select::select;
 
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
@@ -38,8 +37,9 @@ use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node};
 use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
+use rs_matter_embassy::matter::utils::futures::{select, Coalesce};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
-use rs_matter_embassy::matter::utils::select::Coalesce;
+use rs_matter_embassy::matter::utils::timers::{Duration, Timer};
 use rs_matter_embassy::matter::{clusters, devices, root_endpoint};
 use rs_matter_embassy::stack::rand::reseeding_csprng;
 use rs_matter_embassy::stack::utils::futures::IntoFaillble;
@@ -209,7 +209,7 @@ async fn connection(mut controller: WifiController<'_>) {
                 .wait_for_access_point_connected_event_async()
                 .await
                 .unwrap();
-            embassy_time::Timer::after(embassy_time::Duration::from_millis(5000)).await
+            Timer::after(Duration::from_millis(5000)).await
         }
         info!("About to connect...");
 
@@ -217,7 +217,7 @@ async fn connection(mut controller: WifiController<'_>) {
             Ok(_) => info!("Wifi connected!"),
             Err(e) => {
                 info!("Failed to connect to wifi: {e:?}");
-                embassy_time::Timer::after(embassy_time::Duration::from_millis(5000)).await
+                Timer::after(Duration::from_millis(5000)).await
             }
         }
     }

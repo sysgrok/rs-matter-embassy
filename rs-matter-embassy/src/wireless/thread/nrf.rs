@@ -17,7 +17,7 @@
 
 use core::pin::pin;
 
-use embassy_futures::select::{select, Either};
+use rs_matter_stack::matter::utils::futures::{select, Either};
 
 use embassy_nrf::interrupt;
 use embassy_nrf::interrupt::typelevel::{Binding, Interrupt};

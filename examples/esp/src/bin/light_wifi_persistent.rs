@@ -21,7 +21,6 @@ use core::pin::pin;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_executor::Spawner;
 
-use embassy_futures::select::{select, Either};
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
 use esp_bootloader_esp_idf::partitions::{
@@ -48,8 +47,9 @@ use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node};
 use rs_matter_embassy::matter::error::Error;
 use rs_matter_embassy::matter::persist::{KvBlobStore, VENDOR_KEYS_START};
+use rs_matter_embassy::matter::utils::futures::{select, Coalesce, Either};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
-use rs_matter_embassy::matter::utils::select::Coalesce;
+use rs_matter_embassy::matter::utils::timers::Timer;
 use rs_matter_embassy::matter::{clusters, devices};
 use rs_matter_embassy::persist::SeqMapKvBlobStore;
 use rs_matter_embassy::stack::rand::reseeding_csprng;
@@ -287,7 +287,7 @@ async fn wait_pin_low(mut pin: Input<'_>) -> Result<(), Error> {
         pin.wait_for_low().await;
 
         // Debounce
-        embassy_time::Timer::after_millis(50).await;
+        Timer::after_millis(50).await;
 
         if pin.is_low() {
             warn!(
@@ -295,11 +295,7 @@ async fn wait_pin_low(mut pin: Input<'_>) -> Result<(), Error> {
                 RESET_SECS
             );
 
-            let result = select(
-                pin.wait_for_high(),
-                embassy_time::Timer::after_secs(RESET_SECS),
-            )
-            .await;
+            let result = select(pin.wait_for_high(), Timer::after_secs(RESET_SECS)).await;
 
             if matches!(result, Either::Second(())) {
                 break;

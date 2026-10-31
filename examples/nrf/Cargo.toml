@@ -84,7 +84,6 @@ nrf54l15 = ["rs-matter-embassy/nrf54l15-app-s", "embassy-nrf/nrf54l15-app-s", "e
 embassy-executor = { version = "0.10", default-features = false, features = ["platform-cortex-m", "executor-thread", "executor-interrupt", "defmt"] }
 embassy-time = { version = "0.5", default-features = false, features = ["defmt", "defmt-timestamp-uptime-ms"] }
 embassy-nrf = { version = "0.11", features = ["defmt", "time"], default-features = false }
-embassy-futures = "0.1.1"
 embassy-sync = { version = "0.8", features = ["defmt"] }
 defmt = "1"
 embedded-alloc = "0.7"

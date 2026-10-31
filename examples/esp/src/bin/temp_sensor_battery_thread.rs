@@ -41,7 +41,6 @@ use core::pin::pin;
 
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_executor::Spawner;
-use embassy_futures::select::{select, select3, Either};
 
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
@@ -85,8 +84,9 @@ use rs_matter_embassy::matter::dm::{
 use rs_matter_embassy::matter::error::{Error, ErrorCode};
 use rs_matter_embassy::matter::persist::KvBlobStore;
 use rs_matter_embassy::matter::tlv::Nullable;
+use rs_matter_embassy::matter::utils::futures::{select, select3, Coalesce, Either};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
-use rs_matter_embassy::matter::utils::select::Coalesce;
+use rs_matter_embassy::matter::utils::timers::{Instant, Timer};
 use rs_matter_embassy::matter::{clusters, devices, with, Matter};
 use rs_matter_embassy::persist::SeqMapKvBlobStore;
 use rs_matter_embassy::stack::rand::reseeding_csprng;
@@ -502,7 +502,7 @@ async fn deep_sleep_when_idle(
         }
 
         // Let the persistence tasks flush whatever the active period changed.
-        embassy_time::Timer::after_millis(SLEEP_SETTLE_MS).await;
+        Timer::after_millis(SLEEP_SETTLE_MS).await;
 
         // Still idle? (A message might have arrived meanwhile.)
         if icd.power_mode() != IcdPowerMode::Idle {
@@ -514,7 +514,7 @@ async fn deep_sleep_when_idle(
         let poll_ms = icd.net_params().poll_interval_ms as u64;
         let idle_ms = icd
             .idle_until()
-            .map(|until| until.saturating_duration_since(embassy_time::Instant::now()))
+            .map(|until| until.saturating_duration_since(Instant::now()))
             .map(|d| d.as_millis())
             .unwrap_or(poll_ms);
         let sleep_ms = poll_ms.min(idle_ms).max(1000);
@@ -585,7 +585,7 @@ fn restore_clock(matter: &Matter<'_>) {
         return;
     }
 
-    let utc_us = slept.utc_us + slept.sleep_ms * 1000 + embassy_time::Instant::now().as_micros();
+    let utc_us = slept.utc_us + slept.sleep_ms * 1000 + Instant::now().as_micros();
     let granularity = match slept.granularity {
         4 => GranularityEnum::MicrosecondsGranularity,
         3 => GranularityEnum::MillisecondsGranularity,
@@ -686,7 +686,7 @@ async fn wait_pin_low(mut pin: Input<'_>) -> Result<(), Error> {
         pin.wait_for_low().await;
 
         // Debounce
-        embassy_time::Timer::after_millis(50).await;
+        Timer::after_millis(50).await;
 
         if pin.is_low() {
             warn!(
@@ -694,11 +694,7 @@ async fn wait_pin_low(mut pin: Input<'_>) -> Result<(), Error> {
                 RESET_SECS
             );
 
-            let result = select(
-                pin.wait_for_high(),
-                embassy_time::Timer::after_secs(RESET_SECS),
-            )
-            .await;
+            let result = select(pin.wait_for_high(), Timer::after_secs(RESET_SECS)).await;
 
             if matches!(result, Either::Second(())) {
                 break Ok(());

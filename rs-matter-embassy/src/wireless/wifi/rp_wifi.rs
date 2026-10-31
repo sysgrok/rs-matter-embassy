@@ -15,8 +15,8 @@ use embedded_io::ErrorType;
 use cyw43::{Aligned, Control, A4};
 use cyw43_pio::PioSpi;
 
-use embassy_futures::select::select;
-use embassy_futures::select::Either::{First, Second};
+use crate::matter::utils::futures::select;
+use crate::matter::utils::futures::Either::{First, Second};
 
 use embassy_net_driver_channel::Device;
 

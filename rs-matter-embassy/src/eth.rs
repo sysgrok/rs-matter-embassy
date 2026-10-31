@@ -5,8 +5,6 @@ use core::mem::MaybeUninit;
 use core::pin::pin;
 use core::task::Context;
 
-use embassy_futures::select::select;
-
 use embassy_net::driver::{Capabilities, Driver, HardwareAddress, LinkState, RxToken, TxToken};
 
 use crate::enet::{
@@ -17,8 +15,8 @@ use crate::matter::dm::clusters::eth_diag::EthDiag;
 use crate::matter::dm::clusters::gen_diag::InterfaceTypeEnum;
 use crate::matter::error::Error;
 use crate::matter::transport::network::mdns::builtin::BuiltinMdns;
+use crate::matter::utils::futures::{select, Coalesce};
 use crate::matter::utils::init::{init, Init};
-use crate::matter::utils::select::Coalesce;
 use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::sync::IfMutex;
 use crate::stack::eth::{Eth, Ethernet, EthernetTask};

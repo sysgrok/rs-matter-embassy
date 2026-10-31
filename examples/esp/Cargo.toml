@@ -138,8 +138,5 @@ esp-metadata-generated = "0.5"
 # else the defaults used to bring in (`rustcrypto`) is named explicitly.
 rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", default-features = false, features = ["esp", "log"] }
 tinyrlibc = { version = "0.5", default-features = false, features = ["memchr", "utoa", "strtoul"] }
-embassy-futures = "0.1"
-embassy-time = "0.5"
-embassy-sync = "0.8"
 static_cell = "2"
 portable-atomic = "1"
