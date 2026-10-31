@@ -209,7 +209,11 @@ async fn main(_s: Spawner) {
         // Chain any extra Endpoint 0 clusters of your own the same way.
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
-            Async(EthMatterStack::<0, ()>::root_handler(&(), &mut weak_rand)),
+            Async(EthMatterStack::<0, ()>::root_handler(
+                stack.matter(),
+                &(),
+                &mut weak_rand,
+            )),
         )
         // Our on-off cluster, on Endpoint 1
         .chain(

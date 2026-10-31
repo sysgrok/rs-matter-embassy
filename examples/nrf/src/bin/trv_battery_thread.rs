@@ -350,6 +350,7 @@ async fn main(_s: Spawner) {
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
             Async(EmbassyThreadMatterStack::<0, ()>::root_handler(
+                stack.matter(),
                 &(),
                 &mut weak_rand,
             )),
@@ -358,7 +359,10 @@ async fn main(_s: Spawner) {
         // the mode timings. Its `run` hook drives the ICD power mode state machine.
         .chain(
             |e, c| e == ROOT_ENDPOINT_ID && c == ICD_MGMT_CLUSTER.id,
-            Async(SitIcdMgmtHandler::new(Dataver::new_rand(&mut weak_rand), icd).adapt()),
+            Async(
+                SitIcdMgmtHandler::new(Dataver::new_rand(&mut weak_rand), stack.matter(), icd)
+                    .adapt(),
+            ),
         )
         // Our thermostat cluster, on Endpoint 1
         .chain(

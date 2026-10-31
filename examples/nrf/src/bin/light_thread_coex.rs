@@ -247,6 +247,7 @@ async fn main(_s: Spawner) {
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
             Async(EmbassyThreadMatterStack::<0, ()>::root_handler(
+                stack.matter(),
                 &(),
                 &mut weak_rand,
             )),
