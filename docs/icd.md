@@ -122,7 +122,7 @@ a full attach.
   off when idle, MTD) and maps the ICD polling interval onto the OpenThread data-poll period,
   sizing the child timeout and the child-supervision check timeout from it.
 - Concurrent commissioning keeps working, for Thread and Wifi alike: the coex drivers hand
-  the stack a `BleDriver` instead of a BLE controller, and the controller is created only while
+  the stack a `GattPeripheral` which owns the BLE radio, and the controller is created only while
   a commissioning window is advertised over BLE and torn down afterwards (`esp-radio`
   de-initializes its BLE stack on drop), so BLE costs nothing once commissioned and is never
   brought up by an already-commissioned device on wake-up. Where the controller is persistent

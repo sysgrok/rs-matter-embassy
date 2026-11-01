@@ -2,9 +2,11 @@
 //! UDP: A `UdpBind` trait implementation for `embassy-net`
 
 use core::cell::Cell;
-use core::net::Ipv6Addr;
+use core::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use cfg_if::cfg_if;
+
+use edge_nal::UdpBind;
 
 use embassy_net::driver::{Driver, HardwareAddress as DriverHardwareAddress};
 use embassy_net::{
@@ -18,7 +20,8 @@ use crate::matter::transport::network::{MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE};
 use crate::matter::utils::futures::select;
 use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::timers::{Duration, Timer};
-use crate::stack::nal::{NetStack, NoopNet};
+use crate::nal::{map_err, NalSocket};
+use crate::stack::net::NetStack;
 
 /// Re-export the `edge-nal-embassy` crate
 pub use edge_nal_embassy::*;
@@ -221,11 +224,9 @@ pub fn multicast_mac_for_link_local_ipv6(ip: &Ipv6Addr) -> [u8; 6] {
 }
 
 /// An implementation of `NetStack` for the `embassy-net` stack
-// TODO: Implement optional TCP support with a feature flag
 #[derive(Copy, Clone)]
 pub struct EnetStack<'a> {
     udp: Udp<'a>,
-    dns: Dns<'a>,
 }
 
 impl<'a> EnetStack<'a> {
@@ -233,55 +234,25 @@ impl<'a> EnetStack<'a> {
     pub fn new(stack: Stack<'a>, buffers: &'a EnetMatterUdpBuffers) -> Self {
         Self {
             udp: Udp::new(stack, buffers),
-            dns: Dns::new(stack),
         }
     }
 }
 
 impl<'a> NetStack for EnetStack<'a> {
-    type UdpBind<'t>
-        = Udp<'t>
+    type Socket<'t>
+        = NalSocket<<Udp<'a> as UdpBind>::Socket<'t>>
     where
         Self: 't;
 
-    type UdpConnect<'t>
-        = NoopNet
-    where
-        Self: 't;
+    async fn bind(
+        &self,
+        addr: SocketAddr,
+        ipv4_interface: Ipv4Addr,
+        ipv6_interface: u32,
+    ) -> Result<Self::Socket<'_>, Error> {
+        let socket = self.udp.bind(addr).await.map_err(map_err)?;
 
-    type TcpBind<'t>
-        = NoopNet
-    where
-        Self: 't;
-
-    type TcpConnect<'t>
-        = NoopNet
-    where
-        Self: 't;
-
-    type Dns<'t>
-        = Dns<'t>
-    where
-        Self: 't;
-
-    fn udp_bind(&self) -> Option<Self::UdpBind<'_>> {
-        Some(self.udp)
-    }
-
-    fn udp_connect(&self) -> Option<Self::UdpConnect<'_>> {
-        None
-    }
-
-    fn tcp_bind(&self) -> Option<Self::TcpBind<'_>> {
-        None
-    }
-
-    fn tcp_connect(&self) -> Option<Self::TcpConnect<'_>> {
-        None
-    }
-
-    fn dns(&self) -> Option<Self::Dns<'_>> {
-        Some(self.dns)
+        Ok(NalSocket::new(socket, ipv4_interface, ipv6_interface))
     }
 }
 

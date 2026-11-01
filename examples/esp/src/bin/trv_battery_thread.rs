@@ -85,8 +85,8 @@ use rs_matter_embassy::matter::utils::sync::blocking::Mutex;
 use rs_matter_embassy::matter::utils::timers::Timer;
 use rs_matter_embassy::matter::{clusters, devices, with};
 use rs_matter_embassy::persist::SeqMapKvBlobStore;
-use rs_matter_embassy::stack::rand::reseeding_csprng;
-use rs_matter_embassy::wireless::esp::EspThreadDriver;
+use rs_matter_embassy::rand::reseeding_csprng;
+use rs_matter_embassy::wireless::esp::EspThreadRadio;
 use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
 
 use tinyrlibc as _;
@@ -169,7 +169,7 @@ async fn main(_s: Spawner) {
 
     // The factory EUI-64, so that the node keeps its SRP host (and hardware address) across
     // reboots - the SRP key it registers with is persisted along with the rest.
-    let ieee_eui64 = EspThreadDriver::ieee_eui64();
+    let ieee_eui64 = EspThreadRadio::ieee_eui64();
 
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
@@ -246,7 +246,7 @@ async fn main(_s: Spawner) {
             // The Matter stack needs to instantiate an `openthread` Radio - as a Sleepy End
             // Device following the ICD state
             EmbassyThread::new(
-                EspThreadDriver::new(peripherals.IEEE802154, peripherals.BT),
+                EspThreadRadio::new(peripherals.IEEE802154, peripherals.BT),
                 crypto.rand().unwrap(),
                 ieee_eui64,
                 &kv,

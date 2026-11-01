@@ -69,7 +69,7 @@ use rs_matter_embassy::matter::utils::cell::RefCell;
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::sync::blocking::Mutex;
 use rs_matter_embassy::matter::{clusters, devices, with, BasicCommData};
-use rs_matter_embassy::stack::rand::reseeding_csprng;
+use rs_matter_embassy::rand::reseeding_csprng;
 #[cfg(feature = "nrf54l15")]
 use rs_matter_embassy::wireless::nrf::CcmInterruptHandler;
 #[cfg(any(feature = "nrf52840", feature = "xiao"))]
@@ -77,7 +77,7 @@ use rs_matter_embassy::wireless::nrf::NrfLfClock;
 use rs_matter_embassy::wireless::nrf::{
     EguInterruptHandler, LpTimerInterruptHandler, NrfIeee802154Peripherals, NrfMpslPeripherals,
     NrfSdcPeripherals, NrfThreadClockInterruptHandler, NrfThreadHighPrioInterruptHandler,
-    NrfThreadLowPrioInterruptHandler, NrfThreadMpslRadioDriver,
+    NrfThreadLowPrioInterruptHandler, NrfThreadMpslRadio,
 };
 use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
 
@@ -309,14 +309,7 @@ async fn main(_s: Spawner) {
     // followed by the Thread driver. A SIT device has no registrations and no Check-In counter.
     let icd: &'static Icd = mk_static!(Icd).init_with(Icd::init(ICD_MODE));
 
-    let thread_driver = NrfThreadMpslRadioDriver::new(
-        p.RADIO,
-        mpsl_p,
-        sdc_p,
-        ieee802154_p,
-        crypto.rand().unwrap(),
-        Irqs,
-    );
+    let thread_radio = NrfThreadMpslRadio::new(p.RADIO, mpsl_p, sdc_p, ieee802154_p, Irqs);
 
     // The XIAO nRF52840 (like the nRF52840 DK) and the XIAO nRF54L15 have a 32.768 kHz crystal:
     // the CSL receive windows are sized by the low-frequency clock's accuracy, and the RC
@@ -324,11 +317,11 @@ async fn main(_s: Spawner) {
     // top). The nRF54L15 loads the crystal with its internal capacitors, which only the `xiao`
     // feature sets up for the board.
     #[cfg(any(feature = "nrf52840", feature = "xiao"))]
-    let thread_driver = thread_driver.with_lf_clock(NrfLfClock::Xtal { accuracy_ppm: 20 });
+    let thread_radio = thread_radio.with_lf_clock(NrfLfClock::Xtal { accuracy_ppm: 20 });
 
     // The XIAO nRF54L15's RF switch draws ~90 µA when powered: power it only for the radio.
     #[cfg(all(feature = "xiao", feature = "nrf54l15"))]
-    let thread_driver = thread_driver.with_radio_activity_hook(xiao::rf_switch_power, 200);
+    let thread_radio = thread_radio.with_radio_activity_hook(xiao::rf_switch_power, 200);
 
     // The radiator valve: a heating-only Thermostat. The handler owns and persists the
     // setpoints and the mode; the logic below is the (simulated) valve itself.
@@ -392,7 +385,7 @@ async fn main(_s: Spawner) {
         // The Matter stack needs to instantiate `openthread` - as a Sleepy End Device
         // following the ICD state
         EmbassyThread::new(
-            thread_driver,
+            thread_radio,
             crypto.rand().unwrap(),
             ieee_eui64,
             &kv,

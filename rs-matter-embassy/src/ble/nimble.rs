@@ -13,20 +13,20 @@ use nimble_rs::gatt::att_mtu;
 use nimble_rs::gatt::server::{BleGattRegister, GattServices, GattsEvent};
 use nimble_rs::{gatt_services, Ble, BleError, BleUuid, HostEvent};
 
-use rs_matter_stack::ble::GattPeripheral;
-use rs_matter_stack::matter::crypto::Rng;
-use rs_matter_stack::matter::error::{Error, ErrorCode};
-use rs_matter_stack::matter::transport::network::btp::{
+use rs_matter::crypto::Rng;
+use rs_matter::error::{Error, ErrorCode};
+use rs_matter::stack::ble::GattPeripheral;
+use rs_matter::transport::network::btp::{
     AdvData, Btp, C1_CHARACTERISTIC_UUID, C2_CHARACTERISTIC_UUID, C3_CHARACTERISTIC_UUID,
     MATTER_BLE_SERVICE_UUID16,
 };
-use rs_matter_stack::matter::transport::network::BtAddr;
-use rs_matter_stack::matter::utils::cell::RefCell;
-use rs_matter_stack::matter::utils::futures::{select, select3, Coalesce};
-use rs_matter_stack::matter::utils::init::{init, Init};
-use rs_matter_stack::matter::utils::storage::Vec;
-use rs_matter_stack::matter::utils::sync::blocking::Mutex;
-use rs_matter_stack::matter::utils::sync::Signal;
+use rs_matter::transport::network::BtAddr;
+use rs_matter::utils::cell::RefCell;
+use rs_matter::utils::futures::{select, select3, Coalesce};
+use rs_matter::utils::init::{init, Init};
+use rs_matter::utils::storage::Vec;
+use rs_matter::utils::sync::blocking::Mutex;
+use rs_matter::utils::sync::Signal;
 
 use super::ControllerRef;
 

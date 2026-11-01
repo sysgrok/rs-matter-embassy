@@ -1,19 +1,25 @@
+use crate::matter::crypto::Rng;
 use crate::matter::error::Error;
+use crate::stack::wireless::{
+    GattDriver, GattTask, WifiCoexDriver, WifiCoexTask, WifiDriver, WifiTask,
+};
 use crate::wifi::esp::EspWifiController;
-use crate::wireless::esp::EspBleDriver;
+use crate::wireless::esp::EspGattPeripheral;
 
-/// A `WifiDriver` implementation for the ESP32 family of chips.
-pub struct EspWifiDriver<'d> {
+use super::EmbassyWifi;
+
+/// The Wifi and BLE radio of the ESP32 family of chips.
+pub struct EspWifiRadio<'d> {
     wifi_peripheral: esp_hal::peripherals::WIFI<'d>,
     bt_peripheral: esp_hal::peripherals::BT<'d>,
 }
 
-impl<'d> EspWifiDriver<'d> {
-    /// Create a new instance of the `Esp32WifiDriver` type.
+impl<'d> EspWifiRadio<'d> {
+    /// Create a new instance of the `EspWifiRadio` type.
     ///
     /// # Arguments
-    /// - `controller` - The `esp-radio` controller instance.
-    /// - `peripheral` - The Wifi peripheral instance.
+    /// - `wifi_peripheral` - The Wifi peripheral instance.
+    /// - `bt_peripheral` - The BT peripheral instance.
     pub fn new(
         wifi_peripheral: esp_hal::peripherals::WIFI<'d>,
         bt_peripheral: esp_hal::peripherals::BT<'d>,
@@ -25,18 +31,21 @@ impl<'d> EspWifiDriver<'d> {
     }
 }
 
-impl super::WifiDriver for EspWifiDriver<'_> {
+impl<R> WifiDriver for EmbassyWifi<'_, EspWifiRadio<'_>, R>
+where
+    R: Rng + Copy,
+{
     type NetCtl<'a>
         = crate::wifi::esp::EspWifiController<'a>
     where
         Self: 'a;
 
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
-        A: super::WifiDriverTask,
+        A: WifiTask,
     {
         let mut controller = unwrap!(esp_radio::wifi::WifiController::new(
-            self.wifi_peripheral.reborrow(),
+            self.radio.wifi_peripheral.reborrow(),
             esp_radio::wifi::ControllerConfig::default(),
         ));
 
@@ -48,25 +57,30 @@ impl super::WifiDriver for EspWifiDriver<'_> {
         // with `AuthenticationExpired`, so restore the previous level.
         unwrap!(controller.set_max_tx_power(80));
 
-        task.run(
-            esp_radio::wifi::Interface::station(),
-            EspWifiController::new(controller),
-        )
-        .await
+        self.runner
+            .run(
+                esp_radio::wifi::Interface::station(),
+                EspWifiController::new(controller),
+                task,
+            )
+            .await
     }
 }
 
-impl super::WifiCoexDriver for EspWifiDriver<'_> {
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+impl<R> WifiCoexDriver for EmbassyWifi<'_, EspWifiRadio<'_>, R>
+where
+    R: Rng + Copy,
+{
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
-        A: super::WifiCoexDriverTask,
+        A: WifiCoexTask,
     {
         // Wi-Fi power management while the station is disconnected starves the BLE controller:
         // BLE advertisements never go on air while Wi-Fi is up but not (yet) connected, which is
         // exactly the situation during concurrent commissioning. esp-radio hard-coded this to
         // `false` until esp-hal PR #6144, which made it configurable with the ESP-IDF default (`true`).
         let mut controller = unwrap!(esp_radio::wifi::WifiController::new(
-            self.wifi_peripheral.reborrow(),
+            self.radio.wifi_peripheral.reborrow(),
             esp_radio::wifi::ControllerConfig::default().with_sta_disconnected_pm(false),
         ));
 
@@ -79,23 +93,37 @@ impl super::WifiCoexDriver for EspWifiDriver<'_> {
         unwrap!(controller.set_max_tx_power(80));
 
         // The BLE controller is created (and the `esp-radio` BLE stack initialized) only while
-        // the task actually runs BLE - see `EspBleDriver`.
-        task.run(
-            esp_radio::wifi::Interface::station(),
-            EspWifiController::new(controller),
-            EspBleDriver::new(self.bt_peripheral.reborrow()),
-        )
-        .await
+        // the task actually runs BLE - see `EspGattPeripheral`.
+        let gatt = EspGattPeripheral::new(
+            self.radio.bt_peripheral.reborrow(),
+            self.runner.ble_rand(),
+            self.runner.ble_context(),
+        );
+
+        self.runner
+            .run_coex(
+                esp_radio::wifi::Interface::station(),
+                EspWifiController::new(controller),
+                gatt,
+                task,
+            )
+            .await
     }
 }
 
-impl super::BleDriver for EspWifiDriver<'_> {
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
+impl<R> GattDriver for EmbassyWifi<'_, EspWifiRadio<'_>, R>
+where
+    R: Rng + Copy,
+{
+    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
-        A: super::BleDriverTask,
+        A: GattTask,
     {
-        EspBleDriver::new(self.bt_peripheral.reborrow())
-            .run(task)
-            .await
+        task.run(EspGattPeripheral::new(
+            self.radio.bt_peripheral.reborrow(),
+            self.runner.ble_rand(),
+            self.runner.ble_context(),
+        ))
+        .await
     }
 }

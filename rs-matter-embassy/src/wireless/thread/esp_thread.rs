@@ -1,17 +1,25 @@
 use openthread::esp::EspRadio;
 
-use rs_matter_stack::matter::error::Error;
+use rs_matter::persist::KvBlobStoreAccess;
 
-use crate::wireless::esp::EspBleDriver;
+use crate::matter::crypto::CryptoRng;
+use crate::matter::error::Error;
+use crate::ot::OtNetCtl;
+use crate::stack::wireless::{
+    GattDriver, GattTask, ThreadCoexDriver, ThreadCoexTask, ThreadDriver, ThreadTask,
+};
+use crate::wireless::esp::EspGattPeripheral;
 
-/// A `ThreadRadio` implementation for the ESP32 family of chips.
-pub struct EspThreadDriver<'d> {
+use super::EmbassyThread;
+
+/// The Thread and BLE radio of the ESP32 family of chips.
+pub struct EspThreadRadio<'d> {
     radio_peripheral: esp_hal::peripherals::IEEE802154<'d>,
     bt_peripheral: esp_hal::peripherals::BT<'d>,
     rx_queue_size: Option<usize>,
 }
 
-impl<'d> EspThreadDriver<'d> {
+impl<'d> EspThreadRadio<'d> {
     /// Create a new instance of the `EspThreadRadio` type.
     ///
     /// # Arguments
@@ -56,50 +64,80 @@ impl<'d> EspThreadDriver<'d> {
     }
 }
 
-impl super::ThreadDriver for EspThreadDriver<'_> {
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+impl<K, C> ThreadDriver for EmbassyThread<'_, EspThreadRadio<'_>, K, C>
+where
+    K: KvBlobStoreAccess,
+    C: CryptoRng + Copy,
+{
+    type NetCtl<'a>
+        = &'a OtNetCtl<'a>
     where
-        A: super::ThreadDriverTask,
-    {
-        let radio = EspRadio::new(openthread::esp::Ieee802154::new(
-            self.radio_peripheral.reborrow(),
-        ));
-        let radio = match self.rx_queue_size {
-            Some(rx_queue_size) => radio.with_rx_queue_size(rx_queue_size),
-            None => radio,
-        };
+        Self: 'a;
 
-        task.run(radio).await
-    }
-}
-
-impl super::ThreadCoexDriver for EspThreadDriver<'_> {
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
-    where
-        A: super::ThreadCoexDriverTask,
-    {
-        let radio = EspRadio::new(openthread::esp::Ieee802154::new(
-            self.radio_peripheral.reborrow(),
-        ));
-        let radio = match self.rx_queue_size {
-            Some(rx_queue_size) => radio.with_rx_queue_size(rx_queue_size),
-            None => radio,
-        };
-
-        // The BLE controller is created (and the `esp-radio` BLE stack initialized) only while
-        // the task actually runs BLE - see `EspBleDriver`.
-        task.run(radio, EspBleDriver::new(self.bt_peripheral.reborrow()))
-            .await
-    }
-}
-
-impl super::BleDriver for EspThreadDriver<'_> {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
-        A: super::BleDriverTask,
+        A: ThreadTask,
     {
-        EspBleDriver::new(self.bt_peripheral.reborrow())
-            .run(task)
-            .await
+        let radio = create_radio(
+            self.radio.radio_peripheral.reborrow(),
+            self.radio.rx_queue_size,
+        );
+
+        self.runner.run(radio, task).await
+    }
+}
+
+impl<K, C> ThreadCoexDriver for EmbassyThread<'_, EspThreadRadio<'_>, K, C>
+where
+    K: KvBlobStoreAccess,
+    C: CryptoRng + Copy,
+{
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
+    where
+        A: ThreadCoexTask,
+    {
+        // The BLE controller is created (and the `esp-radio` BLE stack initialized) only while
+        // the task actually runs BLE - see `EspGattPeripheral`.
+        let gatt = EspGattPeripheral::new(
+            self.radio.bt_peripheral.reborrow(),
+            self.runner.ble_rand(),
+            self.runner.ble_context(),
+        );
+
+        let radio = create_radio(
+            self.radio.radio_peripheral.reborrow(),
+            self.radio.rx_queue_size,
+        );
+
+        self.runner.run_coex(radio, gatt, task).await
+    }
+}
+
+impl<K, C> GattDriver for EmbassyThread<'_, EspThreadRadio<'_>, K, C>
+where
+    C: CryptoRng + Copy,
+{
+    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+    where
+        A: GattTask,
+    {
+        task.run(EspGattPeripheral::new(
+            self.radio.bt_peripheral.reborrow(),
+            self.runner.ble_rand(),
+            self.runner.ble_context(),
+        ))
+        .await
+    }
+}
+
+fn create_radio(
+    peripheral: esp_hal::peripherals::IEEE802154<'_>,
+    rx_queue_size: Option<usize>,
+) -> EspRadio<'_> {
+    let radio = EspRadio::new(openthread::esp::Ieee802154::new(peripheral));
+
+    match rx_queue_size {
+        Some(rx_queue_size) => radio.with_rx_queue_size(rx_queue_size),
+        None => radio,
     }
 }

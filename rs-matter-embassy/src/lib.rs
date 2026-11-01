@@ -36,10 +36,14 @@ pub mod error;
 #[cfg(feature = "embassy-net")]
 pub mod eth;
 pub mod matter;
+#[cfg(any(feature = "embassy-net", feature = "openthread"))]
+pub mod nal;
 #[cfg(feature = "openthread")]
 pub mod ot;
 pub mod persist;
+pub mod rand;
 pub mod stack;
+pub mod utils;
 #[cfg(feature = "embassy-net")]
 // TODO: We need a dedicated "wifi" feature or at least a dedicated "esp-wifi" feature
 pub mod wifi;

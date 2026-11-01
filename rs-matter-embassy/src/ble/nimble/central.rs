@@ -21,15 +21,15 @@ use nimble_rs::gap::GapEvent;
 use nimble_rs::gatt::client::GattcEvent;
 use nimble_rs::{Ble, BleAddr, HostEvent};
 
-use rs_matter_stack::matter::error::{Error, ErrorCode};
-use rs_matter_stack::matter::transport::network::btp::Btp;
-use rs_matter_stack::matter::transport::network::BtAddr;
-use rs_matter_stack::matter::utils::cell::RefCell;
-use rs_matter_stack::matter::utils::futures::{select, Coalesce};
-use rs_matter_stack::matter::utils::init::{init, Init};
-use rs_matter_stack::matter::utils::storage::Vec;
-use rs_matter_stack::matter::utils::sync::blocking::Mutex;
-use rs_matter_stack::matter::utils::sync::Signal;
+use rs_matter::error::{Error, ErrorCode};
+use rs_matter::transport::network::btp::Btp;
+use rs_matter::transport::network::BtAddr;
+use rs_matter::utils::cell::RefCell;
+use rs_matter::utils::futures::{select, Coalesce};
+use rs_matter::utils::init::{init, Init};
+use rs_matter::utils::storage::Vec;
+use rs_matter::utils::sync::blocking::Mutex;
+use rs_matter::utils::sync::Signal;
 
 use super::{to_matter_err_ble, Controller, C1_UUID, C2_UUID, MAX_MTU_SIZE, SVC_UUID};
 use crate::ble::ControllerRef;

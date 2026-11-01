@@ -79,7 +79,7 @@ use rs_matter_embassy::matter::persist::DummyKvBlobStore;
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices};
 use rs_matter_embassy::stack::rand::reseeding_csprng;
-use rs_matter_embassy::wireless::esp::EspWifiDriver;
+use rs_matter_embassy::wireless::esp::EspWifiRadio;
 use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiMatterStack};
 
 use tinyrlibc as _;
@@ -205,7 +205,7 @@ async fn main(_s: Spawner) {
     let matter = pin!(stack.run_coex(
         // The Matter stack needs to instantiate an `embassy-net` `Driver` and `Controller`
         EmbassyWifi::new(
-            EspWifiDriver::new(peripherals.WIFI, peripherals.BT),
+            EspWifiRadio::new(peripherals.WIFI, peripherals.BT),
             weak_rand,
             true, // Use a random BLE address
             stack,

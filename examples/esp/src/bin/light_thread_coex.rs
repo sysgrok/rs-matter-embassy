@@ -36,8 +36,8 @@ use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node
 use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices, root_endpoint, BasicCommData};
-use rs_matter_embassy::stack::rand::reseeding_csprng;
-use rs_matter_embassy::wireless::esp::EspThreadDriver;
+use rs_matter_embassy::rand::reseeding_csprng;
+use rs_matter_embassy::wireless::esp::EspThreadRadio;
 use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
 
 use tinyrlibc as _;
@@ -168,7 +168,7 @@ async fn main(_s: Spawner) {
     let matter = pin!(stack.run_coex(
         // The Matter stack needs to instantiate an `openthread` Radio
         EmbassyThread::new(
-            EspThreadDriver::new(peripherals.IEEE802154, peripherals.BT),
+            EspThreadRadio::new(peripherals.IEEE802154, peripherals.BT),
             crypto.rand().unwrap(),
             ieee_eui64,
             &kv,

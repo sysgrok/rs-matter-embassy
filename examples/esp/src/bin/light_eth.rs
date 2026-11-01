@@ -25,7 +25,7 @@ use esp_radio::wifi::{AuthenticationMethodConfig, Config, WifiController};
 
 use log::info;
 
-use rs_matter_embassy::eth::{EmbassyEthMatterStack, EmbassyEthernet, PreexistingEthDriver};
+use rs_matter_embassy::eth::{EmbassyEthMatterStack, EmbassyEthernet};
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::app::on_off::{self, OnOffHooks};
@@ -41,8 +41,8 @@ use rs_matter_embassy::matter::utils::futures::{select, Coalesce};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::timers::{Duration, Timer};
 use rs_matter_embassy::matter::{clusters, devices, root_endpoint};
-use rs_matter_embassy::stack::rand::reseeding_csprng;
-use rs_matter_embassy::stack::utils::futures::IntoFaillble;
+use rs_matter_embassy::rand::reseeding_csprng;
+use rs_matter_embassy::utils::futures::IntoFaillble;
 
 use tinyrlibc as _;
 
@@ -182,7 +182,7 @@ async fn main(_s: Spawner) {
     // Using `pin!` is completely optional, but reduces the size of the final future
     let mut matter = pin!(stack.run(
         // The Matter stack needs the ethernet inteface to run
-        EmbassyEthernet::new(PreexistingEthDriver::new(station), weak_rand, stack,),
+        EmbassyEthernet::new(station, weak_rand, stack,),
         // The crypto provider
         &crypto,
         // Our `AsyncHandler` + `AsyncMetadata` impl

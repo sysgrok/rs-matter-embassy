@@ -35,7 +35,7 @@ use tinyrlibc as _;
 
 use embedded_hal_bus::spi::ExclusiveDevice;
 
-use rs_matter_embassy::eth::{EmbassyEthMatterStack, EmbassyEthernet, PreexistingEthDriver};
+use rs_matter_embassy::eth::{EmbassyEthMatterStack, EmbassyEthernet};
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::app::on_off::{self, OnOffHooks};
@@ -53,7 +53,7 @@ use rs_matter_embassy::matter::{clusters, devices, root_endpoint};
 use defmt::{info, unwrap};
 
 use panic_rtt_target as _;
-use rs_matter_embassy::stack::rand::{reseeding_csprng, RngAdaptor};
+use rs_matter_embassy::rand::{reseeding_csprng, RngAdaptor};
 
 macro_rules! mk_static {
     ($t:ty) => {{
@@ -198,11 +198,7 @@ async fn main(spawner: Spawner) {
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
     let matter = pin!(stack.run(
         // The Matter stack needs the ethernet inteface to run
-        EmbassyEthernet::new(
-            PreexistingEthDriver::new(device),
-            crypto.rand().unwrap(),
-            stack,
-        ),
+        EmbassyEthernet::new(device, crypto.rand().unwrap(), stack,),
         // The crypto provider
         &crypto,
         // Our `AsyncHandler` + `AsyncMetadata` impl

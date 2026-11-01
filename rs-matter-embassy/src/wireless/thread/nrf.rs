@@ -1,11 +1,11 @@
 //! Thread (and BLE) drivers for Nordic silicon.
 //!
 //! Two drivers live here:
-//! - [`NrfThreadMpslRadioDriver`] drives the IEEE 802.15.4 radio through the Nordic
+//! - [`NrfThreadMpslRadio`] drives the IEEE 802.15.4 radio through the Nordic
 //!   C driver (the `nrf-802154` crate) on top of MPSL, and is therefore the only
 //!   one capable of running Thread and BLE at the same time. It works on every
 //!   supported part.
-//! - `NrfThreadRustRadioDriver` drives the bare PHY of `embassy-nrf` with a
+//! - `NrfThreadRustRadio` drives the bare PHY of `embassy-nrf` with a
 //!   software MAC on top. It is nRF52-only - the nRF54L series has no `embassy-nrf`
 //!   radio driver - and it cannot coexist with BLE.
 //!
@@ -17,7 +17,7 @@
 
 use core::pin::pin;
 
-use rs_matter_stack::matter::utils::futures::{select, Either};
+use rs_matter::utils::futures::{select, Either};
 
 use embassy_nrf::interrupt;
 use embassy_nrf::interrupt::typelevel::{Binding, Interrupt};
@@ -32,9 +32,19 @@ use nrf_mpsl::{
 
 use nrf_sdc::SoftdeviceController;
 
-use rs_matter_stack::matter::crypto::{CryptoRng, Rng, TryCryptoRng, TryRng};
-use rs_matter_stack::matter::error::{Error, ErrorCode};
-use rs_matter_stack::rand::RngAdaptor;
+use rs_matter::crypto::{CryptoRng, Rng, TryCryptoRng, TryRng};
+use rs_matter::error::{Error, ErrorCode};
+use rs_matter::persist::KvBlobStoreAccess;
+use rs_matter::stack::ble::GattPeripheral;
+use rs_matter::stack::wireless::{GattDriver, GattTask, ThreadDriver, ThreadTask};
+use rs_matter::stack::wireless::{ThreadCoexDriver, ThreadCoexTask};
+use rs_matter::transport::network::btp::{AdvData, Btp};
+
+use crate::ble::{BtpGattContext, BtpGattPeripheral};
+use crate::ot::OtNetCtl;
+use crate::rand::RngAdaptor;
+
+use super::EmbassyThread;
 
 #[cfg(feature = "_nrf52")]
 use embassy_nrf::interrupt::typelevel::Handler;
@@ -49,7 +59,7 @@ use openthread::{
 #[cfg(feature = "_nrf52")]
 use portable_atomic::{AtomicBool, Ordering};
 #[cfg(feature = "_nrf52")]
-use rs_matter_stack::matter::utils::sync::Signal;
+use rs_matter::utils::sync::Signal;
 
 #[cfg(feature = "_nrf54l")]
 pub use nrf_802154::CcmInterruptHandler;
@@ -251,7 +261,7 @@ unsafe impl Binding<interrupt::typelevel::CLOCK_POWER, NrfBleClockInterruptHandl
 }
 
 /// Re-states, for the benefit of the 802.15.4 driver, the bindings that the
-/// caller of `NrfThreadMpslRadioDriver::new` had to prove it made.
+/// caller of `NrfThreadMpslRadio::new` had to prove it made.
 #[derive(Copy, Clone)]
 struct NrfThreadMpslRadioInterrupts;
 unsafe impl Binding<irqs::RadioEgu, EguInterruptHandler> for NrfThreadMpslRadioInterrupts {}
@@ -506,14 +516,14 @@ impl NrfLfClock {
     }
 }
 
-/// An MPSL driver helper.
-struct MpslDriver<'d> {
+/// The MPSL part of a radio.
+struct MpslParts<'d> {
     p: NrfMpslPeripherals<'d>,
     lf_clock: NrfLfClock,
     radio_activity_hook: Option<(fn(bool), u16)>,
 }
 
-impl<'d> MpslDriver<'d> {
+impl<'d> MpslParts<'d> {
     fn new(p: NrfMpslPeripherals<'d>) -> Self {
         Self {
             p,
@@ -584,12 +594,12 @@ mod radio_activity {
     }
 }
 
-/// An SDC driver helper.
-struct SdcDriver<'d> {
+/// The SDC part of a radio.
+struct SdcParts<'d> {
     p: NrfSdcPeripherals<'d>,
 }
 
-impl<'d> SdcDriver<'d> {
+impl<'d> SdcParts<'d> {
     fn new(p: NrfSdcPeripherals<'d>) -> Self {
         Self { p }
     }
@@ -613,33 +623,31 @@ impl<'d> SdcDriver<'d> {
     }
 }
 
-/// A `BleDriver` creating the SoftDevice Controller on top of an MPSL instance which is
+/// A `GattPeripheral` creating the SoftDevice Controller on top of an MPSL instance which is
 /// already up.
 ///
-/// The controller only exists while a task runs - with `rs-matter-stack`, while a commissioning
+/// The controller only exists while the peripheral runs - with the stack, while a commissioning
 /// window is advertised over BLE - and dropping it (`sdc_disable`) stops whatever it was still
 /// doing, advertising included: the BLE host has no chance to stop that itself, as its future is
-/// dropped together with the task's.
-struct SdcBleDriver<'a, 'm, 'd, R> {
+/// dropped together with the run's.
+struct SdcGattPeripheral<'a, 'm, 'd, R> {
     mpsl: &'a MultiprotocolServiceLayer<'m>,
-    sdc: &'a mut SdcDriver<'d>,
+    sdc: &'a mut SdcParts<'d>,
     rand: R,
+    ble_rand: Option<R>,
+    context: &'a BtpGattContext,
 }
 
-impl<'a, 'm, 'd, R> SdcBleDriver<'a, 'm, 'd, R> {
-    fn new(mpsl: &'a MultiprotocolServiceLayer<'m>, sdc: &'a mut SdcDriver<'d>, rand: R) -> Self {
-        Self { mpsl, sdc, rand }
-    }
-}
-
-impl<R> super::BleDriver for SdcBleDriver<'_, '_, '_, R>
+impl<R> GattPeripheral for SdcGattPeripheral<'_, '_, '_, R>
 where
     R: CryptoRng + Copy, /*+ Send*/
 {
-    async fn run<T>(&mut self, mut task: T) -> Result<(), Error>
-    where
-        T: super::BleDriverTask,
-    {
+    async fn run(
+        &mut self,
+        btp: &Btp,
+        service_name: &str,
+        service_adv: &AdvData,
+    ) -> Result<(), Error> {
         // TODO: Externalize as resources
         // Mem is roughly MAC_CONNECTIONS * L2CAP_MTU * L2CAP_TXQ * L2CAP_RXQ
         let mut sdc_mem = nrf_sdc::Mem::<3084>::new();
@@ -649,17 +657,19 @@ where
             .sdc
             .create_controller(self.mpsl, &mut sdc_mem, &mut rand)?;
 
-        task.run(controller).await
+        let mut peripheral = BtpGattPeripheral::new(controller, self.ble_rand, self.context);
+
+        peripheral.run(btp, service_name, service_adv).await
     }
 }
 
-/// An IEEE 802.15.4 driver helper.
-struct IEEE802154Driver<'d> {
+/// The IEEE 802.15.4 part of a radio.
+struct IEEE802154Parts<'d> {
     radio: Peri<'d, RADIO>,
     p: NrfIeee802154Peripherals<'d>,
 }
 
-impl<'d> IEEE802154Driver<'d> {
+impl<'d> IEEE802154Parts<'d> {
     fn new(radio: Peri<'d, RADIO>, p: NrfIeee802154Peripherals<'d>) -> Self {
         Self { radio, p }
     }
@@ -684,34 +694,31 @@ impl<'d> IEEE802154Driver<'d> {
     }
 }
 
-/// A `ThreadDriver` implementation for the NRF52 family of chips based on the Radio driver in `embassy-nrf`.
+/// The radio of the NRF52 family of chips, based on the Radio driver in `embassy-nrf`.
 ///
 /// Note that the Radio driver in `embassy-nrf` is not capable of co-existence with BLE and is also relatively simplistic.
 #[cfg(feature = "_nrf52")]
-pub struct NrfThreadRustRadioDriver<'d, R> {
-    mpsl: MpslDriver<'d>,
-    sdc: SdcDriver<'d>,
+pub struct NrfThreadRustRadio<'d> {
+    mpsl: MpslParts<'d>,
+    sdc: SdcParts<'d>,
     proxy: ProxyRadio<'d>,
-    rand: R,
 }
 
 #[cfg(feature = "_nrf52")]
-impl<'d, R> NrfThreadRustRadioDriver<'d, R> {
-    /// Create a new instance of the `NrfThreadRustRadioDriver` type.
+impl<'d> NrfThreadRustRadio<'d> {
+    /// Create a new instance of the `NrfThreadRustRadio` type.
     ///
     /// # Arguments
     /// - `resources` - The resources for the radio proxying
     /// - `radio` - The radio peripheral instance
     /// - `mpsl_peripherals` - The peripherals MPSL takes ownership of
     /// - `sdc_peripherals` - The peripherals the SoftDevice Controller takes ownership of
-    /// - `rand` - The random number generator
     /// - `_irqs` - The interrupt handlers
     pub fn new<I>(
         resources: &'d mut ProxyRadioResources,
         radio: Peri<'d, RADIO>,
         mpsl_peripherals: NrfMpslPeripherals<'d>,
         sdc_peripherals: NrfSdcPeripherals<'d>,
-        rand: R,
         _irqs: I,
     ) -> (Self, NrfThreadRustRadioRunner<'d, 'd>)
     where
@@ -725,10 +732,9 @@ impl<'d, R> NrfThreadRustRadioDriver<'d, R> {
 
         (
             Self {
-                mpsl: MpslDriver::new(mpsl_peripherals),
-                sdc: SdcDriver::new(sdc_peripherals),
+                mpsl: MpslParts::new(mpsl_peripherals),
+                sdc: SdcParts::new(sdc_peripherals),
                 proxy,
-                rand,
             },
             runner,
         )
@@ -755,10 +761,19 @@ impl<'d, R> NrfThreadRustRadioDriver<'d, R> {
 }
 
 #[cfg(feature = "_nrf52")]
-impl<R> super::ThreadDriver for NrfThreadRustRadioDriver<'_, R> {
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+impl<K, C> ThreadDriver for EmbassyThread<'_, NrfThreadRustRadio<'_>, K, C>
+where
+    K: KvBlobStoreAccess,
+    C: CryptoRng + Copy,
+{
+    type NetCtl<'a>
+        = &'a OtNetCtl<'a>
     where
-        A: super::ThreadDriverTask,
+        Self: 'a;
+
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
+    where
+        A: ThreadTask,
     {
         info!("About to enable Thread radio");
 
@@ -769,27 +784,33 @@ impl<R> super::ThreadDriver for NrfThreadRustRadioDriver<'_, R> {
 
         info!("Running Thread radio task");
 
-        task.run(&mut self.proxy).await
+        self.runner.run(&mut self.radio.proxy, task).await
     }
 }
 
 #[cfg(feature = "_nrf52")]
-impl<R> super::BleDriver for NrfThreadRustRadioDriver<'_, R>
+impl<K, C> GattDriver for EmbassyThread<'_, NrfThreadRustRadio<'_>, K, C>
 where
-    R: CryptoRng + Copy, /*+ Send*/
+    C: CryptoRng + Copy, /*+ Send*/
 {
-    async fn run<T>(&mut self, task: T) -> Result<(), Error>
+    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
-        T: super::BleDriverTask,
+        A: GattTask,
     {
-        let mpsl = self.mpsl.create_mpsl().await?;
+        let mpsl = self.radio.mpsl.create_mpsl().await?;
 
-        let mut ble = SdcBleDriver::new(&mpsl, &mut self.sdc, self.rand);
+        let mut gatt = SdcGattPeripheral {
+            mpsl: &mpsl,
+            sdc: &mut self.radio.sdc,
+            rand: self.runner.rand(),
+            ble_rand: self.runner.ble_rand(),
+            context: self.runner.ble_context(),
+        };
 
         // See the note in `ThreadDriver::run`: MPSL's low-priority processor must
         // be driven for the radio timeslots to be serviced.
         let mut mpsl_run = pin!(mpsl.run());
-        let mut task = pin!(ble.run(task));
+        let mut task = pin!(task.run(&mut gatt));
 
         let Either::Second(res) = select(&mut mpsl_run, &mut task).await;
 
@@ -797,19 +818,18 @@ where
     }
 }
 
-/// A `ThreadDriver` implementation based on the IEEE 802.15.4 C driver from the
+/// The radio of the NRF family of chips, based on the IEEE 802.15.4 C driver from the
 /// Nordic `nrfx` lib, running on top of MPSL.
 ///
-/// This driver is capable of co-existence with BLE.
-pub struct NrfThreadMpslRadioDriver<'d, R> {
-    mpsl: MpslDriver<'d>,
-    sdc: SdcDriver<'d>,
-    ieee802154: IEEE802154Driver<'d>,
-    rand: R,
+/// This radio is capable of co-existence with BLE.
+pub struct NrfThreadMpslRadio<'d> {
+    mpsl: MpslParts<'d>,
+    sdc: SdcParts<'d>,
+    ieee802154: IEEE802154Parts<'d>,
 }
 
-impl<'d, R> NrfThreadMpslRadioDriver<'d, R> {
-    /// Create a new instance of the `NrfThreadMpslRadioDriver` type.
+impl<'d> NrfThreadMpslRadio<'d> {
+    /// Create a new instance of the `NrfThreadMpslRadio` type.
     ///
     /// # Arguments
     /// - `radio` - The radio peripheral instance
@@ -823,17 +843,15 @@ impl<'d, R> NrfThreadMpslRadioDriver<'d, R> {
         mpsl_peripherals: NrfMpslPeripherals<'d>,
         sdc_peripherals: NrfSdcPeripherals<'d>,
         ieee802154_peripherals: NrfIeee802154Peripherals<'d>,
-        rand: R,
         _irqs: I,
     ) -> Self
     where
         I: NrfBleInterruptBindings + nrf_802154::InterruptBindings + 'd,
     {
         Self {
-            mpsl: MpslDriver::new(mpsl_peripherals),
-            sdc: SdcDriver::new(sdc_peripherals),
-            ieee802154: IEEE802154Driver::new(radio, ieee802154_peripherals),
-            rand,
+            mpsl: MpslParts::new(mpsl_peripherals),
+            sdc: SdcParts::new(sdc_peripherals),
+            ieee802154: IEEE802154Parts::new(radio, ieee802154_peripherals),
         }
     }
 
@@ -857,23 +875,35 @@ impl<'d, R> NrfThreadMpslRadioDriver<'d, R> {
     }
 }
 
-impl<R> super::ThreadDriver for NrfThreadMpslRadioDriver<'_, R> {
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+impl<K, C> ThreadDriver for EmbassyThread<'_, NrfThreadMpslRadio<'_>, K, C>
+where
+    K: KvBlobStoreAccess,
+    C: CryptoRng + Copy,
+{
+    type NetCtl<'a>
+        = &'a OtNetCtl<'a>
     where
-        A: super::ThreadDriverTask,
+        Self: 'a;
+
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
+    where
+        A: ThreadTask,
     {
-        let csl_accuracy_ppm = self.mpsl.lf_clock.accuracy_ppm();
+        let csl_accuracy_ppm = self.radio.mpsl.lf_clock.accuracy_ppm();
 
-        let mpsl = self.mpsl.create_mpsl().await?;
+        let mpsl = self.radio.mpsl.create_mpsl().await?;
 
-        let radio = self.ieee802154.create_radio(&mpsl, csl_accuracy_ppm)?;
+        let radio = self
+            .radio
+            .ieee802154
+            .create_radio(&mpsl, csl_accuracy_ppm)?;
 
         // MPSL's low-priority work processor (`mpsl.run()` -> `mpsl_low_priority_process()`)
         // MUST be driven, or the 802.15.4 timeslot session is never serviced: a
         // scheduled TX never completes and RX never re-arms, so the radio wedges
         // after the very first frame and Thread cannot attach.
         let mut mpsl_run = pin!(mpsl.run());
-        let mut task = pin!(task.run(radio));
+        let mut task = pin!(self.runner.run(radio, task));
 
         let Either::Second(res) = select(&mut mpsl_run, &mut task).await;
 
@@ -881,22 +911,28 @@ impl<R> super::ThreadDriver for NrfThreadMpslRadioDriver<'_, R> {
     }
 }
 
-impl<R> super::BleDriver for NrfThreadMpslRadioDriver<'_, R>
+impl<K, C> GattDriver for EmbassyThread<'_, NrfThreadMpslRadio<'_>, K, C>
 where
-    R: CryptoRng + Copy, /*+ Send*/
+    C: CryptoRng + Copy, /*+ Send*/
 {
-    async fn run<T>(&mut self, task: T) -> Result<(), Error>
+    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
-        T: super::BleDriverTask,
+        A: GattTask,
     {
-        let mpsl = self.mpsl.create_mpsl().await?;
+        let mpsl = self.radio.mpsl.create_mpsl().await?;
 
-        let mut ble = SdcBleDriver::new(&mpsl, &mut self.sdc, self.rand);
+        let mut gatt = SdcGattPeripheral {
+            mpsl: &mpsl,
+            sdc: &mut self.radio.sdc,
+            rand: self.runner.rand(),
+            ble_rand: self.runner.ble_rand(),
+            context: self.runner.ble_context(),
+        };
 
         // See the note in `ThreadDriver::run`: MPSL's low-priority processor must
         // be driven for the radio timeslots to be serviced.
         let mut mpsl_run = pin!(mpsl.run());
-        let mut task = pin!(ble.run(task));
+        let mut task = pin!(task.run(&mut gatt));
 
         let Either::Second(res) = select(&mut mpsl_run, &mut task).await;
 
@@ -904,29 +940,39 @@ where
     }
 }
 
-impl<R> super::ThreadCoexDriver for NrfThreadMpslRadioDriver<'_, R>
+impl<K, C> ThreadCoexDriver for EmbassyThread<'_, NrfThreadMpslRadio<'_>, K, C>
 where
-    R: CryptoRng + Copy, /*+ Send*/
+    K: KvBlobStoreAccess,
+    C: CryptoRng + Copy, /*+ Send*/
 {
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
-        A: super::ThreadCoexDriverTask,
+        A: ThreadCoexTask,
     {
-        let csl_accuracy_ppm = self.mpsl.lf_clock.accuracy_ppm();
+        let csl_accuracy_ppm = self.radio.mpsl.lf_clock.accuracy_ppm();
 
-        let mpsl = self.mpsl.create_mpsl().await?;
+        let mpsl = self.radio.mpsl.create_mpsl().await?;
 
-        let radio = self.ieee802154.create_radio(&mpsl, csl_accuracy_ppm)?;
+        let radio = self
+            .radio
+            .ieee802154
+            .create_radio(&mpsl, csl_accuracy_ppm)?;
 
         // Unlike MPSL and the 802.15.4 radio, the SoftDevice Controller does not stay up for
         // the whole run: the stack runs it for each commissioning window advertised over BLE,
         // so once the device is commissioned, the radio is Thread's alone.
-        let ble = SdcBleDriver::new(&mpsl, &mut self.sdc, self.rand);
+        let gatt = SdcGattPeripheral {
+            mpsl: &mpsl,
+            sdc: &mut self.radio.sdc,
+            rand: self.runner.rand(),
+            ble_rand: self.runner.ble_rand(),
+            context: self.runner.ble_context(),
+        };
 
         // See the note in `ThreadDriver::run`: MPSL's low-priority processor must
         // be driven for the radio timeslots to be serviced.
         let mut mpsl_run = pin!(mpsl.run());
-        let mut task = pin!(task.run(radio, ble));
+        let mut task = pin!(self.runner.run_coex(radio, gatt, task));
 
         let Either::Second(res) = select(&mut mpsl_run, &mut task).await;
 

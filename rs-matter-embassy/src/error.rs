@@ -1,4 +1,4 @@
-use rs_matter_stack::matter::error::{Error, ErrorCode};
+use rs_matter::error::{Error, ErrorCode};
 
 use sequential_storage::Error as SError;
 
