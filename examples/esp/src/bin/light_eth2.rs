@@ -42,8 +42,8 @@ use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
 use rs_matter_embassy::ot::openthread::esp::EspRadio;
 use rs_matter_embassy::ot::openthread::{OpenThread, Radio, RamSettings};
 use rs_matter_embassy::ot::{OtMatterResources, OtMdns, OtNetStack, OtNetif};
+use rs_matter_embassy::rand::reseeding_csprng;
 use rs_matter_embassy::stack::eth::EthMatterStack;
-use rs_matter_embassy::stack::rand::reseeding_csprng;
 
 use tinyrlibc as _;
 

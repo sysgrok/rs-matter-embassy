@@ -11,13 +11,13 @@ use crate::matter::dm::networks::wireless::{Wifi, WifiNetworks};
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
 use crate::matter::utils::futures::{select, Coalesce};
+use crate::stack::ble::GattPeripheral;
 use crate::stack::network::{Embedding, Network};
-use crate::stack::wireless::{self, Gatt, GattTask, MAX_WIRELESS_NETWORKS};
-
-use super::{
-    BleDriver, BleDriverGattPeripheral, BleDriverTask, BleDriverTaskImpl,
-    EmbassyWirelessMatterStack, PreexistingBleDriver,
+use crate::stack::wireless::{
+    GattDriver, GattTask, WifiCoexDriver, WifiCoexTask, WifiDriver, WifiTask, MAX_WIRELESS_NETWORKS,
 };
+
+use super::{ControllerGattPeripheral, EmbassyWirelessMatterStack};
 
 #[cfg(feature = "esp")]
 pub mod esp_wifi;
@@ -37,182 +37,91 @@ pub type EmbassyWifiMatterStack<
     S = WifiNetworks<MAX_WIRELESS_NETWORKS>,
 > = EmbassyWirelessMatterStack<'a, B, Wifi, EmbassyNetContext, E, S>;
 
-/// A trait representing a task that needs access to the Wifi driver and controller to perform its work
-pub trait WifiDriverTask {
-    /// Run the task with the given Wifi driver and controller
-    async fn run<D, C>(&mut self, driver: D, net_ctl: C) -> Result<(), Error>
-    where
-        D: embassy_net::driver::Driver,
-        C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag;
-}
+/// The radio of a pre-existing, already created Wifi driver, network controller and BLE controller,
+/// rather than one which creates them when the Matter stack needs them.
+pub struct PreexistingWifiRadio<D, C, B>(D, C, B);
 
-impl<T> WifiDriverTask for &mut T
-where
-    T: WifiDriverTask,
-{
-    /// Run the task with the given Wifi driver and Wifi controller
-    async fn run<D, C>(&mut self, driver: D, net_ctl: C) -> Result<(), Error>
-    where
-        D: embassy_net::driver::Driver,
-        C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
-    {
-        (*self).run(driver, net_ctl).await
-    }
-}
-
-/// A trait representing a task that needs access to the Wifi driver and controller,
-/// as well as to a BLE driver to perform its work.
-///
-/// The task gets a `BleDriver` rather than a BLE controller, so that the BLE controller can be
-/// created only while BLE is needed (i.e. while a commissioning window is advertised) and torn
-/// down afterwards. A driver that has a pre-existing controller can hand out
-/// `PreexistingBleDriver`.
-pub trait WifiCoexDriverTask {
-    /// Run the task with the given Wifi driver, Wifi controller and BLE driver
-    async fn run<D, C, B>(&mut self, wifi_driver: D, net_ctl: C, ble: B) -> Result<(), Error>
-    where
-        D: embassy_net::driver::Driver,
-        C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
-        B: BleDriver;
-}
-
-impl<T> WifiCoexDriverTask for &mut T
-where
-    T: WifiCoexDriverTask,
-{
-    async fn run<D, C, B>(&mut self, wifi_driver: D, net_ctl: C, ble: B) -> Result<(), Error>
-    where
-        D: embassy_net::driver::Driver,
-        C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
-        B: BleDriver,
-    {
-        (*self).run(wifi_driver, net_ctl, ble).await
-    }
-}
-
-/// A trait for running a task within a context where the Wifi radio is initialized and operable
-pub trait WifiDriver {
-    /// The concrete Wifi network controller type this driver produces. Surfaced
-    /// as an associated type so the `Wifi` driver wrapper can name it for the
-    /// single-monomorphization handler chain (`WirelessNetCtl<Self::NetCtl<'_>>`).
-    type NetCtl<'a>: NetCtl + WifiDiag + NetChangeNotif
-    where
-        Self: 'a;
-
-    /// Setup the Wifi driver and controller and run the given task with these
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: WifiDriverTask;
-}
-
-impl<T> WifiDriver for &mut T
-where
-    T: WifiDriver,
-{
-    type NetCtl<'a>
-        = T::NetCtl<'a>
-    where
-        Self: 'a;
-
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: WifiDriverTask,
-    {
-        (*self).run(task).await
-    }
-}
-
-/// A trait for running a task within a context where the Wifi radio - as well as the BLE controller - are initialized and operable
-pub trait WifiCoexDriver {
-    /// Setup the Wifi driver and controller, as well as the BLE controller run the given task with these
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: WifiCoexDriverTask;
-}
-
-impl<T> WifiCoexDriver for &mut T
-where
-    T: WifiCoexDriver,
-{
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: WifiCoexDriverTask,
-    {
-        (*self).run(task).await
-    }
-}
-
-/// A Wifi driver provider that uses a pre-existing, already created Wifi driver and controller,
-/// rather than creating them when the Matter stack needs them.
-pub struct PreexistingWifiDriver<D, C, B>(D, C, B);
-
-impl<D, C, B> PreexistingWifiDriver<D, C, B> {
-    /// Create a new instance of the `PreexistingWifiDriver` type.
+impl<D, C, B> PreexistingWifiRadio<D, C, B> {
+    /// Create a new instance of the `PreexistingWifiRadio` type.
     pub const fn new(enet_wifi_driver: D, net_ctl: C, ble_ctl: B) -> Self {
         Self(enet_wifi_driver, net_ctl, ble_ctl)
     }
 }
 
-impl<D, C, B> WifiDriver for PreexistingWifiDriver<D, C, B>
+impl<D, C, B, R> WifiDriver for EmbassyWifi<'_, PreexistingWifiRadio<D, C, B>, R>
 where
     D: embassy_net::driver::Driver,
     C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
+    R: Rng + Copy,
 {
-    // The operational task receives `&self.1` (a `&C`), so the chain net-ctl type
+    // The operational task receives `&self.radio.1` (a `&C`), so the chain net-ctl type
     // is `&'a C`. `&C` satisfies the diag/net-ctl bounds via the blanket impls.
     type NetCtl<'a>
         = &'a C
     where
         Self: 'a;
 
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
-    where
-        A: WifiDriverTask,
-    {
-        task.run(&mut self.0, &self.1).await
-    }
-}
-
-impl<D, C, B> BleDriver for PreexistingWifiDriver<D, C, B>
-where
-    B: Controller,
-{
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
-        A: BleDriverTask,
+        A: WifiTask,
     {
-        PreexistingBleDriver::new(&self.2).run(task).await
-    }
-}
-
-impl<D, C, B> WifiCoexDriver for PreexistingWifiDriver<D, C, B>
-where
-    D: embassy_net::driver::Driver,
-    C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
-    B: Controller,
-{
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
-    where
-        A: WifiCoexDriverTask,
-    {
-        task.run(&mut self.0, &self.1, PreexistingBleDriver::new(&self.2))
+        self.runner
+            .run(&mut self.radio.0, &self.radio.1, task)
             .await
     }
 }
 
-/// A `Wireless` trait implementation for `embassy-net`'s Wifi stack.
+impl<D, C, B, R> WifiCoexDriver for EmbassyWifi<'_, PreexistingWifiRadio<D, C, B>, R>
+where
+    D: embassy_net::driver::Driver,
+    C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
+    B: Controller,
+    R: Rng + Copy,
+{
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
+    where
+        A: WifiCoexTask,
+    {
+        let gatt = ControllerGattPeripheral::new(
+            &self.radio.2,
+            self.runner.ble_rand(),
+            self.runner.ble_context(),
+        );
+
+        self.runner
+            .run_coex(&mut self.radio.0, &self.radio.1, gatt, task)
+            .await
+    }
+}
+
+impl<D, C, B, R> GattDriver for EmbassyWifi<'_, PreexistingWifiRadio<D, C, B>, R>
+where
+    B: Controller,
+    R: Rng + Copy,
+{
+    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+    where
+        A: GattTask,
+    {
+        task.run(ControllerGattPeripheral::new(
+            &self.radio.2,
+            self.runner.ble_rand(),
+            self.runner.ble_context(),
+        ))
+        .await
+    }
+}
+
+/// The Wifi drivers of the stack over `embassy-net`, one for each of the radios `T`.
 pub struct EmbassyWifi<'a, T, R> {
-    driver: T,
-    rand: R,
-    use_ble_random_addr: bool,
-    context: &'a EmbassyNetContext,
-    ble_context: &'a BtpGattContext,
+    radio: T,
+    runner: EnetWifiRunner<'a, R>,
 }
 
 impl<'a, T, R> EmbassyWifi<'a, T, R> {
     /// Create a new instance of the `EmbassyWifi` type.
     pub fn new<const B: usize, E, S>(
-        driver: T,
+        radio: T,
         rand: R,
         use_ble_random_addr: bool,
         stack: &'a EmbassyWifiMatterStack<'a, B, E, S>,
@@ -222,7 +131,7 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
         S: Embedding,
     {
         Self::wrap(
-            driver,
+            radio,
             rand,
             use_ble_random_addr,
             stack.network().embedding().net_context(),
@@ -230,16 +139,41 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
         )
     }
 
-    /// Wrap the `EmbassyWifi` type around a Wifi Driver and BLE controller runner and a network context.
+    /// Wrap the `EmbassyWifi` type around a Wifi radio and a network context.
     pub const fn wrap(
-        driver: T,
+        radio: T,
         rand: R,
         use_ble_random_addr: bool,
         context: &'a EmbassyNetContext,
         ble_context: &'a BtpGattContext,
     ) -> Self {
         Self {
-            driver,
+            radio,
+            runner: EnetWifiRunner::new(rand, use_ble_random_addr, context, ble_context),
+        }
+    }
+}
+
+/// What the Wifi drivers have in common, whatever their radio: running a task of
+/// the stack over an `embassy-net` driver.
+///
+/// For implementing the Wifi drivers of the stack for a radio this crate does not know.
+pub struct EnetWifiRunner<'a, R> {
+    rand: R,
+    use_ble_random_addr: bool,
+    context: &'a EmbassyNetContext,
+    ble_context: &'a BtpGattContext,
+}
+
+impl<'a, R> EnetWifiRunner<'a, R> {
+    /// Create a new instance of the `EnetWifiRunner` type.
+    pub const fn new(
+        rand: R,
+        use_ble_random_addr: bool,
+        context: &'a EmbassyNetContext,
+        ble_context: &'a BtpGattContext,
+    ) -> Self {
+        Self {
             rand,
             use_ble_random_addr,
             context,
@@ -248,87 +182,26 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
     }
 }
 
-impl<T, R> wireless::Wifi for EmbassyWifi<'_, T, R>
+impl<'a, R> EnetWifiRunner<'a, R>
 where
-    T: WifiDriver,
     R: Rng + Copy,
 {
-    // Forward the concrete controller type from the underlying Wifi driver, so the
-    // commissioning and operational handler chains share one net-ctl type.
-    type NetCtl<'a>
-        = <T as WifiDriver>::NetCtl<'a>
-    where
-        Self: 'a;
-
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: wireless::WifiTask,
-    {
-        self.driver
-            .run(WifiDriverTaskImpl {
-                context: self.context,
-                rand: self.rand,
-                task,
-            })
-            .await
+    /// Return the random number generator for the BLE address, if a random one should be used.
+    pub fn ble_rand(&self) -> Option<R> {
+        self.use_ble_random_addr.then_some(self.rand)
     }
-}
 
-impl<T, R> wireless::WifiCoex for EmbassyWifi<'_, T, R>
-where
-    T: WifiCoexDriver,
-    R: Rng + Copy,
-{
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: wireless::WifiCoexTask,
-    {
-        self.driver
-            .run(WifiCoexDriverTaskImpl {
-                context: self.context,
-                ble_context: self.ble_context,
-                rand: self.rand,
-                use_ble_random_addr: self.use_ble_random_addr,
-                task,
-            })
-            .await
+    /// Return the GATT peripheral context.
+    pub const fn ble_context(&self) -> &'a BtpGattContext {
+        self.ble_context
     }
-}
 
-impl<T, R> Gatt for EmbassyWifi<'_, T, R>
-where
-    T: BleDriver,
-    R: Rng + Copy,
-{
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: GattTask,
-    {
-        self.driver
-            .run(BleDriverTaskImpl {
-                task,
-                rand: self.use_ble_random_addr.then_some(self.rand),
-                context: self.ble_context,
-            })
-            .await
-    }
-}
-
-struct WifiDriverTaskImpl<'a, A, R> {
-    context: &'a EmbassyNetContext,
-    task: A,
-    rand: R,
-}
-
-impl<A, R> WifiDriverTask for WifiDriverTaskImpl<'_, A, R>
-where
-    A: wireless::WifiTask,
-    R: Rng,
-{
-    async fn run<D, C>(&mut self, driver: D, net_ctl: C) -> Result<(), Error>
+    /// Run a Wifi task over the given driver and network controller.
+    pub async fn run<D, C, A>(&self, driver: D, net_ctl: C, mut task: A) -> Result<(), Error>
     where
         D: embassy_net::driver::Driver,
         C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
+        A: WifiTask,
     {
         let mut resources = self.context.resources.lock().await;
         let mut mdns = self.context.mdns.lock().await;
@@ -337,15 +210,16 @@ where
         let mdns = &mut *mdns;
         let buffers = &self.context.buffers;
 
+        let mut rand = self.rand;
         let mut seed = [0; core::mem::size_of::<u64>()];
-        self.rand.fill_bytes(&mut seed);
+        rand.fill_bytes(&mut seed);
 
         let (stack, mut runner) = create_enet_stack(driver, u64::from_le_bytes(seed), resources);
 
         let net_stack = EnetStack::new(stack, buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
 
-        let mut main = pin!(self.task.run(&net_stack, &netif, &net_ctl, mdns));
+        let mut main = pin!(task.run(&net_stack, &netif, &net_ctl, mdns));
         let mut run = pin!(async {
             runner.run().await;
             #[allow(unreachable_code)]
@@ -354,26 +228,21 @@ where
 
         select(&mut main, &mut run).coalesce().await
     }
-}
 
-struct WifiCoexDriverTaskImpl<'a, A, R> {
-    context: &'a EmbassyNetContext,
-    ble_context: &'a BtpGattContext,
-    task: A,
-    rand: R,
-    use_ble_random_addr: bool,
-}
-
-impl<A, R> WifiCoexDriverTask for WifiCoexDriverTaskImpl<'_, A, R>
-where
-    A: wireless::WifiCoexTask,
-    R: Rng + Copy,
-{
-    async fn run<D, C, B>(&mut self, wifi_driver: D, net_ctl: C, ble: B) -> Result<(), Error>
+    /// Run a Wifi task with concurrent commissioning over the given driver, network
+    /// controller and GATT peripheral.
+    pub async fn run_coex<D, C, G, A>(
+        &self,
+        driver: D,
+        net_ctl: C,
+        mut gatt: G,
+        mut task: A,
+    ) -> Result<(), Error>
     where
         D: embassy_net::driver::Driver,
         C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
-        B: BleDriver,
+        G: GattPeripheral,
+        A: WifiCoexTask,
     {
         let mut resources = self.context.resources.lock().await;
         let mut mdns = self.context.mdns.lock().await;
@@ -382,25 +251,16 @@ where
         let mdns = &mut *mdns;
         let buffers = &self.context.buffers;
 
+        let mut rand = self.rand;
         let mut seed = [0; core::mem::size_of::<u64>()];
-        self.rand.fill_bytes(&mut seed);
+        rand.fill_bytes(&mut seed);
 
-        let (stack, mut runner) =
-            create_enet_stack(wifi_driver, u64::from_le_bytes(seed), resources);
+        let (stack, mut runner) = create_enet_stack(driver, u64::from_le_bytes(seed), resources);
 
         let net_stack = EnetStack::new(stack, buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
-        // The BLE controller is created only while the stack runs the peripheral, i.e. while a
-        // commissioning window is advertised over BLE.
-        let mut peripheral = BleDriverGattPeripheral::new(
-            ble,
-            self.use_ble_random_addr.then_some(self.rand),
-            self.ble_context,
-        );
 
-        let mut main = pin!(self
-            .task
-            .run(&net_stack, &netif, &net_ctl, mdns, &mut peripheral));
+        let mut main = pin!(task.run(&net_stack, &netif, &net_ctl, mdns, &mut gatt));
         let mut run = pin!(async {
             runner.run().await;
             #[allow(unreachable_code)]

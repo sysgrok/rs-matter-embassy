@@ -3,22 +3,25 @@
 
 use core::fmt::Write;
 use core::future::poll_fn;
-use core::net::IpAddr;
+use core::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+use edge_nal::UdpBind;
 
 use openthread::{
     Channels, DnsResponse, OpenThread, OtError, OtResources, OtSrpResources, OtUdpResources,
     RamSettings, RamSettingsChange, SettingsKey, SharedRamSettings, SrpConf, SrpService,
 };
 
-use rs_matter_stack::matter::crypto::Crypto;
-use rs_matter_stack::matter::fabric::MAX_FABRICS;
-use rs_matter_stack::matter::persist::KvBlobStoreAccess;
-use rs_matter_stack::matter::transport::network::MatterLocalService;
-use rs_matter_stack::matter::Matter;
-use rs_matter_stack::mdns::Mdns;
-use rs_matter_stack::nal::{NetStack, NoopNet, UdpBind};
+use rs_matter::crypto::Crypto;
+use rs_matter::fabric::MAX_FABRICS;
+use rs_matter::persist::KvBlobStoreAccess;
+use rs_matter::stack::mdns::Mdns;
+use rs_matter::stack::net::NetStack;
+use rs_matter::transport::network::MatterLocalService;
+use rs_matter::Matter;
 
 use crate::fmt::Bytes;
+use crate::nal::{map_err, NalSocket};
 
 use crate::matter::dm::clusters::gen_diag::{InterfaceTypeEnum, NetifDiag, NetifInfo};
 use crate::matter::dm::clusters::net_comm::{
@@ -127,59 +130,30 @@ impl Default for OtMatterResources {
 }
 
 /// An implementation of `NetStack` for `openthread`
-pub struct OtNetStack<'d>(OpenThread<'d>);
+pub struct OtNetStack<'d>(edge_nal_openthread::OtUdpStack<'d>);
 
 impl<'d> OtNetStack<'d> {
     /// Create a new `OtNetStack` instance
-    pub const fn new(ot: OpenThread<'d>) -> Self {
-        Self(ot)
+    pub fn new(ot: OpenThread<'d>) -> Self {
+        Self(edge_nal_openthread::OtUdpStack::new(ot))
     }
 }
 
 impl<'d> NetStack for OtNetStack<'d> {
-    type UdpBind<'t>
-        = edge_nal_openthread::OtUdpStack<'d>
+    type Socket<'t>
+        = NalSocket<<edge_nal_openthread::OtUdpStack<'d> as UdpBind>::Socket<'t>>
     where
         Self: 't;
 
-    type UdpConnect<'t>
-        = NoopNet
-    where
-        Self: 't;
+    async fn bind(
+        &self,
+        addr: SocketAddr,
+        ipv4_interface: Ipv4Addr,
+        ipv6_interface: u32,
+    ) -> Result<Self::Socket<'_>, Error> {
+        let socket = self.0.bind(addr).await.map_err(map_err)?;
 
-    type TcpBind<'t>
-        = NoopNet
-    where
-        Self: 't;
-
-    type TcpConnect<'t>
-        = NoopNet
-    where
-        Self: 't;
-
-    type Dns<'t>
-        = NoopNet
-    where
-        Self: 't;
-
-    fn udp_bind(&self) -> Option<Self::UdpBind<'_>> {
-        Some(edge_nal_openthread::OtUdpStack::new(self.0.clone()))
-    }
-
-    fn udp_connect(&self) -> Option<Self::UdpConnect<'_>> {
-        None
-    }
-
-    fn tcp_bind(&self) -> Option<Self::TcpBind<'_>> {
-        None
-    }
-
-    fn tcp_connect(&self) -> Option<Self::TcpConnect<'_>> {
-        None
-    }
-
-    fn dns(&self) -> Option<Self::Dns<'_>> {
-        None
+        Ok(NalSocket::new(socket, ipv4_interface, ipv6_interface))
     }
 }
 
@@ -1038,11 +1012,11 @@ impl<'a, 'd> OtMdns<'a, 'd> {
 }
 
 impl Mdns for OtMdns<'_, '_> {
-    async fn run<C, U>(
+    async fn run<C, S>(
         &mut self,
         matter: &Matter<'_>,
-        _crypto: C,
-        _udp: U,
+        _crypto: &C,
+        _net_stack: &S,
         _mac: &[u8],
         _ipv4: core::net::Ipv4Addr,
         _ipv6: &[core::net::Ipv6Addr],
@@ -1050,7 +1024,7 @@ impl Mdns for OtMdns<'_, '_> {
     ) -> Result<(), Error>
     where
         C: Crypto,
-        U: UdpBind,
+        S: NetStack,
     {
         OtMdns::run(self, matter).await.map_err(to_matter_err)
     }

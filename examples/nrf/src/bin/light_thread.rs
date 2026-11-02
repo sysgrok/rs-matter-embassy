@@ -38,11 +38,11 @@ use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node
 use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices, root_endpoint, BasicCommData};
-use rs_matter_embassy::stack::rand::reseeding_csprng;
+use rs_matter_embassy::rand::reseeding_csprng;
 use rs_matter_embassy::wireless::nrf::{
     NrfMpslPeripherals, NrfSdcPeripherals, NrfThreadClockInterruptHandler,
     NrfThreadHighPrioInterruptHandler, NrfThreadLowPrioInterruptHandler, NrfThreadRadioResources,
-    NrfThreadRustRadioDriver, NrfThreadRustRadioRunner,
+    NrfThreadRustRadio, NrfThreadRustRadioRunner,
 };
 use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
 
@@ -150,7 +150,7 @@ async fn main(_s: Spawner) {
         ),
     );
 
-    let (thread_driver, thread_radio_runner) = NrfThreadRustRadioDriver::new(
+    let (thread_radio, thread_radio_runner) = NrfThreadRustRadio::new(
         mk_static!(NrfThreadRadioResources, NrfThreadRadioResources::new()),
         p.RADIO,
         NrfMpslPeripherals::new(p.RTC0, p.TIMER0, p.TEMP, p.PPI_CH19, p.PPI_CH30, p.PPI_CH31),
@@ -158,7 +158,6 @@ async fn main(_s: Spawner) {
             p.PPI_CH17, p.PPI_CH18, p.PPI_CH20, p.PPI_CH21, p.PPI_CH22, p.PPI_CH23, p.PPI_CH24,
             p.PPI_CH25, p.PPI_CH26, p.PPI_CH27, p.PPI_CH28, p.PPI_CH29,
         ),
-        crypto.rand().unwrap(),
         Irqs,
     );
 
@@ -223,7 +222,7 @@ async fn main(_s: Spawner) {
     let matter = pin!(stack.run(
         // The Matter stack needs to instantiate `openthread`
         EmbassyThread::new(
-            thread_driver,
+            thread_radio,
             crypto.rand().unwrap(),
             ieee_eui64,
             &kv,

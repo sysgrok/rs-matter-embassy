@@ -2,8 +2,8 @@ use core::pin::pin;
 
 use openthread::{Capabilities, OpenThread, Radio};
 
-use rs_matter_stack::matter::dm::clusters::icd_mgmt::{Icd, IcdNetParams};
-use rs_matter_stack::matter::persist::KvBlobStoreAccess;
+use rs_matter::dm::clusters::icd_mgmt::{Icd, IcdNetParams};
+use rs_matter::persist::KvBlobStoreAccess;
 
 use crate::ble::{BtpGattContext, Controller};
 use crate::matter::crypto::{CryptoRng, Rng};
@@ -14,13 +14,14 @@ use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::sync::IfMutex;
 use crate::ot::{radio_to_matter_err, to_matter_err, OtNetCtl, OtNetStack, OtPersist};
 use crate::ot::{OtMatterResources, OtMdns, OtNetif};
+use crate::stack::ble::GattPeripheral;
 use crate::stack::network::{Embedding, Network};
-use crate::stack::wireless::{self, Gatt, GattTask, MAX_WIRELESS_NETWORKS};
-
-use super::{
-    BleDriver, BleDriverGattPeripheral, BleDriverTask, BleDriverTaskImpl,
-    EmbassyWirelessMatterStack, PreexistingBleDriver,
+use crate::stack::wireless::{
+    GattDriver, GattTask, ThreadCoexDriver, ThreadCoexTask, ThreadDriver, ThreadTask,
+    MAX_WIRELESS_NETWORKS,
 };
+
+use super::{ControllerGattPeripheral, EmbassyWirelessMatterStack};
 
 #[cfg(feature = "esp")]
 pub mod esp_thread;
@@ -40,164 +41,85 @@ pub type EmbassyThreadMatterStack<
     S = ThreadNetworks<MAX_WIRELESS_NETWORKS>,
 > = EmbassyWirelessMatterStack<'a, B, Thread, OtNetContext, E, S>;
 
-/// A trait representing a task that needs access to the Thread radio to perform its work
-pub trait ThreadDriverTask {
-    /// Run the task with the given Thread radio
-    async fn run<R>(&mut self, radio: R) -> Result<(), Error>
-    where
-        R: Radio;
-}
+/// The radio of a pre-existing, already created Thread radio and BLE controller,
+/// rather than one which creates them when the Matter stack needs them.
+pub struct PreexistingThreadRadio<R, B>(R, B);
 
-impl<T> ThreadDriverTask for &mut T
-where
-    T: ThreadDriverTask,
-{
-    async fn run<R>(&mut self, radio: R) -> Result<(), Error>
-    where
-        R: Radio,
-    {
-        (*self).run(radio).await
-    }
-}
-
-/// A trait representing a task that needs access to the Thread radio,
-/// as well as to a BLE driver to perform its work.
-///
-/// The task gets a `BleDriver` rather than a BLE controller, so that the BLE controller can be
-/// created only while BLE is needed (i.e. while a commissioning window is advertised) and torn
-/// down afterwards - which matters for battery-powered devices. A driver that has a pre-existing
-/// controller can hand out `PreexistingBleDriver`.
-pub trait ThreadCoexDriverTask {
-    /// Run the task with the given Thread radio and BLE driver
-    async fn run<R, B>(&mut self, radio: R, ble: B) -> Result<(), Error>
-    where
-        R: Radio,
-        B: BleDriver;
-}
-
-impl<T> ThreadCoexDriverTask for &mut T
-where
-    T: ThreadCoexDriverTask,
-{
-    async fn run<R, B>(&mut self, radio: R, ble: B) -> Result<(), Error>
-    where
-        R: Radio,
-        B: BleDriver,
-    {
-        (*self).run(radio, ble).await
-    }
-}
-
-/// A trait for running a task within a context where the Thread radio is initialized and operable
-pub trait ThreadDriver {
-    /// Setup the Thread radio and run the given task with it
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: ThreadDriverTask;
-}
-
-impl<T> ThreadDriver for &mut T
-where
-    T: ThreadDriver,
-{
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: ThreadDriverTask,
-    {
-        (*self).run(task).await
-    }
-}
-
-/// A trait for running a task within a context where the Thread radio - as well as the BLE controller - are initialized and operable
-pub trait ThreadCoexDriver {
-    /// Setup the Thread radio and the BLE controller and run the given task with these
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: ThreadCoexDriverTask;
-}
-
-impl<T> ThreadCoexDriver for &mut T
-where
-    T: ThreadCoexDriver,
-{
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: ThreadCoexDriverTask,
-    {
-        (*self).run(task).await
-    }
-}
-
-/// A Thread radio provider that uses a pre-existing, already created Thread radio
-/// as well as an already created BLE controller rather than creating these when the Matter stack needs them.
-pub struct PreexistingThreadDriver<R, B>(R, B);
-
-impl<R, B> PreexistingThreadDriver<R, B> {
+impl<R, B> PreexistingThreadRadio<R, B> {
     /// Create a new instance of the `PreexistingThreadRadio` type.
     pub const fn new(radio: R, ble: B) -> Self {
         Self(radio, ble)
     }
 }
 
-impl<R, B> ThreadDriver for PreexistingThreadDriver<R, B>
+impl<R, B, K, C> ThreadDriver for EmbassyThread<'_, PreexistingThreadRadio<R, B>, K, C>
 where
     R: Radio,
+    K: KvBlobStoreAccess,
+    C: CryptoRng + Copy,
 {
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+    type NetCtl<'a>
+        = &'a OtNetCtl<'a>
     where
-        A: ThreadDriverTask,
+        Self: 'a;
+
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
+    where
+        A: ThreadTask,
     {
-        task.run(&mut self.0).await
+        self.runner.run(&mut self.radio.0, task).await
     }
 }
 
-impl<R, B> ThreadCoexDriver for PreexistingThreadDriver<R, B>
+impl<R, B, K, C> ThreadCoexDriver for EmbassyThread<'_, PreexistingThreadRadio<R, B>, K, C>
 where
     R: Radio,
     B: Controller,
-{
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
-    where
-        A: ThreadCoexDriverTask,
-    {
-        task.run(&mut self.0, PreexistingBleDriver::new(&self.1))
-            .await
-    }
-}
-
-impl<R, B> BleDriver for PreexistingThreadDriver<R, B>
-where
-    B: Controller,
+    K: KvBlobStoreAccess,
+    C: CryptoRng + Copy,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
-        A: BleDriverTask,
+        A: ThreadCoexTask,
     {
-        PreexistingBleDriver::new(&self.1).run(task).await
+        let gatt = ControllerGattPeripheral::new(
+            &self.radio.1,
+            self.runner.ble_rand(),
+            self.runner.ble_context(),
+        );
+
+        self.runner.run_coex(&mut self.radio.0, gatt, task).await
     }
 }
 
-/// A `Wireless` trait implementation for `openthread`'s Thread stack.
-pub struct EmbassyThread<'a, T, K, R> {
-    driver: T,
-    ieee_eui64: [u8; 8],
-    kv: K,
-    context: &'a OtNetContext,
-    ble_context: &'a BtpGattContext,
-    use_ble_random_addr: bool,
-    rand: R,
-    icd: Option<&'a Icd>,
+impl<R, B, K, C> GattDriver for EmbassyThread<'_, PreexistingThreadRadio<R, B>, K, C>
+where
+    B: Controller,
+    C: Rng + Copy,
+{
+    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+    where
+        A: GattTask,
+    {
+        task.run(ControllerGattPeripheral::new(
+            &self.radio.1,
+            self.runner.ble_rand(),
+            self.runner.ble_context(),
+        ))
+        .await
+    }
 }
 
-impl<'a, T, K, R> EmbassyThread<'a, T, K, R>
-where
-    T: ThreadDriver,
-    K: KvBlobStoreAccess,
-    R: CryptoRng + Copy,
-{
+/// The Thread drivers of the stack over `openthread`, one for each of the radios `T`.
+pub struct EmbassyThread<'a, T, K, R> {
+    radio: T,
+    runner: OtThreadRunner<'a, K, R>,
+}
+
+impl<'a, T, K, R> EmbassyThread<'a, T, K, R> {
     /// Create a new instance of the `EmbassyThread` type.
     pub fn new<const B: usize, E, S>(
-        driver: T,
+        radio: T,
         rand: R,
         ieee_eui64: [u8; 8],
         kv: K,
@@ -209,7 +131,7 @@ where
         S: Embedding,
     {
         Self::wrap(
-            driver,
+            radio,
             rand,
             ieee_eui64,
             kv,
@@ -219,9 +141,9 @@ where
         )
     }
 
-    /// Wrap an existing `ThreadDriver` with the given parameters.
+    /// Wrap a Thread radio with the given parameters.
     pub fn wrap(
-        driver: T,
+        radio: T,
         rand: R,
         ieee_eui64: [u8; 8],
         kv: K,
@@ -230,14 +152,15 @@ where
         use_ble_random_addr: bool,
     ) -> Self {
         Self {
-            driver,
-            ieee_eui64,
-            kv,
-            context,
-            ble_context,
-            rand,
-            use_ble_random_addr,
-            icd: None,
+            radio,
+            runner: OtThreadRunner::new(
+                rand,
+                ieee_eui64,
+                kv,
+                context,
+                ble_context,
+                use_ble_random_addr,
+            ),
         }
     }
 
@@ -251,87 +174,8 @@ where
     /// one while idle. See the `icd_mgmt` module of `rs-matter` for the state machine.
     #[must_use]
     pub const fn with_icd(mut self, icd: &'a Icd) -> Self {
-        self.icd = Some(icd);
+        self.runner.icd = Some(icd);
         self
-    }
-}
-
-impl<T, K, R> wireless::Thread for EmbassyThread<'_, T, K, R>
-where
-    T: ThreadDriver,
-    K: KvBlobStoreAccess,
-    R: CryptoRng + Copy,
-{
-    // The Thread controller this driver produces. The operational task receives
-    // `&OtNetCtl` (the driver passes `&net_ctl`), so the chain net-ctl type — and
-    // hence this associated type — is `&'a OtNetCtl`. Naming it here lets the
-    // commissioning and operational handler chains share one `WirelessNetCtl`
-    // type (single monomorphization). `&OtNetCtl` satisfies the bounds via the
-    // blanket `impl Trait for &T` impls.
-    type NetCtl<'a>
-        = &'a OtNetCtl<'a>
-    where
-        Self: 'a;
-
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: wireless::ThreadTask,
-    {
-        self.driver
-            .run(ThreadDriverTaskImpl {
-                ieee_eui64: self.ieee_eui64,
-                rand: self.rand,
-                kv: &self.kv,
-                context: self.context,
-                task,
-                icd: self.icd,
-            })
-            .await
-    }
-}
-
-impl<T, K, R> wireless::ThreadCoex for EmbassyThread<'_, T, K, R>
-where
-    T: ThreadCoexDriver,
-    K: KvBlobStoreAccess,
-    R: CryptoRng + Copy,
-{
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: wireless::ThreadCoexTask,
-    {
-        self.driver
-            .run(ThreadCoexDriverTaskImpl {
-                ieee_eui64: self.ieee_eui64,
-                rand: self.rand,
-                kv: &self.kv,
-                context: self.context,
-                ble_context: self.ble_context,
-                use_ble_random_addr: self.use_ble_random_addr,
-                task,
-                icd: self.icd,
-            })
-            .await
-    }
-}
-
-impl<T, K, R> Gatt for EmbassyThread<'_, T, K, R>
-where
-    T: BleDriver,
-    K: KvBlobStoreAccess,
-    R: Rng + Copy,
-{
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: GattTask,
-    {
-        self.driver
-            .run(BleDriverTaskImpl {
-                task,
-                rand: self.use_ble_random_addr.then_some(self.rand),
-                context: self.ble_context,
-            })
-            .await
     }
 }
 
@@ -370,24 +214,72 @@ impl Embedding for OtNetContext {
     }
 }
 
-struct ThreadDriverTaskImpl<'a, A, K, C> {
+/// What the Thread drivers have in common, whatever their radio: running a task of
+/// the stack over `openthread`.
+///
+/// For implementing the Thread drivers of the stack for a radio this crate does not know.
+pub struct OtThreadRunner<'a, K, R> {
     ieee_eui64: [u8; 8],
-    rand: C,
+    rand: R,
     kv: K,
     context: &'a OtNetContext,
-    task: A,
+    ble_context: &'a BtpGattContext,
+    use_ble_random_addr: bool,
     icd: Option<&'a Icd>,
 }
 
-impl<A, K, C> ThreadDriverTask for ThreadDriverTaskImpl<'_, A, K, C>
+impl<'a, K, R> OtThreadRunner<'a, K, R> {
+    /// Create a new instance of the `OtThreadRunner` type.
+    pub const fn new(
+        rand: R,
+        ieee_eui64: [u8; 8],
+        kv: K,
+        context: &'a OtNetContext,
+        ble_context: &'a BtpGattContext,
+        use_ble_random_addr: bool,
+    ) -> Self {
+        Self {
+            ieee_eui64,
+            rand,
+            kv,
+            context,
+            ble_context,
+            use_ble_random_addr,
+            icd: None,
+        }
+    }
+
+    /// Return the GATT peripheral context.
+    pub const fn ble_context(&self) -> &'a BtpGattContext {
+        self.ble_context
+    }
+}
+
+impl<K, R> OtThreadRunner<'_, K, R>
 where
-    A: wireless::ThreadTask,
+    R: Rng + Copy,
+{
+    /// Return the random number generator for the BLE address, if a random one should be used.
+    pub fn ble_rand(&self) -> Option<R> {
+        self.use_ble_random_addr.then_some(self.rand)
+    }
+
+    /// Return the random number generator.
+    pub fn rand(&self) -> R {
+        self.rand
+    }
+}
+
+impl<K, C> OtThreadRunner<'_, K, C>
+where
     K: KvBlobStoreAccess,
     C: CryptoRng + Copy,
 {
-    async fn run<R>(&mut self, mut radio: R) -> Result<(), Error>
+    /// Run a Thread task over the given radio.
+    pub async fn run<R, A>(&self, mut radio: R, mut task: A) -> Result<(), Error>
     where
         R: Radio,
+        A: ThreadTask,
     {
         let mut resources = self.context.resources.lock().await;
         let resources = &mut *resources;
@@ -420,7 +312,7 @@ where
             configure_sed(&ot, icd)?;
         }
 
-        let mut main = pin!(self.task.run(&net_stack, &netif, &net_ctl, &mut mdns));
+        let mut main = pin!(task.run(&net_stack, &netif, &net_ctl, &mut mdns));
         let mut radio = pin!(async {
             ot.run(radio).await;
             #[allow(unreachable_code)]
@@ -441,29 +333,18 @@ where
 
         result
     }
-}
 
-struct ThreadCoexDriverTaskImpl<'a, A, K, C> {
-    ieee_eui64: [u8; 8],
-    rand: C,
-    kv: K,
-    context: &'a OtNetContext,
-    ble_context: &'a BtpGattContext,
-    task: A,
-    use_ble_random_addr: bool,
-    icd: Option<&'a Icd>,
-}
-
-impl<A, K, C> ThreadCoexDriverTask for ThreadCoexDriverTaskImpl<'_, A, K, C>
-where
-    A: wireless::ThreadCoexTask,
-    K: KvBlobStoreAccess,
-    C: CryptoRng + Copy,
-{
-    async fn run<R, B>(&mut self, mut radio: R, ble: B) -> Result<(), Error>
+    /// Run a Thread task with concurrent commissioning over the given radio and GATT peripheral.
+    pub async fn run_coex<R, G, A>(
+        &self,
+        mut radio: R,
+        mut gatt: G,
+        mut task: A,
+    ) -> Result<(), Error>
     where
         R: Radio,
-        B: BleDriver,
+        G: GattPeripheral,
+        A: ThreadCoexTask,
     {
         let mut resources = self.context.resources.lock().await;
         let resources = &mut *resources;
@@ -491,22 +372,12 @@ where
         let net_stack = OtNetStack::new(ot.clone());
         let netif = OtNetif::new(ot.clone());
         let mut mdns = OtMdns::new(ot.clone(), &mut resources.mdns_buf);
-        // The BLE controller is created only while the stack runs the peripheral, i.e. while a
-        // commissioning window is advertised over BLE.
-        let mut peripheral = BleDriverGattPeripheral::new(
-            ble,
-            self.use_ble_random_addr.then_some(self.rand),
-            self.ble_context,
-        );
 
         if let Some(icd) = self.icd {
             configure_sed(&ot, icd)?;
         }
 
-        let mut main =
-            pin!(self
-                .task
-                .run(&net_stack, &netif, &net_ctl, &mut mdns, &mut peripheral));
+        let mut main = pin!(task.run(&net_stack, &netif, &net_ctl, &mut mdns, &mut gatt));
         let mut radio = pin!(async {
             ot.run(radio).await;
             #[allow(unreachable_code)]

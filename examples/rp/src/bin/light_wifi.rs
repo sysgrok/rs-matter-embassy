@@ -52,8 +52,8 @@ use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node
 use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices};
-use rs_matter_embassy::stack::rand::{reseeding_csprng, RngAdaptor};
-use rs_matter_embassy::wireless::rp::RpWifiDriver;
+use rs_matter_embassy::rand::{reseeding_csprng, RngAdaptor};
+use rs_matter_embassy::wireless::rp::RpWifiRadio;
 use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiMatterStack};
 
 macro_rules! mk_static {
@@ -201,7 +201,7 @@ async fn main(_spawner: Spawner) {
     let matter = pin!(stack.run_coex(
         // The Matter stack needs Wifi and BLE
         EmbassyWifi::new(
-            RpWifiDriver::new(
+            RpWifiRadio::new(
                 p.PIN_23, p.PIN_25, p.PIN_24, p.PIN_29, p.DMA_CH0, p.DMA_CH1, p.PIO0, Irqs, fw,
                 clm, btfw, nvram,
             ),

@@ -1,2 +1,2 @@
-/// Re-export the `rs-matter-stack` crate
-pub use rs_matter_stack::*;
+/// Re-export the `stack` of `rs-matter`
+pub use rs_matter::stack::*;

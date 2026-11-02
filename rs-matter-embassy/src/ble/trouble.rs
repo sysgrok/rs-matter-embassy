@@ -9,17 +9,17 @@ use core::mem::MaybeUninit;
 use core::ops::Deref;
 use core::pin::pin;
 
-use rs_matter_stack::ble::GattPeripheral;
-use rs_matter_stack::matter::crypto::Rng;
-use rs_matter_stack::matter::error::{Error, ErrorCode};
-use rs_matter_stack::matter::transport::network::btp::{
+use rs_matter::crypto::Rng;
+use rs_matter::error::{Error, ErrorCode};
+use rs_matter::stack::ble::GattPeripheral;
+use rs_matter::transport::network::btp::{
     AdvData, Btp, C1_CHARACTERISTIC_UUID, C2_CHARACTERISTIC_UUID, MATTER_BLE_SERVICE_UUID16,
 };
-use rs_matter_stack::matter::transport::network::BtAddr;
-use rs_matter_stack::matter::utils::futures::{select, Coalesce};
-use rs_matter_stack::matter::utils::init::{init, Init};
-use rs_matter_stack::matter::utils::storage::Vec;
-use rs_matter_stack::matter::utils::sync::{IfMutex, Notification};
+use rs_matter::transport::network::BtAddr;
+use rs_matter::utils::futures::{select, Coalesce};
+use rs_matter::utils::init::{init, Init};
+use rs_matter::utils::storage::Vec;
+use rs_matter::utils::sync::{IfMutex, Notification};
 
 use trouble_host::att::{AttClient, AttReq, AttRsp};
 use trouble_host::prelude::*;

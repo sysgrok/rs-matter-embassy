@@ -50,7 +50,7 @@ use rs_matter_embassy::stack::eth::EthMatterStack;
 
 use panic_rtt_target as _;
 
-use rs_matter_embassy::stack::rand::reseeding_csprng;
+use rs_matter_embassy::rand::reseeding_csprng;
 use tinyrlibc as _;
 
 macro_rules! mk_static {

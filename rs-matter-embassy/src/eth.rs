@@ -19,7 +19,7 @@ use crate::matter::utils::futures::{select, Coalesce};
 use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::sync::IfMutex;
-use crate::stack::eth::{Eth, Ethernet, EthernetTask};
+use crate::stack::eth::{Eth, EthernetDriver, EthernetTask};
 use crate::stack::network::{Embedding, Network};
 use crate::stack::MatterStack;
 
@@ -84,166 +84,75 @@ where
     }
 }
 
-/// A trait representing a task that needs access to the Ethernet driver to perform its work
-pub trait EthernetDriverTask {
-    /// Run the task with the given Ethernet driver
-    async fn run<D>(&mut self, driver: D) -> Result<(), Error>
-    where
-        D: embassy_net::driver::Driver;
-}
-
-impl<T> EthernetDriverTask for &mut T
-where
-    T: EthernetDriverTask,
-{
-    async fn run<D>(&mut self, driver: D) -> Result<(), Error>
-    where
-        D: embassy_net::driver::Driver,
-    {
-        (*self).run(driver).await
-    }
-}
-
-/// A trait for running a task within a context where the Ethernet driver is initialized and operable
-pub trait EthernetDriver {
-    /// Setup the Ethernet driver and run the given task with it
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: EthernetDriverTask;
-}
-
-impl<T> EthernetDriver for &mut T
-where
-    T: EthernetDriver,
-{
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
-    where
-        A: EthernetDriverTask,
-    {
-        (*self).run(task).await
-    }
-}
-
-/// An Ethernet driver provider that uses a pre-existing, already created Ethernet driver,
-/// rather than creating it when the Matter stack needs it.
-pub struct PreexistingEthDriver<D>(D);
-
-impl<D> PreexistingEthDriver<D> {
-    /// Create a new instance of the `PreexistingEthDriver` type.
-    pub const fn new(enet_driver: D) -> Self {
-        Self(enet_driver)
-    }
-}
-
-impl<D> EthernetDriver for PreexistingEthDriver<D>
-where
-    D: embassy_net::driver::Driver,
-{
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
-    where
-        A: EthernetDriverTask,
-    {
-        task.run(&mut self.0).await
-    }
-}
-
-/// An `Ethernet` trait implementation for `embassy-net`.
-pub struct EmbassyEthernet<'a, T, R> {
-    driver: T,
+/// An Ethernet driver of the stack over `embassy-net` and an `embassy-net` driver `D`.
+pub struct EmbassyEthernet<'a, D, R> {
+    device: D,
     rand: R,
     context: &'a EmbassyNetContext,
 }
 
-impl<'a, T, R> EmbassyEthernet<'a, T, R>
-where
-    T: EthernetDriver,
-{
+impl<'a, D, R> EmbassyEthernet<'a, D, R> {
     /// Create a new instance of the `EmbassyEthernet` type.
     pub fn new<const B: usize, E>(
-        driver: T,
+        device: D,
         rand: R,
         stack: &'a EmbassyEthMatterStack<'a, B, E>,
     ) -> Self
     where
         E: Embedding,
     {
-        Self::wrap(driver, rand, stack.network().embedding().net_context())
+        Self::wrap(device, rand, stack.network().embedding().net_context())
     }
 
-    /// Wrap an existing `Ethernet` driver with the `EmbassyEthernet` type.
-    pub fn wrap(driver: T, rand: R, context: &'a EmbassyNetContext) -> Self {
+    /// Wrap an `embassy-net` driver with the `EmbassyEthernet` type.
+    pub fn wrap(device: D, rand: R, context: &'a EmbassyNetContext) -> Self {
         Self {
-            driver,
+            device,
             rand,
             context,
         }
     }
 }
 
-impl<T, R> Ethernet for EmbassyEthernet<'_, T, R>
+impl<D, R> EthernetDriver for EmbassyEthernet<'_, D, R>
 where
-    T: EthernetDriver,
+    D: Driver,
     R: Rng,
 {
-    async fn run<A>(&mut self, task: A) -> Result<(), Error>
+    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
         A: EthernetTask,
     {
-        struct EthernetDriverTaskImpl<'a, 'b, A, R> {
-            context: &'a EmbassyNetContext,
-            task: A,
-            rand: &'b mut R,
-        }
+        let mut resources = self.context.resources.lock().await;
+        let mut mdns = self.context.mdns.lock().await;
 
-        impl<A, R> EthernetDriverTask for EthernetDriverTaskImpl<'_, '_, A, R>
-        where
-            A: EthernetTask,
-            R: Rng,
-        {
-            async fn run<D>(&mut self, driver: D) -> Result<(), Error>
-            where
-                D: embassy_net::driver::Driver,
-            {
-                let mut resources = self.context.resources.lock().await;
-                let mut mdns = self.context.mdns.lock().await;
+        let resources = &mut *resources;
+        let mdns = &mut *mdns;
+        let buffers = &self.context.buffers;
 
-                let resources = &mut *resources;
-                let mdns = &mut *mdns;
-                let buffers = &self.context.buffers;
+        let mut seed = [0; core::mem::size_of::<u64>()];
+        self.rand.fill_bytes(&mut seed);
 
-                let mut seed = [0; core::mem::size_of::<u64>()];
-                self.rand.fill_bytes(&mut seed);
+        let counters = EnetCounters::new();
 
-                let counters = EnetCounters::new();
+        let (stack, mut runner) = create_enet_stack(
+            EnetCountingDriver::new(&mut self.device, &counters),
+            u64::from_le_bytes(seed),
+            resources,
+        );
 
-                let (stack, mut runner) = create_enet_stack(
-                    EnetCountingDriver::new(driver, &counters),
-                    u64::from_le_bytes(seed),
-                    resources,
-                );
+        let net_stack = EnetStack::new(stack, buffers);
+        let netif = EnetNetif::new(stack, InterfaceTypeEnum::Ethernet);
+        let eth_diag = EnetEthDiag::new(stack, &counters);
 
-                let net_stack = EnetStack::new(stack, buffers);
-                let netif = EnetNetif::new(stack, InterfaceTypeEnum::Ethernet);
-                let eth_diag = EnetEthDiag::new(stack, &counters);
+        let mut main = pin!(task.run(&net_stack, &netif, &eth_diag, mdns));
+        let mut run = pin!(async {
+            runner.run().await;
+            #[allow(unreachable_code)]
+            Ok(())
+        });
 
-                let mut main = pin!(self.task.run(&net_stack, &netif, &eth_diag, mdns));
-                let mut run = pin!(async {
-                    runner.run().await;
-                    #[allow(unreachable_code)]
-                    Ok(())
-                });
-
-                select(&mut main, &mut run).coalesce().await
-            }
-        }
-
-        self.driver
-            .run(EthernetDriverTaskImpl {
-                context: self.context,
-                task,
-                rand: &mut self.rand,
-            })
-            .await
+        select(&mut main, &mut run).coalesce().await
     }
 }
 

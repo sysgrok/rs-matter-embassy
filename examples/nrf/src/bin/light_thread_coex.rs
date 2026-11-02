@@ -34,13 +34,13 @@ use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node
 use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices, root_endpoint, BasicCommData};
-use rs_matter_embassy::stack::rand::reseeding_csprng;
+use rs_matter_embassy::rand::reseeding_csprng;
 #[cfg(feature = "nrf54l15")]
 use rs_matter_embassy::wireless::nrf::CcmInterruptHandler;
 use rs_matter_embassy::wireless::nrf::{
     EguInterruptHandler, LpTimerInterruptHandler, NrfIeee802154Peripherals, NrfMpslPeripherals,
     NrfSdcPeripherals, NrfThreadClockInterruptHandler, NrfThreadHighPrioInterruptHandler,
-    NrfThreadLowPrioInterruptHandler, NrfThreadMpslRadioDriver,
+    NrfThreadLowPrioInterruptHandler, NrfThreadMpslRadio,
 };
 use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
 
@@ -219,14 +219,7 @@ async fn main(_s: Spawner) {
         ),
     );
 
-    let thread_driver = NrfThreadMpslRadioDriver::new(
-        p.RADIO,
-        mpsl_p,
-        sdc_p,
-        ieee802154_p,
-        crypto.rand().unwrap(),
-        Irqs,
-    );
+    let thread_radio = NrfThreadMpslRadio::new(p.RADIO, mpsl_p, sdc_p, ieee802154_p, Irqs);
 
     // Our "light" on-off cluster.
     // It will toggle the light state every 5 seconds
@@ -279,7 +272,7 @@ async fn main(_s: Spawner) {
     let matter = pin!(stack.run_coex(
         // The Matter stack needs to instantiate `openthread`
         EmbassyThread::new(
-            thread_driver,
+            thread_radio,
             crypto.rand().unwrap(),
             ieee_eui64,
             &kv,

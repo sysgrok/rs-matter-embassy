@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [?.??.?] - ????-??-??
+* Breaking: on the `stack` of `rs-matter`; the driver traits are gone, as `EmbassyWifi`, `EmbassyThread` and `EmbassyEthernet` implement the drivers of the stack for each radio, and `*Driver` is `*Radio`
 * Breaking: update to the `rs-matter` split into crates; `root_handler` takes the `Matter` instance, as per `rs-matter-stack`
 * Raise MSRV to 1.92, as per `rs-matter`
 * Use `rs-matter`'s `utils::futures`, `utils::timers` and `utils::storage` instead of depending on `embassy-futures`, `embassy-time` and `heapless`

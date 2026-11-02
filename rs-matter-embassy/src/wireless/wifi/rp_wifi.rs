@@ -29,15 +29,22 @@ use embassy_rp::Peri;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
+use crate::ble::BtpGattPeripheral;
 use crate::enet::net::driver::{Driver as _, HardwareAddress as DriverHardwareAddress};
 use crate::enet::{
     create_link_local_ipv6, multicast_mac_for_link_local_ipv6, MDNS_MULTICAST_MAC_IPV4,
     MDNS_MULTICAST_MAC_IPV6,
 };
+use crate::matter::crypto::Rng;
 use crate::matter::error::Error;
 use crate::matter::utils::sync::blocking::Mutex;
+use crate::stack::wireless::{
+    GattDriver, GattTask, WifiCoexDriver, WifiCoexTask, WifiDriver, WifiTask,
+};
 use crate::wifi::rp::Cyw43WifiController;
-use crate::wireless::PreexistingBleDriver;
+use crate::wireless::ControllerGattPeripheral;
+
+use super::EmbassyWifi;
 
 #[derive(Copy, Clone)]
 struct Cyw43PioInterrupts;
@@ -233,8 +240,8 @@ where
     }
 }
 
-/// A `WifiDriver` implementation for the ESP32 family of chips.
-pub struct RpWifiDriver<'d> {
+/// The CYW43 Wifi and BLE radio of the Raspberry Pi Pico W family of boards.
+pub struct RpWifiRadio<'d> {
     pwr: Peri<'d, PIN_23>,
     cs: Peri<'d, PIN_25>,
     dio: Peri<'d, PIN_24>,
@@ -248,8 +255,8 @@ pub struct RpWifiDriver<'d> {
     nvram: Option<&'d Aligned<A4, [u8]>>,
 }
 
-impl<'d> RpWifiDriver<'d> {
-    /// Create a new instance of the `Esp32WifiDriver` type.
+impl<'d> RpWifiRadio<'d> {
+    /// Create a new instance of the `RpWifiRadio` type.
     ///
     /// # Arguments
     /// - `pwr` - The power control pin for the cyw chip.
@@ -333,24 +340,27 @@ impl<'d> RpWifiDriver<'d> {
     }
 }
 
-impl super::WifiDriver for RpWifiDriver<'_> {
+impl<R> WifiDriver for EmbassyWifi<'_, RpWifiRadio<'_>, R>
+where
+    R: Rng + Copy,
+{
     type NetCtl<'a>
         = crate::wifi::rp::Cyw43WifiController<'a>
     where
         Self: 'a;
 
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
-        A: super::WifiDriverTask,
+        A: WifiTask,
     {
         let state = Cyw43State::take();
-        let fmw_clm = self.fmw_clm;
+        let fmw_clm = self.radio.fmw_clm;
 
-        let pwr = Output::new(self.pwr.reborrow(), Level::Low);
-        let cs = Output::new(self.cs.reborrow(), Level::High);
-        let mut pio = Pio::new(self.pio.reborrow(), Cyw43PioInterrupts);
-        let dma0 = Channel::new(self.dma0.reborrow(), Cyw43PioInterrupts);
-        let dma1 = Channel::new(self.dma1.reborrow(), Cyw43PioInterrupts);
+        let pwr = Output::new(self.radio.pwr.reborrow(), Level::Low);
+        let cs = Output::new(self.radio.cs.reborrow(), Level::High);
+        let mut pio = Pio::new(self.radio.pio.reborrow(), Cyw43PioInterrupts);
+        let dma0 = Channel::new(self.radio.dma0.reborrow(), Cyw43PioInterrupts);
+        let dma1 = Channel::new(self.radio.dma1.reborrow(), Cyw43PioInterrupts);
 
         let spi = PioSpi::new(
             &mut pio.common,
@@ -361,8 +371,8 @@ impl super::WifiDriver for RpWifiDriver<'_> {
             cyw43_pio::DEFAULT_CLOCK_DIVIDER * 8,
             pio.irq0,
             cs,
-            self.dio.reborrow(),
-            self.clk.reborrow(),
+            self.radio.dio.reborrow(),
+            self.radio.clk.reborrow(),
             dma0,
             dma1,
         );
@@ -371,8 +381,8 @@ impl super::WifiDriver for RpWifiDriver<'_> {
             &mut *state.0,
             pwr,
             spi,
-            self.fmw.unwrap_or(&Aligned([])),
-            self.nvram.unwrap_or(&Aligned([])),
+            self.radio.fmw.unwrap_or(&Aligned([])),
+            self.radio.nvram.unwrap_or(&Aligned([])),
         )
         .await;
 
@@ -380,33 +390,37 @@ impl super::WifiDriver for RpWifiDriver<'_> {
         // so the runner has to be polled concurrently with the controller initialization,
         // or else the initialization would hang forever.
         let mut runner = pin!(runner.run());
-        let mut task = pin!(async {
-            Self::init_net_controller(&mut net_device, &mut net_controller, fmw_clm).await;
+        let mut run_task = pin!(async {
+            RpWifiRadio::init_net_controller(&mut net_device, &mut net_controller, fmw_clm).await;
 
-            task.run(net_device, Cyw43WifiController::new(net_controller))
+            self.runner
+                .run(net_device, Cyw43WifiController::new(net_controller), task)
                 .await
         });
 
-        match select(&mut runner, &mut task).await {
+        match select(&mut runner, &mut run_task).await {
             First(_) => Ok(()),
             Second(r) => r,
         }
     }
 }
 
-impl super::WifiCoexDriver for RpWifiDriver<'_> {
-    async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
+impl<R> WifiCoexDriver for EmbassyWifi<'_, RpWifiRadio<'_>, R>
+where
+    R: Rng + Copy,
+{
+    async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
-        A: super::WifiCoexDriverTask,
+        A: WifiCoexTask,
     {
         let state = Cyw43State::take();
-        let fmw_clm = self.fmw_clm;
+        let fmw_clm = self.radio.fmw_clm;
 
-        let pwr = Output::new(self.pwr.reborrow(), Level::Low);
-        let cs = Output::new(self.cs.reborrow(), Level::High);
-        let mut pio = Pio::new(self.pio.reborrow(), Cyw43PioInterrupts);
-        let dma0 = Channel::new(self.dma0.reborrow(), Cyw43PioInterrupts);
-        let dma1 = Channel::new(self.dma1.reborrow(), Cyw43PioInterrupts);
+        let pwr = Output::new(self.radio.pwr.reborrow(), Level::Low);
+        let cs = Output::new(self.radio.cs.reborrow(), Level::High);
+        let mut pio = Pio::new(self.radio.pio.reborrow(), Cyw43PioInterrupts);
+        let dma0 = Channel::new(self.radio.dma0.reborrow(), Cyw43PioInterrupts);
+        let dma1 = Channel::new(self.radio.dma1.reborrow(), Cyw43PioInterrupts);
 
         let spi = PioSpi::new(
             &mut pio.common,
@@ -417,8 +431,8 @@ impl super::WifiCoexDriver for RpWifiDriver<'_> {
             cyw43_pio::DEFAULT_CLOCK_DIVIDER * 8,
             pio.irq0,
             cs,
-            self.dio.reborrow(),
-            self.clk.reborrow(),
+            self.radio.dio.reborrow(),
+            self.radio.clk.reborrow(),
             dma0,
             dma1,
         );
@@ -427,9 +441,9 @@ impl super::WifiCoexDriver for RpWifiDriver<'_> {
             &mut *state.0,
             pwr,
             spi,
-            self.fmw.unwrap_or(&Aligned([])),
-            self.fmw_bt.unwrap_or(&Aligned([])),
-            self.nvram.unwrap_or(&Aligned([])),
+            self.radio.fmw.unwrap_or(&Aligned([])),
+            self.radio.fmw_bt.unwrap_or(&Aligned([])),
+            self.radio.nvram.unwrap_or(&Aligned([])),
         )
         .await;
 
@@ -439,20 +453,26 @@ impl super::WifiCoexDriver for RpWifiDriver<'_> {
         let mut runner_fut = pin!(never_ending(runner.run()));
         let runner = SharedRunner::new(runner_fut.as_mut());
 
-        let mut task = pin!(async {
-            Self::init_net_controller(&mut net_device, &mut net_controller, fmw_clm).await;
+        let mut run_task = pin!(async {
+            RpWifiRadio::init_net_controller(&mut net_device, &mut net_controller, fmw_clm).await;
 
             // The CYW43 BLE controller stays up for the whole run; the stack starts and stops
             // advertising on it as commissioning windows come and go.
             let ble_ctl =
                 Cyw43Controller::new(ExternalController::<_, 20>::new(bt_device), &runner);
 
-            task.run(
-                net_device,
-                Cyw43WifiController::new(net_controller),
-                PreexistingBleDriver::new(&ble_ctl),
-            )
-            .await
+            self.runner
+                .run_coex(
+                    net_device,
+                    Cyw43WifiController::new(net_controller),
+                    ControllerGattPeripheral::new(
+                        &ble_ctl,
+                        self.runner.ble_rand(),
+                        self.runner.ble_context(),
+                    ),
+                    task,
+                )
+                .await
         });
 
         // The runner arm goes last so that it re-registers the executor's waker with the runner's
@@ -460,25 +480,28 @@ impl super::WifiCoexDriver for RpWifiDriver<'_> {
         // pump-while-pending wait has polled the runner with its parker waker instead.
         let mut runner_arm = pin!(poll_fn(|cx| runner.poll(cx)));
 
-        match select(&mut task, &mut runner_arm).await {
+        match select(&mut run_task, &mut runner_arm).await {
             First(r) => r,
             Second(never) => match never {},
         }
     }
 }
 
-impl super::BleDriver for RpWifiDriver<'_> {
+impl<R> GattDriver for EmbassyWifi<'_, RpWifiRadio<'_>, R>
+where
+    R: Rng + Copy,
+{
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
-        A: super::BleDriverTask,
+        A: GattTask,
     {
         let state = Cyw43State::take();
 
-        let pwr = Output::new(self.pwr.reborrow(), Level::Low);
-        let cs = Output::new(self.cs.reborrow(), Level::High);
-        let mut pio = Pio::new(self.pio.reborrow(), Cyw43PioInterrupts);
-        let dma0 = Channel::new(self.dma0.reborrow(), Cyw43PioInterrupts);
-        let dma1 = Channel::new(self.dma1.reborrow(), Cyw43PioInterrupts);
+        let pwr = Output::new(self.radio.pwr.reborrow(), Level::Low);
+        let cs = Output::new(self.radio.cs.reborrow(), Level::High);
+        let mut pio = Pio::new(self.radio.pio.reborrow(), Cyw43PioInterrupts);
+        let dma0 = Channel::new(self.radio.dma0.reborrow(), Cyw43PioInterrupts);
+        let dma1 = Channel::new(self.radio.dma1.reborrow(), Cyw43PioInterrupts);
 
         let spi = PioSpi::new(
             &mut pio.common,
@@ -489,8 +512,8 @@ impl super::BleDriver for RpWifiDriver<'_> {
             cyw43_pio::DEFAULT_CLOCK_DIVIDER * 8,
             pio.irq0,
             cs,
-            self.dio.reborrow(),
-            self.clk.reborrow(),
+            self.radio.dio.reborrow(),
+            self.radio.clk.reborrow(),
             dma0,
             dma1,
         );
@@ -499,26 +522,27 @@ impl super::BleDriver for RpWifiDriver<'_> {
             &mut *state.0,
             pwr,
             spi,
-            self.fmw.unwrap_or(&Aligned([])),
-            self.fmw_bt.unwrap_or(&Aligned([])),
-            self.nvram.unwrap_or(&Aligned([])),
+            self.radio.fmw.unwrap_or(&Aligned([])),
+            self.radio.fmw_bt.unwrap_or(&Aligned([])),
+            self.radio.nvram.unwrap_or(&Aligned([])),
         )
         .await;
-
-        //Self::init_net_controller(&mut net_device, &mut net_controller, self.fmw_clm).await;
 
         let mut runner_fut = pin!(never_ending(runner.run()));
         let runner = SharedRunner::new(runner_fut.as_mut());
 
-        let mut task = pin!(task.run(Cyw43Controller::new(
-            ExternalController::<_, 20>::new(bt_device),
-            &runner,
-        )));
+        let mut peripheral = BtpGattPeripheral::new(
+            Cyw43Controller::new(ExternalController::<_, 20>::new(bt_device), &runner),
+            self.runner.ble_rand(),
+            self.runner.ble_context(),
+        );
+
+        let mut run_task = pin!(task.run(&mut peripheral));
 
         // The runner arm goes last, for the reason given in the `WifiCoexDriver` impl above.
         let mut runner_arm = pin!(poll_fn(|cx| runner.poll(cx)));
 
-        match select(&mut task, &mut runner_arm).await {
+        match select(&mut run_task, &mut runner_arm).await {
             First(r) => r,
             Second(never) => match never {},
         }

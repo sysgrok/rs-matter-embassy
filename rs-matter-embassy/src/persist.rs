@@ -4,11 +4,11 @@ use core::ops::Range;
 
 use embedded_storage_async::nor_flash::MultiwriteNorFlash;
 
-use rs_matter_stack::matter::error::Error;
-use rs_matter_stack::matter::fabric::MAX_FABRICS;
-use rs_matter_stack::matter::persist::KvBlobStore;
-use rs_matter_stack::matter::utils::futures::block_on;
-use rs_matter_stack::matter::utils::storage::Vec;
+use rs_matter::error::Error;
+use rs_matter::fabric::MAX_FABRICS;
+use rs_matter::persist::KvBlobStore;
+use rs_matter::utils::futures::block_on;
+use rs_matter::utils::storage::Vec;
 
 use sequential_storage::cache::key_pointers::ArrayKeyPointers;
 use sequential_storage::cache::page_states::CalculatedPageStates;
