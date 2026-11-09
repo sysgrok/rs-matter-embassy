@@ -224,6 +224,13 @@ jobs:
       - name: Setup | Rust thumbv6m-none-eabi
         run: rustup target add thumbv6m-none-eabi
 
+      # bindgen (e.g. `nrf-mpsl-sys`) loads the newest libclang on the runner, but
+      # takes the builtin headers from the default `clang`. When the two versions
+      # differ (Ubuntu 26.04: 22 vs 21), `<stdint.h>` comes out empty. Use the
+      # libclang of the default `clang`.
+      - name: Setup | libclang
+        run: echo "LIBCLANG_PATH=$(dirname "$(readlink -f "$(command -v clang)")")/../lib" >> "$GITHUB_ENV"
+
       - name: Setup | Checkout
         uses: actions/checkout@v3
 
