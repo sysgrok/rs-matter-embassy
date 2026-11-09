@@ -681,6 +681,14 @@ fn security_policy_flags(sp: &openthread::SecurityPolicy) -> u16 {
 }
 
 /// An mDNS trait implementation for `openthread` using Thread SRP
+///
+/// The SRP host name is the node's Thread extended address, in hexadecimal.
+/// OpenThread picks this address at random and keeps it in its settings,
+/// together with the key it signs the SRP updates with. So the name stays the
+/// same across restarts, and changes together with the key when the settings
+/// are erased. The SRP server reserves a name for the key that registered it
+/// until the key lease ends, 14 days by default, so a name that stayed the same
+/// while the key changed would be refused until then.
 pub struct OtMdns<'a, 'd> {
     ot: OpenThread<'d>,
     buf: &'a mut [u8],
@@ -770,21 +778,14 @@ impl<'a, 'd> OtMdns<'a, 'd> {
         loop {
             // TODO: Not very efficient to remove and re-add everything
 
-            let ieee_eui64 = ot.ieee_eui64();
+            let addr = ot.ext_address().to_be_bytes();
 
             let mut hostname = String::<16>::new();
             unwrap!(
                 write!(
                     hostname,
                     "{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
-                    ieee_eui64[0],
-                    ieee_eui64[1],
-                    ieee_eui64[2],
-                    ieee_eui64[3],
-                    ieee_eui64[4],
-                    ieee_eui64[5],
-                    ieee_eui64[6],
-                    ieee_eui64[7]
+                    addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], addr[6], addr[7]
                 ),
                 "Unreachable"
             );
