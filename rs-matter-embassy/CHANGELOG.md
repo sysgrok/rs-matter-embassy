@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [?.??.?] - ????-??-??
+* Fix: with the `nimble` backend, the BLE peripheral stops advertising and disconnects when the commissioning window closes; before, a controller that outlives the peripheral's run (`ControllerGattPeripheral`, e.g. the Pico W) kept advertising. The `trouble` backend still has this problem (TODO)
 * Breaking: no `edge-nal`, `edge-nal-embassy` or `edge-nal-openthread`; `EnetStack` and `OtNetStack` implement the `NetStack` of `rs_matter::stack` themselves. The `nal` module and the `edge-nal-embassy` re-export in `enet` are gone
   * `embassy-net` gets only the features the stack needs (UDP, IPv4, IPv6, multicast, DHCPv4, Ethernet); an app that needs e.g. TCP or DNS turns them on itself
   * `EnetMatterUdpBuffers::init`, for building the buffers in place

@@ -215,6 +215,12 @@ where
             }
         )));
 
+        // TODO: The `rs-matter` stack stops BLE by dropping this future when a commissioning window
+        // closes. The advertiser and the connection then only queue their stop and disconnect
+        // requests for the runner, which is dropped along with them, so nothing reaches the
+        // controller. A controller that outlives `run` (see `ControllerGattPeripheral`) keeps
+        // advertising until the next `run` resets it. A fix needs `GattPeripheral::run` to be told
+        // to stop and then awaited, instead of dropped.
         let mut ble_task = pin!(Self::run_ble(runner));
         let mut peripheral_task = pin!(Self::run_peripheral(
             btp,

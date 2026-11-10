@@ -5,6 +5,7 @@
 //! plain `bt-hci` controller, so the choice is purely which host stack ends up in the binary.
 
 use core::cell::Cell;
+use core::pin::pin;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
@@ -63,6 +64,13 @@ const BLE_GAP_DISC_MODE_GEN: u8 = 2;
 const BLE_ATT_ERR_INSUFFICIENT_RES: u8 = 0x11;
 /// `BLE_HS_EDONE` - the status a completed (peer-confirmed) indication reports.
 const BLE_HS_EDONE: i32 = 14;
+/// `BLE_ERR_REM_USER_CONN_TERM` - the HCI reason "remote user terminated connection".
+const BLE_ERR_REM_USER_CONN_TERM: u8 = 0x13;
+
+extern "C" {
+    /// NimBLE's `ble_gap_terminate`, which `nimble-rs` wraps only with its `central` feature.
+    fn ble_gap_terminate(conn_handle: u16, hci_reason: u8) -> core::ffi::c_int;
+}
 
 /// The advertising interval, in NimBLE's 0.625ms units (160ms).
 ///
@@ -382,8 +390,16 @@ where
         // indications - the last of which also drives (re)advertising synchronously, so that needs
         // no future of its own. This keeps the `run` future (which rs-matter-stack bump-allocates)
         // small.
+        let mut host = pin!(Self::run_host(&ble, &self.ble_ctl));
+
+        // Dropped before `host`, whose HCI pump carries the commands it sends
+        let _stop = StopOnDrop {
+            ble: &ble,
+            context: self.context,
+        };
+
         select3(
-            Self::run_host(&ble, &self.ble_ctl),
+            &mut host,
             self.process_incoming(btp),
             self.process_outgoing(btp, &ble),
         )
@@ -562,6 +578,40 @@ where
             })?;
 
         Ok(())
+    }
+}
+
+/// Stops advertising and drops the peer when `run` returns or its future is dropped. The
+/// `rs-matter` stack stops BLE that way when a commissioning window closes.
+///
+/// Dropping the `Ble` host tells the controller nothing, so a controller that outlives `run` (see
+/// `ControllerGattPeripheral`) would go on advertising, or keep the link, with no host behind it.
+struct StopOnDrop<'r, 'd> {
+    ble: &'r Ble<'d, Services>,
+    context: &'r NimbleBtpGattContext,
+}
+
+impl Drop for StopOnDrop<'_, '_> {
+    fn drop(&mut self) {
+        // Fails with `BLE_HS_EALREADY` when not advertising
+        if self.ble.adv_stop().is_ok() {
+            info!("Advertising stopped");
+        }
+
+        let conn_handle = self.context.state.lock(|state| {
+            state
+                .borrow()
+                .connection
+                .as_ref()
+                .map(|conn| conn.conn_handle)
+        });
+
+        if let Some(conn_handle) = conn_handle {
+            // SAFETY: a plain NimBLE host call, like the ones `nimble-rs` wraps
+            unsafe {
+                ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            }
+        }
     }
 }
 
