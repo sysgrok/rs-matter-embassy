@@ -1,8 +1,8 @@
-//! An example utilizing the `EmbassyEthMatterStack` struct.
+//! An example utilizing the `MatterStack` struct over `EmbassyEthNetwork`.
 //!
 //! As the name suggests, this Matter stack assembly uses Ethernet as the main transport as well as for commissioning.
 //!
-//! If you want to use Wifi (and BLE), utilize `EmbassyWifiMatterStack` instead.
+//! If you want to use Wifi (and BLE), utilize `EmbassyWifiNetwork` instead.
 //!
 //! The example implements a fictitious Light device (an On-Off Matter cluster).
 #![no_std]
@@ -35,7 +35,7 @@ use tinyrlibc as _;
 
 use embedded_hal_bus::spi::ExclusiveDevice;
 
-use rs_matter_embassy::eth::{EmbassyEthMatterStack, EmbassyEthernet};
+use rs_matter_embassy::eth::{EmbassyEthNetwork, EmbassyEthernet};
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::app::on_off::{self, OnOffHooks};
@@ -49,6 +49,7 @@ use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node
 use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices, root_endpoint};
+use rs_matter_embassy::stack::MatterStack;
 
 use defmt::{info, unwrap};
 
@@ -136,9 +137,11 @@ async fn main(spawner: Spawner) {
     // Statically allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = mk_static!(EmbassyEthMatterStack<BUMP_SIZE, ()>).init_with(
-        EmbassyEthMatterStack::init(&TEST_DEV_DET, TEST_DEV_COMM, &TEST_DEV_ATT),
-    );
+    let stack = mk_static!(MatterStack<BUMP_SIZE, EmbassyEthNetwork>).init_with(MatterStack::init(
+        &TEST_DEV_DET,
+        TEST_DEV_COMM,
+        &TEST_DEV_ATT,
+    ));
 
     // Create the crypto provider, using the ROSC RNG peripheral (which is a TRNG) as the source of randomness for a reseeding CSPRNG.
     let crypto = default_crypto(
@@ -166,7 +169,7 @@ async fn main(spawner: Spawner) {
         // Chain any extra Endpoint 0 clusters of your own the same way.
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
-            Async(EmbassyEthMatterStack::<0, ()>::root_handler(
+            Async(MatterStack::<0, EmbassyEthNetwork>::root_handler(
                 stack.matter(),
                 &(),
                 &mut weak_rand,
@@ -196,7 +199,7 @@ async fn main(spawner: Spawner) {
     // Using `pin!` is completely optional, but reduces the size of the final future
     //
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
-    let matter = pin!(stack.run(
+    let matter = pin!(stack.run_eth(
         // The Matter stack needs the ethernet inteface to run
         EmbassyEthernet::new(device, crypto.rand().unwrap(), stack,),
         // The crypto provider

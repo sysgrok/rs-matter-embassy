@@ -1,6 +1,7 @@
-//! Eternet: Type aliases for an Embassy Matter stack running over an Ethernet network.
+//! Ethernet: an Embassy Matter stack running over an Ethernet network.
 
 use core::cell::Cell;
+use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::pin::pin;
 use core::task::Context;
@@ -13,76 +14,31 @@ use crate::enet::{
 use crate::matter::crypto::Rng;
 use crate::matter::dm::clusters::eth_diag::EthDiag;
 use crate::matter::dm::clusters::gen_diag::InterfaceTypeEnum;
+use crate::matter::dm::networks::eth::EthNetwork;
 use crate::matter::error::Error;
 use crate::matter::transport::network::mdns::builtin::BuiltinMdns;
 use crate::matter::utils::futures::{select, Coalesce};
 use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::sync::IfMutex;
-use crate::stack::eth::{Eth, EthernetDriver, EthernetTask};
-use crate::stack::network::{Embedding, Network};
+use crate::stack::eth::{EthernetDriver, EthernetTask};
+use crate::stack::network::{Embedding, EthStackNetwork, StackNetwork};
 use crate::stack::MatterStack;
 
-/// A type alias for an Embassy Matter stack running over an Ethernet network.
-///
-/// The difference between this and `EthMatterStack` is that all resources necessary for the
-/// operation of `embassy-net` are pre-allocated inside the stack.
-pub type EmbassyEthMatterStack<'a, const B: usize, E = ()> = MatterStack<'a, B, EmbassyEth<E>>;
+/// The network of a `MatterStack` that runs Ethernet with [`EmbassyEthernet`]: the networks
+/// store `S`, and the `embassy-net` context, which the stack holds so that it can be
+/// statically allocated.
+pub struct EmbassyEthNetwork<S = EthNetwork<'static>>(PhantomData<fn() -> S>);
 
-/// A type alias for an Embassy implementation of the `Network` trait for a Matter stack running over
-/// Ethernet.
-pub type EmbassyEth<E = ()> = Eth<EmbassyNet<E>>;
-
-/// An embedding of the `embassy-net` context for the `Eth` network type from `rs-matter-stack`.
-///
-/// Allows the memory of this context to be statically allocated and cost-initialized.
-pub struct EmbassyNet<E = ()> {
-    net_context: EmbassyNetContext,
-    embedding: E,
-}
-
-impl<E> EmbassyNet<E>
+impl<S> StackNetwork for EmbassyEthNetwork<S>
 where
-    E: Embedding,
+    S: EthStackNetwork<Context = ()>,
 {
-    /// Creates a new instance of the `EspGatt` embedding.
-    #[allow(clippy::large_stack_frames)]
-    #[inline(always)]
-    const fn new() -> Self {
-        Self {
-            net_context: EmbassyNetContext::new(),
-            embedding: E::INIT,
-        }
-    }
-
-    /// Return an in-place initializer for the `EspGatt` embedding.
-    fn init() -> impl Init<Self> {
-        init!(Self {
-            net_context <- EmbassyNetContext::init(),
-            embedding <- E::init(),
-        })
-    }
-
-    pub fn net_context(&self) -> &EmbassyNetContext {
-        &self.net_context
-    }
-
-    /// Return a reference to the embedding.
-    pub fn embedding(&self) -> &E {
-        &self.embedding
-    }
+    type Store = S::Store;
+    type Context = EmbassyNetContext;
 }
 
-impl<E> Embedding for EmbassyNet<E>
-where
-    E: Embedding,
-{
-    const INIT: Self = Self::new();
-
-    fn init() -> impl Init<Self> {
-        EmbassyNet::init()
-    }
-}
+impl<S> EthStackNetwork for EmbassyEthNetwork<S> where S: EthStackNetwork<Context = ()> {}
 
 /// An Ethernet driver of the stack over `embassy-net` and an `embassy-net` driver `D`.
 pub struct EmbassyEthernet<'a, D, R> {
@@ -93,15 +49,16 @@ pub struct EmbassyEthernet<'a, D, R> {
 
 impl<'a, D, R> EmbassyEthernet<'a, D, R> {
     /// Create a new instance of the `EmbassyEthernet` type.
-    pub fn new<const B: usize, E>(
+    pub fn new<const B: usize, S, E>(
         device: D,
         rand: R,
-        stack: &'a EmbassyEthMatterStack<'a, B, E>,
+        stack: &'a MatterStack<'a, B, S, E>,
     ) -> Self
     where
+        S: StackNetwork<Context = EmbassyNetContext>,
         E: Embedding,
     {
-        Self::wrap(device, rand, stack.network().embedding().net_context())
+        Self::wrap(device, rand, stack.context())
     }
 
     /// Wrap an `embassy-net` driver with the `EmbassyEthernet` type.

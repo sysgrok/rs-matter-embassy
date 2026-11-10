@@ -1,4 +1,4 @@
-//! An example utilizing the `EmbassyThreadMatterStack` struct.
+//! An example utilizing the `MatterStack` struct over `EmbassyThreadNetwork`.
 //!
 //! As the name suggests, this Matter stack assembly uses Thread as the main transport,
 //! and thus BLE for commissioning, in non-concurrent commissioning mode
@@ -24,6 +24,8 @@ use embedded_alloc::LlffHeap;
 
 use defmt::{info, unwrap};
 
+use rs_matter_embassy::stack::wireless::BTP_BUMP_SIZE;
+
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, Rng};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::app::on_off::{self, OnOffHooks};
@@ -39,12 +41,13 @@ use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices, root_endpoint, BasicCommData};
 use rs_matter_embassy::rand::reseeding_csprng;
+use rs_matter_embassy::stack::MatterStack;
 use rs_matter_embassy::wireless::nrf::{
     NrfMpslPeripherals, NrfSdcPeripherals, NrfThreadClockInterruptHandler,
     NrfThreadHighPrioInterruptHandler, NrfThreadLowPrioInterruptHandler, NrfThreadRadioResources,
     NrfThreadRustRadio, NrfThreadRustRadioRunner,
 };
-use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
+use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadNetwork};
 
 use panic_rtt_target as _;
 
@@ -86,7 +89,7 @@ static RADIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 ///
 /// If - for your platform - this size is not enough, increase it until
 /// the program runs without panics during the stack initialization.
-const BUMP_SIZE: usize = 21320 + 4 + 2976;
+const BUMP_SIZE: usize = 21320 + 4 + 2976 + BTP_BUMP_SIZE;
 
 #[global_allocator]
 static HEAP: LlffHeap = LlffHeap::empty();
@@ -139,16 +142,15 @@ async fn main(_s: Spawner) {
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = mk_static!(EmbassyThreadMatterStack<BUMP_SIZE, ()>).init_with(
-        EmbassyThreadMatterStack::init(
+    let stack =
+        mk_static!(MatterStack<BUMP_SIZE, EmbassyThreadNetwork>).init_with(MatterStack::init(
             &TEST_BASIC_INFO,
             BasicCommData {
                 password: TEST_DEV_COMM.password,
                 discriminator,
             },
             &TEST_DEV_ATT,
-        ),
-    );
+        ));
 
     let (thread_radio, thread_radio_runner) = NrfThreadRustRadio::new(
         mk_static!(NrfThreadRadioResources, NrfThreadRadioResources::new()),
@@ -189,7 +191,7 @@ async fn main(_s: Spawner) {
         // Chain any extra Endpoint 0 clusters of your own the same way.
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
-            Async(EmbassyThreadMatterStack::<0, ()>::root_handler(
+            Async(MatterStack::<0, EmbassyThreadNetwork>::root_handler(
                 stack.matter(),
                 &(),
                 &mut weak_rand,
@@ -219,7 +221,7 @@ async fn main(_s: Spawner) {
     // Using `pin!` is completely optional, but reduces the size of the final future
     //
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
-    let matter = pin!(stack.run(
+    let matter = pin!(stack.run_thread_no_coex(
         // The Matter stack needs to instantiate `openthread`
         EmbassyThread::new(
             thread_radio,

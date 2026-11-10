@@ -37,13 +37,13 @@ rs-matter-embassy = { version = "0.1", default-features = false, features = ["ru
 (See [All examples and how to build them](examples))
 
 ```rust
-//! An example utilizing the `EmbassyWifiMatterStack` struct.
+//! An example utilizing the `MatterStack` struct over `EmbassyWifiNetwork`.
 //!
 //! As the name suggests, this Matter stack assembly uses Wifi as the main transport,
 //! and thus BLE for commissioning.
 //!
-//! If you want to use Ethernet, utilize `EmbassyEthMatterStack` instead.
-//! If you want to use non-concurrent commissioning, call `run` instead of `run_coex`
+//! If you want to use Ethernet, utilize `EmbassyEthNetwork` instead.
+//! If you want to use non-concurrent commissioning, call `run_wifi_no_coex` instead of `run_wifi`
 //! and provision a higher `BUMP_SIZE` because the non-concurrent commissioning has slightly higher
 //! memory requirements on the futures' sizes.
 //! (Note: Alexa does not work (yet) with non-concurrent commissioning.)
@@ -65,6 +65,8 @@ use esp_metadata_generated::memory_range;
 
 use log::info;
 
+use rs_matter_embassy::stack::wireless::BTP_BUMP_SIZE;
+
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::app::on_off::{self, OnOffHooks};
@@ -75,12 +77,13 @@ use rs_matter_embassy::matter::dm::devices::test::{
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node};
-use rs_matter_embassy::matter::persist::DummyKvBlobStore;
+use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices};
-use rs_matter_embassy::stack::rand::reseeding_csprng;
+use rs_matter_embassy::rand::reseeding_csprng;
+use rs_matter_embassy::stack::MatterStack;
 use rs_matter_embassy::wireless::esp::EspWifiRadio;
-use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiMatterStack};
+use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiNetwork};
 
 use tinyrlibc as _;
 
@@ -108,7 +111,7 @@ macro_rules! mk_static {
 ///
 /// If - for your platform - this size is not enough, increase it until
 /// the program runs without panics during the stack initialization.
-const BUMP_SIZE: usize = 20000;
+const BUMP_SIZE: usize = 20000 + BTP_BUMP_SIZE;
 
 /// Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
 #[cfg(not(feature = "esp32"))]
@@ -136,18 +139,13 @@ async fn main(_s: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(
-        timg0.timer0,
-        #[cfg(target_arch = "riscv32")]
-        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT)
-            .software_interrupt0,
-    );
+    esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = mk_static!(EmbassyWifiMatterStack::<BUMP_SIZE, ()>).init_with(
-        EmbassyWifiMatterStack::init(&TEST_DEV_DET, TEST_DEV_COMM, &TEST_DEV_ATT),
+    let stack = mk_static!(MatterStack<BUMP_SIZE, EmbassyWifiNetwork>).init_with(
+        MatterStack::init(&TEST_DEV_DET, TEST_DEV_COMM, &TEST_DEV_ATT),
     );
 
     // Create the crypto provider, using the `esp-hal` TRNG/ADC1 as the source of randomness for a reseeding CSPRNG.
@@ -164,6 +162,7 @@ async fn main(_s: Spawner) {
     let on_off = on_off::OnOffHandler::new_standalone(
         Dataver::new_rand(&mut weak_rand),
         LIGHT_ENDPOINT_ID,
+        VENDOR_KEYS_START + 0x10,
         TestOnOffDeviceLogic::new(true),
     );
 
@@ -176,12 +175,16 @@ async fn main(_s: Spawner) {
         // Chain any extra Endpoint 0 clusters of your own the same way.
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
-            Async(EmbassyWifiMatterStack::<0, ()>::root_handler(&(), &mut weak_rand)),
+            Async(MatterStack::<0, EmbassyWifiNetwork>::root_handler(
+                stack.matter(),
+                &(),
+                &mut weak_rand,
+            )),
         )
         // Our on-off cluster, on Endpoint 1
         .chain(
             |e, c| e == LIGHT_ENDPOINT_ID && c == TestOnOffDeviceLogic::CLUSTER.id,
-            on_off::HandlerAsyncAdaptor(&on_off),
+            Async(on_off::HandlerAdaptor(&on_off)),
         )
         // Each Endpoint needs a Descriptor cluster too
         // Just use the one that `rs-matter` provides out of the box
@@ -202,7 +205,7 @@ async fn main(_s: Spawner) {
     // Using `pin!` is completely optional, but reduces the size of the final future
     //
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
-    let matter = pin!(stack.run_coex(
+    let matter = pin!(stack.run_wifi(
         // The Matter stack needs to instantiate an `embassy-net` `Driver` and `Controller`
         EmbassyWifi::new(
             EspWifiRadio::new(peripherals.WIFI, peripherals.BT),
@@ -231,7 +234,7 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 /// The Matter Light device Node
 const NODE: Node = Node {
     endpoints: &[
-        EmbassyWifiMatterStack::<0, ()>::root_endpoint(),
+        MatterStack::<0, EmbassyWifiNetwork>::wifi_root_endpoint(),
         Endpoint::new(
             LIGHT_ENDPOINT_ID,
             devices!(DEV_TYPE_ON_OFF_LIGHT),

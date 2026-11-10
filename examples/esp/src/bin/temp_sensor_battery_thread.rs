@@ -58,6 +58,8 @@ use esp_metadata_generated::memory_range;
 
 use log::{info, warn};
 
+use rs_matter_embassy::stack::wireless::BTP_BUMP_SIZE;
+
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
 use rs_matter_embassy::matter::dm::clusters::decl::temperature_measurement::{
@@ -88,8 +90,9 @@ use rs_matter_embassy::matter::utils::timers::{Instant, Timer};
 use rs_matter_embassy::matter::{clusters, devices, with, Matter};
 use rs_matter_embassy::persist::SeqMapKvBlobStore;
 use rs_matter_embassy::rand::reseeding_csprng;
+use rs_matter_embassy::stack::MatterStack;
 use rs_matter_embassy::wireless::esp::EspThreadRadio;
-use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
+use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadNetwork};
 
 use tinyrlibc as _;
 
@@ -105,7 +108,7 @@ macro_rules! mk_static {
 /// The amount of memory for allocating all `rs-matter-stack` futures created during
 /// the execution of the `run*` methods.
 /// This does NOT include the rest of the Matter stack.
-const BUMP_SIZE: usize = 26000;
+const BUMP_SIZE: usize = 26000 + BTP_BUMP_SIZE;
 
 /// Heap strictly necessary only for Thread+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
 const HEAP_SIZE: usize = 100 * 1024;
@@ -186,7 +189,8 @@ async fn main(_s: Spawner) {
     }
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0); // TEMPORARY (local esp-hal clone): no `FROM_CPU_INTR0` there
+    // TEMPORARY: the `ieee802154-sleep` esp-hal branch takes no `FROM_CPU_INTR0`
+    esp_rtos::start(timg0.timer0);
 
     // The user trigger: GPIO4, pulled up, wakes the chip when pulled low. Configured for the
     // low-power path (the one that works with the digital GPIO peripheral powered down), and
@@ -217,9 +221,8 @@ async fn main(_s: Spawner) {
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = mk_static!(EmbassyThreadMatterStack::<BUMP_SIZE, ()>).init_with(
-        EmbassyThreadMatterStack::init(&BASIC_INFO, TEST_DEV_COMM, &TEST_DEV_ATT),
-    );
+    let stack = mk_static!(MatterStack<BUMP_SIZE, EmbassyThreadNetwork>)
+        .init_with(MatterStack::init(&BASIC_INFO, TEST_DEV_COMM, &TEST_DEV_ATT));
 
     // The shared LIT ICD state: the registrations, the Check-In counter and the power mode state
     // machine. Backs the ICD Management cluster handler; the Thread driver and the deep-sleep
@@ -254,7 +257,7 @@ async fn main(_s: Spawner) {
         // The stack adds the operational network clusters on top.
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
-            Async(EmbassyThreadMatterStack::<0, ()>::root_handler(
+            Async(MatterStack::<0, EmbassyThreadNetwork>::root_handler(
                 stack.matter(),
                 &(),
                 &mut weak_rand,
@@ -305,7 +308,7 @@ async fn main(_s: Spawner) {
         let kv = stack.matter().kv(&mut store);
 
         // Run the Matter stack with our handler
-        let mut matter = pin!(stack.run_coex(
+        let mut matter = pin!(stack.run_thread(
             // The Matter stack needs to instantiate an `openthread` Radio - as a Sleepy End
             // Device following the ICD state
             EmbassyThread::new(
