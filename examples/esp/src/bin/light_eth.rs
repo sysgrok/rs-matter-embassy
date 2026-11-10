@@ -1,4 +1,4 @@
-//! An example utilizing the `EmbassyEthMatterStack` struct.
+//! An example utilizing the `MatterStack` struct over `EmbassyEthNetwork`.
 //! As the name suggests, this Matter stack assembly uses Ethernet as the main transport, as well as for commissioning.
 //!
 //! Notice thart we actually don't use Ethernet for real, as ESP32s don't have Ethernet ports out of the box.
@@ -25,7 +25,7 @@ use esp_radio::wifi::{AuthenticationMethodConfig, Config, WifiController};
 
 use log::info;
 
-use rs_matter_embassy::eth::{EmbassyEthMatterStack, EmbassyEthernet};
+use rs_matter_embassy::eth::{EmbassyEthNetwork, EmbassyEthernet};
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::app::on_off::{self, OnOffHooks};
@@ -42,6 +42,7 @@ use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::timers::{Duration, Timer};
 use rs_matter_embassy::matter::{clusters, devices, root_endpoint};
 use rs_matter_embassy::rand::reseeding_csprng;
+use rs_matter_embassy::stack::MatterStack;
 use rs_matter_embassy::utils::futures::IntoFaillble;
 
 use tinyrlibc as _;
@@ -101,14 +102,17 @@ async fn main(_s: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0); // TEMPORARY (local esp-hal clone): no `FROM_CPU_INTR0` there
+    // TEMPORARY: the `ieee802154-sleep` esp-hal branch takes no `FROM_CPU_INTR0`
+    esp_rtos::start(timg0.timer0);
 
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = mk_static!(EmbassyEthMatterStack::<BUMP_SIZE, ()>).init_with(
-        EmbassyEthMatterStack::init(&TEST_DEV_DET, TEST_DEV_COMM, &TEST_DEV_ATT),
-    );
+    let stack = mk_static!(MatterStack<BUMP_SIZE, EmbassyEthNetwork>).init_with(MatterStack::init(
+        &TEST_DEV_DET,
+        TEST_DEV_COMM,
+        &TEST_DEV_ATT,
+    ));
 
     // Configure and start the Wifi first
     let station_config = Config::Station(
@@ -152,7 +156,7 @@ async fn main(_s: Spawner) {
         // Chain any extra Endpoint 0 clusters of your own the same way.
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
-            Async(EmbassyEthMatterStack::<0, ()>::root_handler(
+            Async(MatterStack::<0, EmbassyEthNetwork>::root_handler(
                 stack.matter(),
                 &(),
                 &mut weak_rand,
@@ -180,7 +184,7 @@ async fn main(_s: Spawner) {
 
     // Run the Matter stack with our handler
     // Using `pin!` is completely optional, but reduces the size of the final future
-    let mut matter = pin!(stack.run(
+    let mut matter = pin!(stack.run_eth(
         // The Matter stack needs the ethernet inteface to run
         EmbassyEthernet::new(station, weak_rand, stack,),
         // The crypto provider

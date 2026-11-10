@@ -1,4 +1,4 @@
-//! An example utilizing the `EthMatterStack` struct directly from `rs-matter-stack`.
+//! An example utilizing the `MatterStack` struct directly from `rs-matter-stack`, over Ethernet.
 //! As the name suggests, this Matter stack assembly uses Ethernet as the main transport, as well as for commissioning.
 //!
 //! Notice thart we actually don't use Ethernet for real, as NRFs don't have Ethernet ports out of the box.
@@ -35,6 +35,7 @@ use rs_matter_embassy::matter::dm::devices::test::{
 };
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
+use rs_matter_embassy::matter::dm::networks::eth::EthNetwork;
 use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node};
 use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::futures::{select, Coalesce};
@@ -46,7 +47,8 @@ use rs_matter_embassy::ot::openthread::{
     ProxyRadioResources, Radio, RamSettings,
 };
 use rs_matter_embassy::ot::{OtMatterResources, OtMdns, OtNetStack, OtNetif};
-use rs_matter_embassy::stack::eth::EthMatterStack;
+use rs_matter_embassy::stack::eth::PreexistingEthernet;
+use rs_matter_embassy::stack::MatterStack;
 
 use panic_rtt_target as _;
 
@@ -139,7 +141,7 @@ async fn main(_s: Spawner) {
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = mk_static!(EthMatterStack<BUMP_SIZE, ()>).init_with(EthMatterStack::init(
+    let stack = mk_static!(MatterStack<BUMP_SIZE, EthNetwork>).init_with(MatterStack::init(
         &TEST_BASIC_INFO,
         BasicCommData {
             password: TEST_DEV_COMM.password,
@@ -209,7 +211,7 @@ async fn main(_s: Spawner) {
         // Chain any extra Endpoint 0 clusters of your own the same way.
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
-            Async(EthMatterStack::<0, ()>::root_handler(
+            Async(MatterStack::<0, EthNetwork>::root_handler(
                 stack.matter(),
                 &(),
                 &mut weak_rand,
@@ -237,15 +239,17 @@ async fn main(_s: Spawner) {
     // Using `pin!` is completely optional, but reduces the size of the final future
     //
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
-    let mut matter = pin!(stack.run_preex(
-        // The Matter stack needs to open two UDP sockets
-        OtNetStack::new(ot.clone()),
-        // The Matter stack needs access to the netif so as to detect network going up/down
-        OtNetif::new(ot.clone()),
-        // No Ethernet diagnostics, as the netif is not really Ethernet
-        &(),
-        // The Matter stack needs an mDNS to run
-        OtMdns::new(ot.clone(), &mut ot_resources.mdns_buf),
+    let mut matter = pin!(stack.run_eth(
+        PreexistingEthernet::new(
+            // The Matter stack needs to open two UDP sockets
+            OtNetStack::new(ot.clone()),
+            // The Matter stack needs access to the netif so as to detect network going up/down
+            OtNetif::new(ot.clone()),
+            // No Ethernet diagnostics, as the netif is not really Ethernet
+            &(),
+            // The Matter stack needs an mDNS to run
+            OtMdns::new(ot.clone(), &mut ot_resources.mdns_buf),
+        ),
         // The crypto provider
         &crypto,
         // Our `AsyncHandler` + `AsyncMetadata` impl
@@ -274,7 +278,7 @@ const LIGHT_ENDPOINT_ID: u16 = 1;
 /// The Matter Light device Node
 const NODE: Node = Node {
     endpoints: &[
-        EthMatterStack::<0, ()>::root_endpoint(),
+        MatterStack::<0, EthNetwork>::eth_root_endpoint(),
         Endpoint::new(
             LIGHT_ENDPOINT_ID,
             devices!(DEV_TYPE_ON_OFF_LIGHT),

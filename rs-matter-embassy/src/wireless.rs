@@ -1,21 +1,25 @@
 //! Wireless: Type aliases and state structs for an Embassy Matter stack running over a wireless network (Wifi or Thread) and BLE.
 
 use crate::matter::crypto::Rng;
-use crate::matter::dm::networks::wireless::{WirelessNetwork, WirelessNetworks};
 use crate::matter::error::Error;
 use crate::matter::utils::init::{init, Init};
-use crate::stack::network::{Embedding, Network};
-use crate::stack::wireless::{WirelessBle, MAX_WIRELESS_NETWORKS};
+use crate::stack::network::{Embedding, StackNetwork};
 use crate::stack::MatterStack;
 
 use crate::ble::{BtpGattContext, BtpGattPeripheral, Controller, ControllerRef};
 use crate::matter::transport::network::btp::{AdvData, Btp};
 use crate::stack::ble::GattPeripheral;
 
+#[cfg(all(feature = "openthread", feature = "embassy-net"))]
+pub use any::*;
 #[cfg(feature = "openthread")]
 pub use thread::*;
 #[cfg(feature = "embassy-net")]
 pub use wifi::*;
+
+// Any: an Embassy Matter stack for a node that runs Ethernet, Wifi or Thread, picked at runtime.
+#[cfg(all(feature = "openthread", feature = "embassy-net"))]
+mod any;
 
 // Thread: Type aliases and state structs for an Embassy Matter stack running over a Thread network and BLE.
 #[cfg(feature = "openthread")]
@@ -42,49 +46,21 @@ pub mod rp {
     pub use super::wifi::rp_wifi::*;
 }
 
-/// A type alias for an Embassy Matter stack running over a wireless network (Wifi or Thread) and BLE.
-///
-/// The difference between this and `WirelessMatterStack` is that all resources necessary for the
-/// operation of the BLE controller and pre-allocated inside the stack.
-///
-/// `S` is the networks store of the Wifi or Thread interface.
-pub type EmbassyWirelessMatterStack<
-    'a,
-    const B: usize,
-    T,
-    N,
-    E = (),
-    S = WirelessNetworks<MAX_WIRELESS_NETWORKS, T>,
-> = MatterStack<'a, B, EmbassyWirelessBle<T, N, E, S>>;
-
-/// A type alias for an Embassy implementation of the `Network` trait for a Matter stack running over
-/// BLE during commissioning, and then over either WiFi or Thread when operating.
-pub type EmbassyWirelessBle<T, N, E = (), S = WirelessNetworks<MAX_WIRELESS_NETWORKS, T>> =
-    WirelessBle<T, EmbassyGatt<N, E>, S>;
-
 #[allow(unused)]
 pub(crate) const SLOTS: usize = 20;
 
-/// An embedding of the Trouble Gatt peripheral context for the `WirelessBle` network type from `rs-matter-stack`.
-///
-/// Allows the memory of this context to be statically allocated and cost-initialized.
-///
-/// Usage:
-/// ```ignore
-/// MatterStack<WirelessBle<Wifi, EmbassyGatt<C, E>>>::new(...);
-/// ```
-///
-/// ... where `E` can be a next-level, user-supplied embedding or just `()` if the user does not need to embed anything.
-pub struct EmbassyGatt<N, E = ()> {
+/// The context of a `MatterStack` that runs Wifi or Thread: the context of the BLE GATT
+/// peripheral, and the context of the network (`N`), which the stack holds so that they
+/// can be statically allocated (see `EmbassyWifiNetwork`, `EmbassyThreadNetwork` and
+/// `EmbassyAnyNetwork`).
+pub struct EmbassyGatt<N> {
     btp_gatt_context: BtpGattContext,
     net_context: N,
-    embedding: E,
 }
 
-impl<N, E> EmbassyGatt<N, E>
+impl<N> EmbassyGatt<N>
 where
     N: Embedding,
-    E: Embedding,
 {
     /// Creates a new instance of the `EspGatt` embedding.
     #[allow(clippy::large_stack_frames)]
@@ -93,7 +69,6 @@ where
         Self {
             btp_gatt_context: BtpGattContext::new(),
             net_context: N::INIT,
-            embedding: E::INIT,
         }
     }
 
@@ -102,7 +77,6 @@ where
         init!(Self {
             btp_gatt_context <- BtpGattContext::init(),
             net_context <- N::init(),
-            embedding <- E::init(),
         })
     }
 
@@ -111,20 +85,20 @@ where
         &self.btp_gatt_context
     }
 
+    /// Return a reference to the network context.
     pub fn net_context(&self) -> &N {
         &self.net_context
     }
 
-    /// Return a reference to the embedding.
-    pub fn embedding(&self) -> &E {
-        &self.embedding
+    /// Return a mutable reference to the network context.
+    pub fn net_context_mut(&mut self) -> &mut N {
+        &mut self.net_context
     }
 }
 
-impl<N, E> Embedding for EmbassyGatt<N, E>
+impl<N> Embedding for EmbassyGatt<N>
 where
     N: Embedding,
-    E: Embedding,
 {
     const INIT: Self = Self::new();
 
@@ -138,18 +112,17 @@ where
     R: Rng + Copy,
     C: Controller,
 {
-    pub fn new_for_stack<const B: usize, T, N, E, S>(
+    pub fn new_for_stack<const B: usize, N, S, E>(
         ble_ctl: C,
         rand: Option<R>,
-        stack: &'a crate::wireless::EmbassyWirelessMatterStack<B, T, N, E, S>,
+        stack: &'a MatterStack<B, S, E>,
     ) -> Self
     where
-        T: WirelessNetwork,
-        N: Embedding,
+        N: Embedding + 'a,
+        S: StackNetwork<Context = EmbassyGatt<N>>,
         E: Embedding,
-        S: Embedding,
     {
-        Self::new(ble_ctl, rand, stack.network().embedding().ble_context())
+        Self::new(ble_ctl, rand, stack.context().ble_context())
     }
 }
 

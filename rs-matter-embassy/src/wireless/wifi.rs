@@ -1,3 +1,4 @@
+use core::marker::PhantomData;
 use core::pin::pin;
 
 use crate::ble::{BtpGattContext, Controller};
@@ -7,35 +8,38 @@ use crate::matter::crypto::Rng;
 use crate::matter::dm::clusters::gen_diag::InterfaceTypeEnum;
 use crate::matter::dm::clusters::net_comm::NetCtl;
 use crate::matter::dm::clusters::wifi_diag::{WifiDiag, WirelessDiag};
-use crate::matter::dm::networks::wireless::{Wifi, WifiNetworks};
+use crate::matter::dm::networks::wireless::WifiNetworks;
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
 use crate::matter::utils::futures::{select, Coalesce};
 use crate::stack::ble::GattPeripheral;
-use crate::stack::network::{Embedding, Network};
+use crate::stack::network::{Embedding, StackNetwork, WifiStackNetwork};
 use crate::stack::wireless::{
-    GattDriver, GattTask, WifiCoexDriver, WifiCoexTask, WifiDriver, WifiTask, MAX_WIRELESS_NETWORKS,
+    GattDriver, GattTask, WifiCoexDriver, WifiCoexTask, WifiDriver, WifiTask,
 };
+use crate::stack::MatterStack;
 
-use super::{ControllerGattPeripheral, EmbassyWirelessMatterStack};
+use super::{ControllerGattPeripheral, EmbassyGatt};
 
 #[cfg(feature = "esp")]
 pub mod esp_wifi;
 #[cfg(feature = "rp")]
 pub mod rp_wifi;
 
-/// A type alias for an Embassy Matter stack running over Wifi (and BLE, during commissioning).
-///
-/// The difference between this and the `WifiMatterStack` is that all resources necessary for the
-/// operation of `embassy-net` as well as the BLE controller and pre-allocated inside the stack.
-///
-/// `S` is the networks store of the Wifi interface.
-pub type EmbassyWifiMatterStack<
-    'a,
-    const B: usize,
-    E = (),
-    S = WifiNetworks<MAX_WIRELESS_NETWORKS>,
-> = EmbassyWirelessMatterStack<'a, B, Wifi, EmbassyNetContext, E, S>;
+/// The network of a `MatterStack` that runs Wifi with [`EmbassyWifi`]: the networks store
+/// `S`, and the contexts of `embassy-net` and of the BLE controller, which the stack holds
+/// so that they can be statically allocated.
+pub struct EmbassyWifiNetwork<S = WifiNetworks>(PhantomData<fn() -> S>);
+
+impl<S> StackNetwork for EmbassyWifiNetwork<S>
+where
+    S: WifiStackNetwork<Context = ()>,
+{
+    type Store = S::Store;
+    type Context = EmbassyGatt<EmbassyNetContext>;
+}
+
+impl<S> WifiStackNetwork for EmbassyWifiNetwork<S> where S: WifiStackNetwork<Context = ()> {}
 
 /// The radio of a pre-existing, already created Wifi driver, network controller and BLE controller,
 /// rather than one which creates them when the Matter stack needs them.
@@ -120,22 +124,22 @@ pub struct EmbassyWifi<'a, T, R> {
 
 impl<'a, T, R> EmbassyWifi<'a, T, R> {
     /// Create a new instance of the `EmbassyWifi` type.
-    pub fn new<const B: usize, E, S>(
+    pub fn new<const B: usize, S, E>(
         radio: T,
         rand: R,
         use_ble_random_addr: bool,
-        stack: &'a EmbassyWifiMatterStack<'a, B, E, S>,
+        stack: &'a MatterStack<'a, B, S, E>,
     ) -> Self
     where
+        S: StackNetwork<Context = EmbassyGatt<EmbassyNetContext>>,
         E: Embedding,
-        S: Embedding,
     {
         Self::wrap(
             radio,
             rand,
             use_ble_random_addr,
-            stack.network().embedding().net_context(),
-            stack.network().embedding().ble_context(),
+            stack.context().net_context(),
+            stack.context().ble_context(),
         )
     }
 

@@ -1,3 +1,4 @@
+use core::marker::PhantomData;
 use core::pin::pin;
 
 use openthread::{Capabilities, OpenThread, Radio};
@@ -7,7 +8,7 @@ use rs_matter::persist::KvBlobStoreAccess;
 
 use crate::ble::{BtpGattContext, Controller};
 use crate::matter::crypto::{CryptoRng, Rng};
-use crate::matter::dm::networks::wireless::{Thread, ThreadNetworks};
+use crate::matter::dm::networks::wireless::ThreadNetworks;
 use crate::matter::error::Error;
 use crate::matter::utils::futures::{select4, Coalesce};
 use crate::matter::utils::init::{init, Init};
@@ -15,31 +16,33 @@ use crate::matter::utils::sync::IfMutex;
 use crate::ot::{radio_to_matter_err, to_matter_err, OtNetCtl, OtNetStack, OtPersist};
 use crate::ot::{OtMatterResources, OtMdns, OtNetif};
 use crate::stack::ble::GattPeripheral;
-use crate::stack::network::{Embedding, Network};
+use crate::stack::network::{Embedding, StackNetwork, ThreadStackNetwork};
 use crate::stack::wireless::{
     GattDriver, GattTask, ThreadCoexDriver, ThreadCoexTask, ThreadDriver, ThreadTask,
-    MAX_WIRELESS_NETWORKS,
 };
+use crate::stack::MatterStack;
 
-use super::{ControllerGattPeripheral, EmbassyWirelessMatterStack};
+use super::{ControllerGattPeripheral, EmbassyGatt};
 
 #[cfg(feature = "esp")]
 pub mod esp_thread;
 #[cfg(feature = "nrf")]
 pub mod nrf;
 
-/// A type alias for an Embassy Matter stack running over Thread (and BLE, during commissioning).
-///
-/// The difference between this and the `ThreadMatterStack` is that all resources necessary for the
-/// operation of `openthread` as well as the BLE controller and pre-allocated inside the stack.
-///
-/// `S` is the networks store of the Thread interface.
-pub type EmbassyThreadMatterStack<
-    'a,
-    const B: usize,
-    E = (),
-    S = ThreadNetworks<MAX_WIRELESS_NETWORKS>,
-> = EmbassyWirelessMatterStack<'a, B, Thread, OtNetContext, E, S>;
+/// The network of a `MatterStack` that runs Thread with [`EmbassyThread`]: the networks store
+/// `S`, and the contexts of `openthread` and of the BLE controller, which the stack holds
+/// so that they can be statically allocated.
+pub struct EmbassyThreadNetwork<S = ThreadNetworks>(PhantomData<fn() -> S>);
+
+impl<S> StackNetwork for EmbassyThreadNetwork<S>
+where
+    S: ThreadStackNetwork<Context = ()>,
+{
+    type Store = S::Store;
+    type Context = EmbassyGatt<OtNetContext>;
+}
+
+impl<S> ThreadStackNetwork for EmbassyThreadNetwork<S> where S: ThreadStackNetwork<Context = ()> {}
 
 /// The radio of a pre-existing, already created Thread radio and BLE controller,
 /// rather than one which creates them when the Matter stack needs them.
@@ -118,25 +121,25 @@ pub struct EmbassyThread<'a, T, K, R> {
 
 impl<'a, T, K, R> EmbassyThread<'a, T, K, R> {
     /// Create a new instance of the `EmbassyThread` type.
-    pub fn new<const B: usize, E, S>(
+    pub fn new<const B: usize, S, E>(
         radio: T,
         rand: R,
         ieee_eui64: [u8; 8],
         kv: K,
-        stack: &'a EmbassyThreadMatterStack<'a, B, E, S>,
+        stack: &'a MatterStack<'a, B, S, E>,
         use_ble_random_addr: bool,
     ) -> Self
     where
+        S: StackNetwork<Context = EmbassyGatt<OtNetContext>>,
         E: Embedding,
-        S: Embedding,
     {
         Self::wrap(
             radio,
             rand,
             ieee_eui64,
             kv,
-            stack.network().embedding().net_context(),
-            stack.network().embedding().ble_context(),
+            stack.context().net_context(),
+            stack.context().ble_context(),
             use_ble_random_addr,
         )
     }

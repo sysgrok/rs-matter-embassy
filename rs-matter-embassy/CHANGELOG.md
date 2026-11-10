@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [?.??.?] - ????-??-??
+* New: `EmbassyAnyNetwork`, for a node that runs Ethernet, Wifi or Thread, picked at runtime with `wireless::select_net_type`; its `EmbassyAnyNetContext` holds the `embassy-net` or the `openthread` context in the same memory. Drive it with an `AnyNetDriver` of the Embassy drivers. `EmbassyGatt::net_context_mut`
+* The stacks that commission over BLE need `BTP_BUMP_SIZE` more in their bump arena, as the examples show, since `rs_matter::stack` keeps the BTP transport there
+* Breaking: no stack aliases; a stack is a plain `MatterStack` over `EmbassyEthNetwork`, `EmbassyWifiNetwork`, `EmbassyThreadNetwork` or `EmbassyAnyNetwork` (a networks store plus the contexts the drivers need), as in `MatterStack<'a, B, EmbassyWifiNetwork, E>`. Each takes a store of its network type. `EmbassyEthMatterStack`, `EmbassyWifiMatterStack`, `EmbassyThreadMatterStack`, `EmbassyWirelessMatterStack`, `EmbassyWirelessBle`, `EmbassyEth` and `EmbassyNet` are gone, and `EmbassyGatt` no longer holds the user data
 * Breaking: on the `stack` of `rs-matter`; the driver traits are gone, as `EmbassyWifi`, `EmbassyThread` and `EmbassyEthernet` implement the drivers of the stack for each radio, and `*Driver` is `*Radio`
 * Breaking: update to the `rs-matter` split into crates; `root_handler` takes the `Matter` instance, as per `rs-matter-stack`
 * Raise MSRV to 1.92, as per `rs-matter`
@@ -19,4 +22,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Wi-Fi Network Diagnostics: BSSID, security type, channel and RSSI with `esp-radio`; RSSI with `cyw43`
 * Ethernet Network Diagnostics over `embassy-net`: carrier detect and packet counts (advertise with `eth_diag(carrier_detect, packet_counts)`)
   * Breaking: the Ethernet `run_preex` takes an `EthDiag`, as per `rs-matter-stack`
-* The Wi-Fi and Thread stacks take the networks store type as a parameter, `S`, after `E` (`EmbassyWifiMatterStack<'a, B, E, S>`, `EmbassyThreadMatterStack<'a, B, E, S>`), as per `rs-matter-stack`; by default a `WirelessNetworks` with `MAX_WIRELESS_NETWORKS` networks
+* The Wi-Fi and Thread networks take the networks store type as a parameter, `S` (`EmbassyWifiNetwork<S>`, `EmbassyThreadNetwork<S>`), as per `rs-matter-stack`; by default a `WirelessNetworks` with `DEFAULT_MAX_NETWORKS` networks

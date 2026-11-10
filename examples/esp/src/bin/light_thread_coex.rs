@@ -1,9 +1,9 @@
-//! An example utilizing the `EmbassyThreadMatterStack` struct.
+//! An example utilizing the `MatterStack` struct over `EmbassyThreadNetwork`.
 //!
 //! As the name suggests, this Matter stack assembly uses Thread as the main transport,
 //! and thus BLE for commissioning, in concurrent commissioning mode.
 //!
-//! If you want to use Ethernet, utilize `EmbassyEthMatterStack` instead.
+//! If you want to use Ethernet, utilize `EmbassyEthNetwork` instead.
 //!
 //! The example implements a fictitious Light device (an On-Off Matter cluster).
 #![no_std]
@@ -22,6 +22,8 @@ use esp_metadata_generated::memory_range;
 
 use log::info;
 
+use rs_matter_embassy::stack::wireless::BTP_BUMP_SIZE;
+
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, Rng};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::app::on_off::{self, OnOffHooks};
@@ -37,8 +39,9 @@ use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices, root_endpoint, BasicCommData};
 use rs_matter_embassy::rand::reseeding_csprng;
+use rs_matter_embassy::stack::MatterStack;
 use rs_matter_embassy::wireless::esp::EspThreadRadio;
-use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadMatterStack};
+use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadNetwork};
 
 use tinyrlibc as _;
 
@@ -61,7 +64,7 @@ macro_rules! mk_static {
 ///
 /// If - for your platform - this size is not enough, increase it until
 /// the program runs without panics during the stack initialization.
-const BUMP_SIZE: usize = 22000;
+const BUMP_SIZE: usize = 22000 + BTP_BUMP_SIZE;
 
 /// Heap strictly necessary only for Thread+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
 const HEAP_SIZE: usize = 100 * 1024;
@@ -85,7 +88,8 @@ async fn main(_s: Spawner) {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0); // TEMPORARY (local esp-hal clone): no `FROM_CPU_INTR0` there
+    // TEMPORARY: the `ieee802154-sleep` esp-hal branch takes no `FROM_CPU_INTR0`
+    esp_rtos::start(timg0.timer0);
 
     // Create the crypto provider, using the `esp-hal` TRNG/ADC1 as the source of randomness for a reseeding CSPRNG.
     let _trng_source = esp_hal::rng::TrngSource::new(peripherals.RNG, peripherals.ADC1);
@@ -106,16 +110,15 @@ async fn main(_s: Spawner) {
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack = mk_static!(EmbassyThreadMatterStack::<BUMP_SIZE, ()>).init_with(
-        EmbassyThreadMatterStack::init(
+    let stack =
+        mk_static!(MatterStack<BUMP_SIZE, EmbassyThreadNetwork>).init_with(MatterStack::init(
             &TEST_BASIC_INFO,
             BasicCommData {
                 password: TEST_DEV_COMM.password,
                 discriminator,
             },
             &TEST_DEV_ATT,
-        ),
-    );
+        ));
 
     // Our "light" on-off cluster.
     // It will toggle the light state every 5 seconds
@@ -135,7 +138,7 @@ async fn main(_s: Spawner) {
         // Chain any extra Endpoint 0 clusters of your own the same way.
         .chain(
             |e, _| e == ROOT_ENDPOINT_ID,
-            Async(EmbassyThreadMatterStack::<0, ()>::root_handler(
+            Async(MatterStack::<0, EmbassyThreadNetwork>::root_handler(
                 stack.matter(),
                 &(),
                 &mut weak_rand,
@@ -165,7 +168,7 @@ async fn main(_s: Spawner) {
     // Using `pin!` is completely optional, but reduces the size of the final future
     //
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
-    let matter = pin!(stack.run_coex(
+    let matter = pin!(stack.run_thread(
         // The Matter stack needs to instantiate an `openthread` Radio
         EmbassyThread::new(
             EspThreadRadio::new(peripherals.IEEE802154, peripherals.BT),
