@@ -94,7 +94,22 @@ async fn exchange(a: &EnetStack<'_>, b: &EnetStack<'_>) -> Result<(), Error> {
     let (len, _) = b_recv.recv_from(&mut buf).await?;
     assert_eq!(&buf[..len], b"group");
 
-    b_multicast.leave(IpAddr::V6(group)).await
+    b_multicast.leave(IpAddr::V6(group)).await?;
+
+    // A new socket in the slot that carried traffic works; more packets than a socket
+    // has metadata entries, so that its rings wrap
+    drop(b_socket);
+    let mut b_socket = b.bind(any(PORT), Ipv4Addr::UNSPECIFIED, 0).await?;
+    let (_, mut b_recv, _) = b_socket.split();
+
+    for _ in 0..8 {
+        a_send.send_to(b"again", udp(link_local(&B_MAC))).await?;
+
+        let (len, _) = b_recv.recv_from(&mut buf).await?;
+        assert_eq!(&buf[..len], b"again");
+    }
+
+    Ok(())
 }
 
 fn any(port: u16) -> SocketAddr {
