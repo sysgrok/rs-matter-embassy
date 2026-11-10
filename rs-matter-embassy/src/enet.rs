@@ -1,30 +1,31 @@
 //! Network interface: `EnetNetif` - a `Netif` trait implementation for `embassy-net`
-//! UDP: A `UdpBind` trait implementation for `embassy-net`
+//! UDP: `EnetStack` - a `NetStack` trait implementation for `embassy-net`
 
-use core::cell::Cell;
-use core::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use core::cell::{Cell, UnsafeCell};
+use core::future::{ready, Future};
+use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use cfg_if::cfg_if;
 
-use edge_nal::UdpBind;
-
 use embassy_net::driver::{Driver, HardwareAddress as DriverHardwareAddress};
+use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{
-    Config, ConfigV6, HardwareAddress, Ipv6Cidr, Runner, Stack, StackResources, StaticConfigV6,
+    Config, ConfigV6, HardwareAddress, IpEndpoint, IpListenEndpoint, Ipv6Cidr, Runner, Stack,
+    StackResources, StaticConfigV6,
 };
 
+use crate::error::to_net_error;
 use crate::matter::dm::clusters::gen_diag::{InterfaceTypeEnum, NetifDiag, NetifInfo};
 use crate::matter::dm::networks::NetChangeNotif;
-use crate::matter::error::Error;
-use crate::matter::transport::network::{MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE};
+use crate::matter::error::{Error, ErrorCode};
+use crate::matter::transport::network::{
+    Address, NetworkMulticast, NetworkReceive, NetworkSend, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE,
+};
 use crate::matter::utils::futures::select;
+use crate::matter::utils::init::{init, init_array_from_fn, zeroed, Init, UnsafeCellInit};
 use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::timers::{Duration, Timer};
-use crate::nal::{map_err, NalSocket};
-use crate::stack::net::NetStack;
-
-/// Re-export the `edge-nal-embassy` crate
-pub use edge_nal_embassy::*;
+use crate::stack::net::{NetSocket, NetStack};
 
 /// Re-export the `embassy-net` crate
 pub mod net {
@@ -53,14 +54,108 @@ cfg_if! {
     }
 }
 
-/// A type alias for the `UdpBuffers` type configured with the minimum number of UDP socket buffers
-/// sufficient for the operation of the Matter stack
-pub type EnetMatterUdpBuffers = UdpBuffers<
-    ENET_MAX_UDP_SOCKETS,
-    MAX_TX_PACKET_SIZE,
-    MAX_RX_PACKET_SIZE,
-    ENET_MAX_UDP_META_DATA,
->;
+/// The buffers of the UDP sockets that the Matter stack binds with `EnetStack`
+pub struct EnetMatterUdpBuffers {
+    taken: Mutex<Cell<[bool; ENET_MAX_UDP_SOCKETS]>>,
+    slots: [UnsafeCell<EnetUdpSlot>; ENET_MAX_UDP_SOCKETS],
+}
+
+impl EnetMatterUdpBuffers {
+    #[allow(clippy::declare_interior_mutable_const)]
+    const SLOT: UnsafeCell<EnetUdpSlot> = UnsafeCell::new(EnetUdpSlot::new());
+
+    /// Create a new `EnetMatterUdpBuffers` instance
+    pub const fn new() -> Self {
+        Self {
+            taken: Mutex::new(Cell::new([false; ENET_MAX_UDP_SOCKETS])),
+            slots: [Self::SLOT; ENET_MAX_UDP_SOCKETS],
+        }
+    }
+
+    /// Return an in-place initializer for `EnetMatterUdpBuffers`
+    pub fn init() -> impl Init<Self> {
+        init!(Self {
+            taken: Mutex::new(Cell::new([false; ENET_MAX_UDP_SOCKETS])),
+            slots <- init_array_from_fn(|_| UnsafeCell::init(EnetUdpSlot::init())),
+        })
+    }
+
+    /// Take a free slot, which stays taken until the returned `EnetUdpSlotRef` is dropped.
+    #[allow(clippy::mut_from_ref)]
+    fn take(&self) -> Option<(EnetUdpSlotRef<'_>, &mut EnetUdpSlot)> {
+        let index = self.taken.lock(|taken| {
+            let mut slots = taken.get();
+            let index = slots.iter().position(|taken| !taken)?;
+
+            slots[index] = true;
+            taken.set(slots);
+
+            Some(index)
+        })?;
+
+        // SAFETY: The slot is marked as taken, so no other reference to it exists
+        // until `EnetUdpSlotRef` gives it back.
+        let slot = unsafe { &mut *self.slots[index].get() };
+
+        Some((
+            EnetUdpSlotRef {
+                buffers: self,
+                index,
+            },
+            slot,
+        ))
+    }
+}
+
+impl Default for EnetMatterUdpBuffers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The buffers of one UDP socket
+struct EnetUdpSlot {
+    rx_meta: [PacketMetadata; ENET_MAX_UDP_META_DATA],
+    rx: [u8; MAX_RX_PACKET_SIZE],
+    tx_meta: [PacketMetadata; ENET_MAX_UDP_META_DATA],
+    tx: [u8; MAX_TX_PACKET_SIZE],
+}
+
+impl EnetUdpSlot {
+    const fn new() -> Self {
+        Self {
+            rx_meta: [PacketMetadata::EMPTY; ENET_MAX_UDP_META_DATA],
+            rx: [0; MAX_RX_PACKET_SIZE],
+            tx_meta: [PacketMetadata::EMPTY; ENET_MAX_UDP_META_DATA],
+            tx: [0; MAX_TX_PACKET_SIZE],
+        }
+    }
+
+    fn init() -> impl Init<Self> {
+        init!(Self {
+            rx_meta: [PacketMetadata::EMPTY; ENET_MAX_UDP_META_DATA],
+            rx <- zeroed(),
+            tx_meta: [PacketMetadata::EMPTY; ENET_MAX_UDP_META_DATA],
+            tx <- zeroed(),
+        })
+    }
+}
+
+/// Gives a taken slot of `EnetMatterUdpBuffers` back when dropped.
+struct EnetUdpSlotRef<'a> {
+    buffers: &'a EnetMatterUdpBuffers,
+    index: usize,
+}
+
+impl Drop for EnetUdpSlotRef<'_> {
+    fn drop(&mut self) {
+        self.buffers.taken.lock(|taken| {
+            let mut slots = taken.get();
+            slots[self.index] = false;
+            taken.set(slots);
+        });
+    }
+}
 
 /// A type alias for the `StackResources` type configured with the minimum number of sockets
 /// sufficient for the operation of the Matter stack
@@ -112,6 +207,7 @@ impl NetifDiag for EnetNetif<'_> {
         let v6 = self.stack.config_v6();
 
         let mut hw_addr = [0; 8];
+        #[allow(clippy::single_match)]
         match self.stack.hardware_address() {
             HardwareAddress::Ethernet(addr) => hw_addr[..6].copy_from_slice(&addr.0),
             #[allow(unreachable_patterns)]
@@ -226,33 +322,120 @@ pub fn multicast_mac_for_link_local_ipv6(ip: &Ipv6Addr) -> [u8; 6] {
 /// An implementation of `NetStack` for the `embassy-net` stack
 #[derive(Copy, Clone)]
 pub struct EnetStack<'a> {
-    udp: Udp<'a>,
+    stack: Stack<'a>,
+    buffers: &'a EnetMatterUdpBuffers,
 }
 
 impl<'a> EnetStack<'a> {
     /// Create a new `EnetStack` instance
-    pub fn new(stack: Stack<'a>, buffers: &'a EnetMatterUdpBuffers) -> Self {
-        Self {
-            udp: Udp::new(stack, buffers),
-        }
+    pub const fn new(stack: Stack<'a>, buffers: &'a EnetMatterUdpBuffers) -> Self {
+        Self { stack, buffers }
+    }
+
+    fn bind_socket(&self, addr: &SocketAddr) -> Result<EnetSocket<'a>, Error> {
+        let (slot_ref, slot) = self.buffers.take().ok_or(ErrorCode::ResourceExhausted)?;
+
+        let mut socket = UdpSocket::new(
+            self.stack,
+            &mut slot.rx_meta,
+            &mut slot.rx,
+            &mut slot.tx_meta,
+            &mut slot.tx,
+        );
+
+        let ip = addr.ip();
+        socket
+            .bind(IpListenEndpoint {
+                addr: (!ip.is_unspecified()).then(|| ip.into()),
+                port: addr.port(),
+            })
+            .map_err(to_net_error)?;
+
+        Ok(EnetSocket {
+            socket,
+            stack: self.stack,
+            _slot_ref: slot_ref,
+        })
     }
 }
 
 impl<'a> NetStack for EnetStack<'a> {
     type Socket<'t>
-        = NalSocket<<Udp<'a> as UdpBind>::Socket<'t>>
+        = EnetSocket<'a>
     where
         Self: 't;
 
-    async fn bind(
+    fn bind(
         &self,
         addr: SocketAddr,
-        ipv4_interface: Ipv4Addr,
-        ipv6_interface: u32,
-    ) -> Result<Self::Socket<'_>, Error> {
-        let socket = self.udp.bind(addr).await.map_err(map_err)?;
+        _ipv4_interface: Ipv4Addr,
+        _ipv6_interface: u32,
+    ) -> impl Future<Output = Result<Self::Socket<'_>, Error>> {
+        ready(self.bind_socket(&addr))
+    }
+}
 
-        Ok(NalSocket::new(socket, ipv4_interface, ipv6_interface))
+/// The UDP socket of `EnetStack`
+pub struct EnetSocket<'a> {
+    socket: UdpSocket<'a>,
+    stack: Stack<'a>,
+    // Dropped after `socket`, so its buffers are given back only once the socket is gone
+    _slot_ref: EnetUdpSlotRef<'a>,
+}
+
+impl NetSocket for EnetSocket<'_> {
+    type Send<'a>
+        = &'a Self
+    where
+        Self: 'a;
+
+    type Receive<'a>
+        = &'a Self
+    where
+        Self: 'a;
+
+    type Multicast<'a>
+        = &'a Self
+    where
+        Self: 'a;
+
+    fn split(&mut self) -> (Self::Send<'_>, Self::Receive<'_>, Self::Multicast<'_>) {
+        (&*self, &*self, &*self)
+    }
+}
+
+impl NetworkSend for &EnetSocket<'_> {
+    async fn send_to(&mut self, data: &[u8], addr: Address) -> Result<(), Error> {
+        let addr = addr.udp().ok_or(ErrorCode::NoNetworkInterface)?;
+
+        self.socket
+            .send_to(data, IpEndpoint::from(addr))
+            .await
+            .map_err(to_net_error)
+    }
+}
+
+impl NetworkReceive for &EnetSocket<'_> {
+    async fn wait_available(&mut self) -> Result<(), Error> {
+        self.socket.wait_recv_ready().await;
+
+        Ok(())
+    }
+
+    async fn recv_from(&mut self, buffer: &mut [u8]) -> Result<(usize, Address), Error> {
+        let (len, meta) = self.socket.recv_from(buffer).await.map_err(to_net_error)?;
+
+        Ok((len, Address::Udp(meta.endpoint.into())))
+    }
+}
+
+impl NetworkMulticast for &EnetSocket<'_> {
+    fn join(&mut self, addr: IpAddr) -> impl Future<Output = Result<(), Error>> {
+        ready(self.stack.join_multicast_group(addr).map_err(to_net_error))
+    }
+
+    fn leave(&mut self, addr: IpAddr) -> impl Future<Output = Result<(), Error>> {
+        ready(self.stack.leave_multicast_group(addr).map_err(to_net_error))
     }
 }
 

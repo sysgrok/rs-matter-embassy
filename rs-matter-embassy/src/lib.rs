@@ -36,8 +36,6 @@ pub mod error;
 #[cfg(feature = "embassy-net")]
 pub mod eth;
 pub mod matter;
-#[cfg(any(feature = "embassy-net", feature = "openthread"))]
-pub mod nal;
 #[cfg(feature = "openthread")]
 pub mod ot;
 pub mod persist;

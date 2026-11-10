@@ -133,8 +133,7 @@ impl EmbassyNetContext {
     /// Return an in-place initializer for the `EmbassyNetContext` type.
     pub fn init() -> impl Init<Self> {
         init!(Self {
-            // TODO: Implement init constructor for `UdpBuffers`
-            buffers: EnetMatterUdpBuffers::new(),
+            buffers <- EnetMatterUdpBuffers::init(),
             // Note: below will break if `HostResources` stops being a bunch of `MaybeUninit`s
             resources <- IfMutex::init(unsafe { MaybeUninit::<EnetMatterStackResources>::uninit().assume_init() }),
             mdns <- IfMutex::init(BuiltinMdns::init()),
