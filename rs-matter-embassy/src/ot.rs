@@ -2,26 +2,26 @@
 //! mDNS impl: `OtMdns` - an mDNS trait implementation for `openthread` using Thread SRP
 
 use core::fmt::Write;
-use core::future::poll_fn;
+use core::future::{poll_fn, ready, Future};
 use core::net::{IpAddr, Ipv4Addr, SocketAddr};
-
-use edge_nal::UdpBind;
 
 use openthread::{
     Channels, DnsResponse, OpenThread, OtError, OtResources, OtSrpResources, OtUdpResources,
-    RamSettings, RamSettingsChange, SettingsKey, SharedRamSettings, SrpConf, SrpService,
+    RamSettings, RamSettingsChange, SettingsKey, SharedRamSettings, SrpConf, SrpService, UdpSocket,
 };
 
 use rs_matter::crypto::Crypto;
 use rs_matter::fabric::MAX_FABRICS;
 use rs_matter::persist::KvBlobStoreAccess;
 use rs_matter::stack::mdns::Mdns;
-use rs_matter::stack::net::NetStack;
-use rs_matter::transport::network::MatterLocalService;
+use rs_matter::stack::net::{NetSocket, NetStack};
+use rs_matter::transport::network::{
+    Address, MatterLocalService, NetworkMulticast, NetworkReceive, NetworkSend,
+};
 use rs_matter::Matter;
 
+use crate::error::to_net_error;
 use crate::fmt::Bytes;
-use crate::nal::{map_err, NalSocket};
 
 use crate::matter::dm::clusters::gen_diag::{InterfaceTypeEnum, NetifDiag, NetifInfo};
 use crate::matter::dm::clusters::net_comm::{
@@ -130,30 +130,113 @@ impl Default for OtMatterResources {
 }
 
 /// An implementation of `NetStack` for `openthread`
-pub struct OtNetStack<'d>(edge_nal_openthread::OtUdpStack<'d>);
+pub struct OtNetStack<'d>(OpenThread<'d>);
 
 impl<'d> OtNetStack<'d> {
     /// Create a new `OtNetStack` instance
-    pub fn new(ot: OpenThread<'d>) -> Self {
-        Self(edge_nal_openthread::OtUdpStack::new(ot))
+    pub const fn new(ot: OpenThread<'d>) -> Self {
+        Self(ot)
+    }
+
+    fn bind_socket(&self, addr: &SocketAddr) -> Result<OtNetSocket<'d>, Error> {
+        let SocketAddr::V6(addr) = addr else {
+            return Err(ErrorCode::NoNetworkInterface.into());
+        };
+
+        let socket = UdpSocket::bind(self.0.clone(), addr).map_err(to_net_error)?;
+
+        Ok(OtNetSocket {
+            socket,
+            ot: self.0.clone(),
+        })
     }
 }
 
 impl<'d> NetStack for OtNetStack<'d> {
     type Socket<'t>
-        = NalSocket<<edge_nal_openthread::OtUdpStack<'d> as UdpBind>::Socket<'t>>
+        = OtNetSocket<'d>
     where
         Self: 't;
 
-    async fn bind(
+    fn bind(
         &self,
         addr: SocketAddr,
-        ipv4_interface: Ipv4Addr,
-        ipv6_interface: u32,
-    ) -> Result<Self::Socket<'_>, Error> {
-        let socket = self.0.bind(addr).await.map_err(map_err)?;
+        _ipv4_interface: Ipv4Addr,
+        _ipv6_interface: u32,
+    ) -> impl Future<Output = Result<Self::Socket<'_>, Error>> {
+        ready(self.bind_socket(&addr))
+    }
+}
 
-        Ok(NalSocket::new(socket, ipv4_interface, ipv6_interface))
+/// The UDP socket of `OtNetStack`
+pub struct OtNetSocket<'d> {
+    socket: UdpSocket<'d>,
+    ot: OpenThread<'d>,
+}
+
+impl NetSocket for OtNetSocket<'_> {
+    type Send<'a>
+        = &'a Self
+    where
+        Self: 'a;
+
+    type Receive<'a>
+        = &'a Self
+    where
+        Self: 'a;
+
+    type Multicast<'a>
+        = &'a Self
+    where
+        Self: 'a;
+
+    fn split(&mut self) -> (Self::Send<'_>, Self::Receive<'_>, Self::Multicast<'_>) {
+        (&*self, &*self, &*self)
+    }
+}
+
+impl NetworkSend for &OtNetSocket<'_> {
+    async fn send_to(&mut self, data: &[u8], addr: Address) -> Result<(), Error> {
+        let Some(SocketAddr::V6(addr)) = addr.udp() else {
+            return Err(ErrorCode::NoNetworkInterface.into());
+        };
+
+        self.socket
+            .send(data, None, &addr)
+            .await
+            .map_err(to_net_error)
+    }
+}
+
+impl NetworkReceive for &OtNetSocket<'_> {
+    async fn wait_available(&mut self) -> Result<(), Error> {
+        self.socket
+            .wait_recv_available()
+            .await
+            .map_err(to_net_error)
+    }
+
+    async fn recv_from(&mut self, buffer: &mut [u8]) -> Result<(usize, Address), Error> {
+        let (len, _, addr) = self.socket.recv(buffer).await.map_err(to_net_error)?;
+
+        Ok((len, Address::Udp(SocketAddr::V6(addr))))
+    }
+}
+
+impl NetworkMulticast for &OtNetSocket<'_> {
+    fn join(&mut self, addr: IpAddr) -> impl Future<Output = Result<(), Error>> {
+        ready(match addr {
+            IpAddr::V6(addr) => self.ot.join_multicast(addr).map_err(to_net_error),
+            // Thread has no IPv4
+            IpAddr::V4(_) => Ok(()),
+        })
+    }
+
+    fn leave(&mut self, addr: IpAddr) -> impl Future<Output = Result<(), Error>> {
+        ready(match addr {
+            IpAddr::V6(addr) => self.ot.leave_multicast(addr).map_err(to_net_error),
+            IpAddr::V4(_) => Ok(()),
+        })
     }
 }
 

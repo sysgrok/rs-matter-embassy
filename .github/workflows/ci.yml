@@ -97,13 +97,14 @@ jobs:
         run: cargo build ${{ matrix.build }}
 
       # The tests are backend-independent; they run on the default (`trouble`) leg.
+      # `embassy-net` turns on the tests of its UDP sockets.
       - name: Build | Clippy - tests
         if: matrix.backend == 'trouble'
-        run: cargo clippy --tests --no-deps -- -Dwarnings
+        run: cargo clippy --tests --features embassy-net --no-deps -- -Dwarnings
 
       - name: Test
         if: matrix.backend == 'trouble'
-        run: cargo test
+        run: cargo test --features embassy-net
 
   # One job per (example set x BLE host backend). Previously all of this ran
   # sequentially in a single job; the split is what keeps the wall clock flat

@@ -194,7 +194,7 @@ nimble = ["dep:nimble-rs"]
 nimble-central = ["nimble", "nimble-rs/central"]
 
 # General
-embassy-net = ["dep:embassy-net", "edge-nal-embassy", "openthread?/embassy-net-driver-channel", "esp-radio?/wifi"]
+embassy-net = ["dep:embassy-net", "openthread?/embassy-net-driver-channel", "esp-radio?/wifi"]
 esp = ["esp-radio", "esp-hal", "openthread?/esp-radio"]
 rp = ["cyw43", "cyw43-pio", "embassy-rp", "embassy-net-driver-channel"]
 # Chip selection for the `rp` backend. `embassy-rp` requires exactly one of these
@@ -207,13 +207,13 @@ rp2040 = ["embassy-rp/rp2040"]
 rp235xa = ["embassy-rp/rp235xa"]
 rp235xb = ["embassy-rp/rp235xb"]
 nrf = ["embassy-nrf", "nrf-sdc", "nrf-mpsl", "nrf-802154", "portable-atomic"]
-openthread = ["dep:openthread", "dep:edge-nal-openthread"]
+openthread = ["dep:openthread"]
 # Build OpenThread as a Full Thread Device (router-capable) rather than the
 # default Minimal Thread Device. Enables the route-table diagnostics and the
 # router-eligible (REED) routing-role refinement in the `ThreadDiag` impl.
 openthread-ftd = ["openthread?/ftd"]
-log = ["dep:log", "rs-matter/log", "openthread?/log", "edge-nal-openthread?/log", "embassy-net?/log", "edge-nal-embassy?/log", "trouble-host?/log", "nimble-rs?/log", "cyw43?/log", "embassy-nrf?/log", "nrf-mpsl?/log", "nrf-sdc?/log", "nrf-802154?/log"]
-defmt = ["dep:defmt", "rs-matter/defmt", "openthread?/defmt", "edge-nal-openthread?/defmt", "embassy-net?/defmt", "edge-nal-embassy?/defmt", "trouble-host?/defmt", "nimble-rs?/defmt", "cyw43?/defmt", "cyw43-pio?/defmt", "embassy-nrf?/defmt", "nrf-mpsl?/defmt", "nrf-sdc?/defmt", "nrf-802154?/defmt"]
+log = ["dep:log", "rs-matter/log", "openthread?/log", "embassy-net?/log", "trouble-host?/log", "nimble-rs?/log", "cyw43?/log", "embassy-nrf?/log", "nrf-mpsl?/log", "nrf-sdc?/log", "nrf-802154?/log"]
+defmt = ["dep:defmt", "rs-matter/defmt", "openthread?/defmt", "embassy-net?/defmt", "trouble-host?/defmt", "nimble-rs?/defmt", "cyw43?/defmt", "cyw43-pio?/defmt", "embassy-nrf?/defmt", "nrf-mpsl?/defmt", "nrf-sdc?/defmt", "nrf-802154?/defmt"]
 rustcrypto = ["rs-matter/rustcrypto"]
 mbedtls = ["rs-matter/mbedtls", "openthread?/mbedtls-rs-sys"]
 
@@ -282,7 +282,6 @@ embassy-sync = "0.8"
 embedded-io = "0.7"
 scopeguard = { version = "1", default-features = false }
 rs-matter = { version = "0.4", default-features = false }
-edge-nal = "0.7"
 rand_core010 = { package = "rand_core", version = "0.10" }
 rand_chacha = { version = "0.10", default-features = false }
 static_cell = "2"
@@ -290,9 +289,7 @@ static_cell = "2"
 embedded-storage-async = "0.4.1"
 sequential-storage = "8"
 
-embassy-net = { version = "0.9", optional = true }
-edge-nal-embassy = { version = "0.9", optional = true, features = ["proto-ipv4", "proto-ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
-edge-nal-openthread = { version = "0.3", optional = true, default-features = false }
+embassy-net = { version = "0.9", optional = true, features = ["udp", "proto-ipv4", "proto-ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
 
 # `default-features = false` to shed `central`: Matter commissioning is
 # BLE-peripheral-only, and the central role drags the scanner/central HCI
@@ -331,3 +328,7 @@ nrf-sdc = { version = "0.4", default-features = false, optional = true, features
 nrf-mpsl = { version = "0.4", default-features = false, optional = true, features = ["critical-section-impl"] }
 nrf-802154 = { version = "0.1", default-features = false, optional = true, features = ["openthread"] }
 portable-atomic = { version = "1", optional = true }
+
+[dev-dependencies]
+# A time driver for the host tests of `embassy-net`
+embassy-time = { version = "0.5", features = ["std", "generic-queue-8"] }

@@ -243,9 +243,3 @@ const NODE: Node = Node {
     ],
 };
 ```
-
-## Future
-
-* Device Attestation data support using secure flash storage
-* Setting system time via Matter
-* Matter OTA support
