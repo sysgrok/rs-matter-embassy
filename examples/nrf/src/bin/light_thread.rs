@@ -32,7 +32,7 @@ use rs_matter_embassy::matter::dm::clusters::app::on_off::{self, OnOffHooks};
 use rs_matter_embassy::matter::dm::clusters::basic_info::BasicInfoConfig;
 use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
 use rs_matter_embassy::matter::dm::devices::test::{
-    DAC_PRIVKEY, TEST_DEV_ATT, TEST_DEV_COMM, TEST_DEV_DET,
+    DAC_PRIVKEY, TEST_BASIC_COMM, TEST_DEV_ATT, TEST_DEV_DET,
 };
 use rs_matter_embassy::matter::dm::devices::DEV_TYPE_ON_OFF_LIGHT;
 use rs_matter_embassy::matter::dm::endpoints::ROOT_ENDPOINT_ID;
@@ -146,9 +146,10 @@ async fn main(_s: Spawner) {
         mk_static!(MatterStack<BUMP_SIZE, EmbassyThreadNetwork>).init_with(MatterStack::init(
             &TEST_BASIC_INFO,
             BasicCommData {
-                password: TEST_DEV_COMM.password,
+                password: TEST_BASIC_COMM.password,
                 discriminator,
-            },
+            }
+            .into(),
             &TEST_DEV_ATT,
         ));
 
