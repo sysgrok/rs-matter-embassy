@@ -9,7 +9,8 @@ use core::task::Context;
 use embassy_net::driver::{Capabilities, Driver, HardwareAddress, LinkState, RxToken, TxToken};
 
 use crate::enet::{
-    create_enet_stack, EnetMatterStackResources, EnetMatterUdpBuffers, EnetNetif, EnetStack,
+    create_enet_stack, EnetMatterStackResources, EnetMatterTcpBuffers,
+    EnetMatterTcpTransportBuffers, EnetMatterUdpBuffers, EnetNetif, EnetStack,
 };
 use crate::matter::crypto::Rng;
 use crate::matter::dm::clusters::eth_diag::EthDiag;
@@ -18,11 +19,12 @@ use crate::matter::dm::networks::eth::EthNetwork;
 use crate::matter::error::Error;
 use crate::matter::transport::network::mdns::builtin::BuiltinMdns;
 use crate::matter::utils::futures::{select, Coalesce};
-use crate::matter::utils::init::{init, Init};
+use crate::matter::utils::init::{init, Init, InitMaybeUninit};
 use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::sync::IfMutex;
 use crate::stack::eth::{EthernetDriver, EthernetTask};
 use crate::stack::network::{Embedding, EthStackNetwork, StackNetwork};
+use crate::stack::tcp::TcpConfig;
 use crate::stack::MatterStack;
 
 /// The network of a `MatterStack` that runs Ethernet with [`EmbassyEthernet`]: the networks
@@ -86,6 +88,7 @@ where
         let resources = &mut *resources;
         let mdns = &mut *mdns;
         let buffers = &self.context.buffers;
+        let tcp_buffers = &self.context.tcp_buffers;
 
         let mut seed = [0; core::mem::size_of::<u64>()];
         self.rand.fill_bytes(&mut seed);
@@ -98,7 +101,11 @@ where
             resources,
         );
 
-        let net_stack = EnetStack::new(stack, buffers);
+        let mut matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers<'_>>::uninit();
+        let matter_tcp_buffers = matter_tcp_buffers.init_with(
+            EnetMatterTcpTransportBuffers::init_with_config(TcpConfig::new()),
+        );
+        let net_stack = EnetStack::new_with_tcp(stack, buffers, tcp_buffers, matter_tcp_buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::Ethernet);
         let eth_diag = EnetEthDiag::new(stack, &counters);
 
@@ -116,6 +123,7 @@ where
 /// A context (storage) for the network layer of the Matter stack.
 pub struct EmbassyNetContext {
     pub(crate) buffers: EnetMatterUdpBuffers,
+    pub(crate) tcp_buffers: EnetMatterTcpBuffers,
     pub(crate) resources: IfMutex<EnetMatterStackResources>,
     pub(crate) mdns: IfMutex<BuiltinMdns>,
 }
@@ -125,6 +133,7 @@ impl EmbassyNetContext {
     pub const fn new() -> Self {
         Self {
             buffers: EnetMatterUdpBuffers::new(),
+            tcp_buffers: EnetMatterTcpBuffers::new(),
             resources: IfMutex::new(EnetMatterStackResources::new()),
             mdns: IfMutex::new(BuiltinMdns::new()),
         }
@@ -134,6 +143,7 @@ impl EmbassyNetContext {
     pub fn init() -> impl Init<Self> {
         init!(Self {
             buffers <- EnetMatterUdpBuffers::init(),
+            tcp_buffers <- EnetMatterTcpBuffers::init(),
             // Note: below will break if `HostResources` stops being a bunch of `MaybeUninit`s
             resources <- IfMutex::init(unsafe { MaybeUninit::<EnetMatterStackResources>::uninit().assume_init() }),
             mdns <- IfMutex::init(BuiltinMdns::init()),
