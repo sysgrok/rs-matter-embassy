@@ -196,7 +196,7 @@ nimble-central = ["nimble", "nimble-rs/central"]
 # General
 embassy-net = ["dep:embassy-net", "openthread?/embassy-net-driver-channel", "esp-radio?/wifi"]
 # Enable operational Matter-over-TCP transport over `embassy-net`.
-tcp = ["embassy-net?/tcp"]
+matter-tcp = ["embassy-net?/tcp"]
 esp = ["esp-radio", "esp-hal", "openthread?/esp-radio"]
 rp = ["cyw43", "cyw43-pio", "embassy-rp", "embassy-net-driver-channel"]
 # Chip selection for the `rp` backend. `embassy-rp` requires exactly one of these

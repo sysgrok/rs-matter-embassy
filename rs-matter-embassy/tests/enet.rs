@@ -13,9 +13,9 @@ use rs_matter_embassy::enet::net::driver::{
     Capabilities, Driver, HardwareAddress, LinkState, RxToken, TxToken,
 };
 use rs_matter_embassy::enet::net::StackResources;
-#[cfg(feature = "tcp")]
+#[cfg(feature = "matter-tcp")]
 use rs_matter_embassy::enet::net::tcp::TcpSocket;
-#[cfg(feature = "tcp")]
+#[cfg(feature = "matter-tcp")]
 use rs_matter_embassy::enet::{
     EnetMatterTcpBuffers, EnetMatterTcpTransportBuffers,
 };
@@ -26,15 +26,15 @@ use rs_matter_embassy::matter::error::{Error, ErrorCode};
 use rs_matter_embassy::matter::transport::network::{
     Address, NetworkMulticast, NetworkReceive, NetworkSend,
 };
-#[cfg(feature = "tcp")]
+#[cfg(feature = "matter-tcp")]
 use rs_matter_embassy::matter::utils::futures::select;
 use rs_matter_embassy::matter::utils::futures::{block_on, select3, Either3};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::timers::{with_timeout, Duration};
-#[cfg(feature = "tcp")]
+#[cfg(feature = "matter-tcp")]
 use rs_matter_embassy::stack::net::{NetTcp, NetTcpStack};
 use rs_matter_embassy::stack::net::{NetSocket, NetStack};
-#[cfg(feature = "tcp")]
+#[cfg(feature = "matter-tcp")]
 use rs_matter_embassy::stack::tcp::TcpConfig;
 
 const A_MAC: [u8; 6] = [0x02, 0, 0, 0, 0, 0x01];
@@ -124,7 +124,7 @@ async fn exchange(a: &EnetStack<'_>, b: &EnetStack<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-#[cfg(feature = "tcp")]
+#[cfg(feature = "matter-tcp")]
 #[test]
 fn tcp_sockets_exchange_framed_messages() {
     let a_to_b = Mutex::new(Frames::default());
@@ -162,7 +162,7 @@ fn tcp_sockets_exchange_framed_messages() {
     assert!(matches!(result, Either3::First(Ok(Ok(())))));
 }
 
-#[cfg(feature = "tcp")]
+#[cfg(feature = "matter-tcp")]
 async fn exchange_tcp(
     a: &EnetStack<'_>,
     b_stack: rs_matter_embassy::enet::net::Stack<'_>,

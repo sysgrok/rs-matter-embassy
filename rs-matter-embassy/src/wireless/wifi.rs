@@ -1,10 +1,10 @@
 use core::marker::PhantomData;
-#[cfg(feature = "tcp")]
+#[cfg(feature = "matter-tcp")]
 use core::mem::MaybeUninit;
 use core::pin::pin;
 
 use crate::ble::{BtpGattContext, Controller};
-#[cfg(feature = "tcp")]
+#[cfg(feature = "matter-tcp")]
 use crate::enet::EnetMatterTcpTransportBuffers;
 use crate::enet::{create_enet_stack, EnetNetif, EnetStack};
 use crate::eth::EmbassyNetContext;
@@ -16,11 +16,11 @@ use crate::matter::dm::networks::wireless::WifiNetworks;
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
 use crate::matter::utils::futures::{select, Coalesce};
-#[cfg(feature = "tcp")]
+#[cfg(feature = "matter-tcp")]
 use crate::matter::utils::init::InitMaybeUninit;
 use crate::stack::ble::GattPeripheral;
 use crate::stack::network::{Embedding, StackNetwork, WifiStackNetwork};
-#[cfg(feature = "tcp")]
+#[cfg(feature = "matter-tcp")]
 use crate::stack::tcp::TcpConfig;
 use crate::stack::wireless::{
     GattDriver, GattTask, WifiCoexDriver, WifiCoexTask, WifiDriver, WifiTask,
@@ -221,7 +221,7 @@ where
         let resources = &mut *resources;
         let mdns = &mut *mdns;
         let udp_buffers = &self.context.udp_buffers;
-        #[cfg(feature = "tcp")]
+        #[cfg(feature = "matter-tcp")]
         let tcp_buffers = &self.context.tcp_buffers;
 
         let mut rand = self.rand;
@@ -230,16 +230,16 @@ where
 
         let (stack, mut runner) = create_enet_stack(driver, u64::from_le_bytes(seed), resources);
 
-        #[cfg(feature = "tcp")]
+        #[cfg(feature = "matter-tcp")]
         let mut matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers<'_>>::uninit();
-        #[cfg(feature = "tcp")]
+        #[cfg(feature = "matter-tcp")]
         let matter_tcp_buffers = matter_tcp_buffers.init_with(
             EnetMatterTcpTransportBuffers::init_with_config(TcpConfig::new()),
         );
-        #[cfg(feature = "tcp")]
+        #[cfg(feature = "matter-tcp")]
         let net_stack =
             EnetStack::new_with_tcp(stack, udp_buffers, tcp_buffers, matter_tcp_buffers);
-        #[cfg(not(feature = "tcp"))]
+        #[cfg(not(feature = "matter-tcp"))]
         let net_stack = EnetStack::new(stack, udp_buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
 
@@ -274,7 +274,7 @@ where
         let resources = &mut *resources;
         let mdns = &mut *mdns;
         let udp_buffers = &self.context.udp_buffers;
-        #[cfg(feature = "tcp")]
+        #[cfg(feature = "matter-tcp")]
         let tcp_buffers = &self.context.tcp_buffers;
 
         let mut rand = self.rand;
@@ -283,16 +283,16 @@ where
 
         let (stack, mut runner) = create_enet_stack(driver, u64::from_le_bytes(seed), resources);
 
-        #[cfg(feature = "tcp")]
+        #[cfg(feature = "matter-tcp")]
         let mut matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers<'_>>::uninit();
-        #[cfg(feature = "tcp")]
+        #[cfg(feature = "matter-tcp")]
         let matter_tcp_buffers = matter_tcp_buffers.init_with(
             EnetMatterTcpTransportBuffers::init_with_config(TcpConfig::new()),
         );
-        #[cfg(feature = "tcp")]
+        #[cfg(feature = "matter-tcp")]
         let net_stack =
             EnetStack::new_with_tcp(stack, udp_buffers, tcp_buffers, matter_tcp_buffers);
-        #[cfg(not(feature = "tcp"))]
+        #[cfg(not(feature = "matter-tcp"))]
         let net_stack = EnetStack::new(stack, udp_buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
 
