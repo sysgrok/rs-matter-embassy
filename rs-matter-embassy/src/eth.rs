@@ -8,9 +8,10 @@ use core::task::Context;
 
 use embassy_net::driver::{Capabilities, Driver, HardwareAddress, LinkState, RxToken, TxToken};
 
+#[cfg(feature = "tcp")]
+use crate::enet::{EnetMatterTcpBuffers, EnetMatterTcpTransportBuffers};
 use crate::enet::{
-    create_enet_stack, EnetMatterStackResources, EnetMatterTcpBuffers,
-    EnetMatterTcpTransportBuffers, EnetMatterUdpBuffers, EnetNetif, EnetStack,
+    create_enet_stack, EnetMatterStackResources, EnetMatterUdpBuffers, EnetNetif, EnetStack,
 };
 use crate::matter::crypto::Rng;
 use crate::matter::dm::clusters::eth_diag::EthDiag;
@@ -19,11 +20,14 @@ use crate::matter::dm::networks::eth::EthNetwork;
 use crate::matter::error::Error;
 use crate::matter::transport::network::mdns::builtin::BuiltinMdns;
 use crate::matter::utils::futures::{select, Coalesce};
-use crate::matter::utils::init::{init, Init, InitMaybeUninit};
+#[cfg(feature = "tcp")]
+use crate::matter::utils::init::InitMaybeUninit;
+use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::sync::IfMutex;
 use crate::stack::eth::{EthernetDriver, EthernetTask};
 use crate::stack::network::{Embedding, EthStackNetwork, StackNetwork};
+#[cfg(feature = "tcp")]
 use crate::stack::tcp::TcpConfig;
 use crate::stack::MatterStack;
 
@@ -87,7 +91,8 @@ where
 
         let resources = &mut *resources;
         let mdns = &mut *mdns;
-        let buffers = &self.context.buffers;
+        let udp_buffers = &self.context.udp_buffers;
+        #[cfg(feature = "tcp")]
         let tcp_buffers = &self.context.tcp_buffers;
 
         let mut seed = [0; core::mem::size_of::<u64>()];
@@ -101,11 +106,17 @@ where
             resources,
         );
 
+        #[cfg(feature = "tcp")]
         let mut matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers<'_>>::uninit();
+        #[cfg(feature = "tcp")]
         let matter_tcp_buffers = matter_tcp_buffers.init_with(
             EnetMatterTcpTransportBuffers::init_with_config(TcpConfig::new()),
         );
-        let net_stack = EnetStack::new_with_tcp(stack, buffers, tcp_buffers, matter_tcp_buffers);
+        #[cfg(feature = "tcp")]
+        let net_stack =
+            EnetStack::new_with_tcp(stack, udp_buffers, tcp_buffers, matter_tcp_buffers);
+        #[cfg(not(feature = "tcp"))]
+        let net_stack = EnetStack::new(stack, udp_buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::Ethernet);
         let eth_diag = EnetEthDiag::new(stack, &counters);
 
@@ -122,7 +133,8 @@ where
 
 /// A context (storage) for the network layer of the Matter stack.
 pub struct EmbassyNetContext {
-    pub(crate) buffers: EnetMatterUdpBuffers,
+    pub(crate) udp_buffers: EnetMatterUdpBuffers,
+    #[cfg(feature = "tcp")]
     pub(crate) tcp_buffers: EnetMatterTcpBuffers,
     pub(crate) resources: IfMutex<EnetMatterStackResources>,
     pub(crate) mdns: IfMutex<BuiltinMdns>,
@@ -132,7 +144,8 @@ impl EmbassyNetContext {
     /// Create a new instance of the `EmbassyNetContext` type.
     pub const fn new() -> Self {
         Self {
-            buffers: EnetMatterUdpBuffers::new(),
+            udp_buffers: EnetMatterUdpBuffers::new(),
+            #[cfg(feature = "tcp")]
             tcp_buffers: EnetMatterTcpBuffers::new(),
             resources: IfMutex::new(EnetMatterStackResources::new()),
             mdns: IfMutex::new(BuiltinMdns::new()),
@@ -140,10 +153,22 @@ impl EmbassyNetContext {
     }
 
     /// Return an in-place initializer for the `EmbassyNetContext` type.
+    #[cfg(feature = "tcp")]
     pub fn init() -> impl Init<Self> {
         init!(Self {
-            buffers <- EnetMatterUdpBuffers::init(),
+            udp_buffers <- EnetMatterUdpBuffers::init(),
             tcp_buffers <- EnetMatterTcpBuffers::init(),
+            // Note: below will break if `HostResources` stops being a bunch of `MaybeUninit`s
+            resources <- IfMutex::init(unsafe { MaybeUninit::<EnetMatterStackResources>::uninit().assume_init() }),
+            mdns <- IfMutex::init(BuiltinMdns::init()),
+        })
+    }
+
+    /// Return an in-place initializer for the `EmbassyNetContext` type.
+    #[cfg(not(feature = "tcp"))]
+    pub fn init() -> impl Init<Self> {
+        init!(Self {
+            udp_buffers <- EnetMatterUdpBuffers::init(),
             // Note: below will break if `HostResources` stops being a bunch of `MaybeUninit`s
             resources <- IfMutex::init(unsafe { MaybeUninit::<EnetMatterStackResources>::uninit().assume_init() }),
             mdns <- IfMutex::init(BuiltinMdns::init()),

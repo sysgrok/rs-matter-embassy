@@ -13,6 +13,12 @@ use rs_matter_embassy::enet::net::driver::{
     Capabilities, Driver, HardwareAddress, LinkState, RxToken, TxToken,
 };
 use rs_matter_embassy::enet::net::StackResources;
+#[cfg(feature = "tcp")]
+use rs_matter_embassy::enet::net::tcp::TcpSocket;
+#[cfg(feature = "tcp")]
+use rs_matter_embassy::enet::{
+    EnetMatterTcpBuffers, EnetMatterTcpTransportBuffers,
+};
 use rs_matter_embassy::enet::{
     create_enet_stack, create_link_local_ipv6, EnetMatterUdpBuffers, EnetStack,
 };
@@ -20,10 +26,16 @@ use rs_matter_embassy::matter::error::{Error, ErrorCode};
 use rs_matter_embassy::matter::transport::network::{
     Address, NetworkMulticast, NetworkReceive, NetworkSend,
 };
+#[cfg(feature = "tcp")]
+use rs_matter_embassy::matter::utils::futures::select;
 use rs_matter_embassy::matter::utils::futures::{block_on, select3, Either3};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::timers::{with_timeout, Duration};
+#[cfg(feature = "tcp")]
+use rs_matter_embassy::stack::net::{NetTcp, NetTcpStack};
 use rs_matter_embassy::stack::net::{NetSocket, NetStack};
+#[cfg(feature = "tcp")]
+use rs_matter_embassy::stack::tcp::TcpConfig;
 
 const A_MAC: [u8; 6] = [0x02, 0, 0, 0, 0, 0x01];
 const B_MAC: [u8; 6] = [0x02, 0, 0, 0, 0, 0x02];
@@ -107,6 +119,120 @@ async fn exchange(a: &EnetStack<'_>, b: &EnetStack<'_>) -> Result<(), Error> {
 
         let (len, _) = b_recv.recv_from(&mut buf).await?;
         assert_eq!(&buf[..len], b"again");
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "tcp")]
+#[test]
+fn tcp_sockets_exchange_framed_messages() {
+    let a_to_b = Mutex::new(Frames::default());
+    let b_to_a = Mutex::new(Frames::default());
+
+    let mut a_resources = StackResources::<6>::new();
+    let mut b_resources = StackResources::<4>::new();
+
+    let (a_stack, mut a_runner) =
+        create_enet_stack(Link::new(A_MAC, &a_to_b, &b_to_a), 1, &mut a_resources);
+    let (b_stack, mut b_runner) =
+        create_enet_stack(Link::new(B_MAC, &b_to_a, &a_to_b), 2, &mut b_resources);
+
+    let a_udp_buffers = EnetMatterUdpBuffers::new();
+    let mut a_tcp_buffers = MaybeUninit::uninit();
+    let a_tcp_buffers = a_tcp_buffers.init_with(EnetMatterTcpBuffers::init());
+    let mut a_matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers<'_>>::uninit();
+    let a_matter_tcp_buffers = a_matter_tcp_buffers.init_with(
+        EnetMatterTcpTransportBuffers::init_with_config(TcpConfig::new()),
+    );
+
+    let a = EnetStack::new_with_tcp(
+        a_stack,
+        &a_udp_buffers,
+        a_tcp_buffers,
+        a_matter_tcp_buffers,
+    );
+
+    let result = block_on(select3(
+        with_timeout(Duration::from_secs(10), exchange_tcp(&a, b_stack)),
+        a_runner.run(),
+        b_runner.run(),
+    ));
+
+    assert!(matches!(result, Either3::First(Ok(Ok(())))));
+}
+
+#[cfg(feature = "tcp")]
+async fn exchange_tcp(
+    a: &EnetStack<'_>,
+    b_stack: rs_matter_embassy::enet::net::Stack<'_>,
+) -> Result<(), Error> {
+    let tcp = a.tcp().expect("tcp enabled");
+    let a_tcp = tcp.bind(any(PORT)).await?;
+    let mut a_send = a_tcp.send();
+    let mut a_recv = a_tcp.recv();
+
+    let mut rx_buf = [0u8; 1024];
+    let mut tx_buf = [0u8; 1024];
+    let mut b_sock = TcpSocket::new(b_stack, &mut rx_buf, &mut tx_buf);
+
+    let server = async {
+        let mut buf = [0u8; 16];
+        a_recv.wait_available().await?;
+        let (len, addr) = a_recv.recv_from(&mut buf).await?;
+        assert_eq!(&buf[..len], b"ping");
+        assert!(matches!(addr, Address::Tcp(_)));
+
+        a_send.send_to(b"pong", addr).await?;
+
+        // Wait for peer close notification
+        let closed = a_recv.wait_available_or_closed().await?;
+        assert_eq!(closed, Some(addr));
+        Ok::<(), Error>(())
+    };
+
+    let client = async {
+        b_sock
+            .connect((link_local(&A_MAC), PORT))
+            .await
+            .map_err(|_| ErrorCode::StdIoError)?;
+
+        let mut frame = [0u8; 8];
+        frame[..4].copy_from_slice(&4u32.to_le_bytes());
+        frame[4..8].copy_from_slice(b"ping");
+        b_sock
+            .write(&frame)
+            .await
+            .map_err(|_| ErrorCode::StdIoError)?;
+        b_sock.flush().await.map_err(|_| ErrorCode::StdIoError)?;
+
+        let mut resp = [0u8; 8];
+        let mut read = 0;
+        while read < resp.len() {
+            let n = b_sock
+                .read(&mut resp[read..])
+                .await
+                .map_err(|_| ErrorCode::StdIoError)?;
+            assert!(n > 0);
+            read += n;
+        }
+        assert_eq!(u32::from_le_bytes(resp[..4].try_into().unwrap()), 4);
+        assert_eq!(&resp[4..8], b"pong");
+
+        b_sock.close();
+        b_sock.flush().await.map_err(|_| ErrorCode::StdIoError)?;
+        core::future::pending::<Result<(), Error>>().await
+    };
+
+    let exchange = select(server, client);
+    match select(a_tcp.run(), exchange).await {
+        rs_matter_embassy::matter::utils::futures::Either::First(r) => r?,
+        rs_matter_embassy::matter::utils::futures::Either::Second(
+            rs_matter_embassy::matter::utils::futures::Either::First(r),
+        ) => r?,
+        rs_matter_embassy::matter::utils::futures::Either::Second(
+            rs_matter_embassy::matter::utils::futures::Either::Second(r),
+        ) => r?,
     }
 
     Ok(())
