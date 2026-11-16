@@ -34,8 +34,6 @@ use rs_matter_embassy::matter::utils::timers::{with_timeout, Duration};
 #[cfg(feature = "matter-tcp")]
 use rs_matter_embassy::stack::net::{NetTcp, NetTcpStack};
 use rs_matter_embassy::stack::net::{NetSocket, NetStack};
-#[cfg(feature = "matter-tcp")]
-use rs_matter_embassy::stack::tcp::TcpConfig;
 
 const A_MAC: [u8; 6] = [0x02, 0, 0, 0, 0, 0x01];
 const B_MAC: [u8; 6] = [0x02, 0, 0, 0, 0, 0x02];
@@ -141,10 +139,9 @@ fn tcp_sockets_exchange_framed_messages() {
     let a_udp_buffers = EnetMatterUdpBuffers::new();
     let mut a_tcp_buffers = MaybeUninit::uninit();
     let a_tcp_buffers = a_tcp_buffers.init_with(EnetMatterTcpBuffers::init());
-    let mut a_matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers<'_>>::uninit();
-    let a_matter_tcp_buffers = a_matter_tcp_buffers.init_with(
-        EnetMatterTcpTransportBuffers::init_with_config(TcpConfig::new()),
-    );
+    let mut a_matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers>::uninit();
+    let a_matter_tcp_buffers =
+        a_matter_tcp_buffers.init_with(EnetMatterTcpTransportBuffers::init());
 
     let a = EnetStack::new_with_tcp(
         a_stack,
@@ -155,6 +152,71 @@ fn tcp_sockets_exchange_framed_messages() {
 
     let result = block_on(select3(
         with_timeout(Duration::from_secs(10), exchange_tcp(&a, b_stack)),
+        a_runner.run(),
+        b_runner.run(),
+    ));
+
+    assert!(matches!(result, Either3::First(Ok(Ok(())))));
+}
+
+#[cfg(feature = "matter-tcp")]
+#[test]
+fn tcp_socket_keep_alive_configures_timeout() {
+    use core::net::{Ipv6Addr, SocketAddr};
+    use rs_matter_embassy::enet::EnetTcpListener;
+    use rs_matter_embassy::stack::tcp::{TcpKeepAlive, TcpNetworkSocket, TcpNetworkSockets};
+
+    let a_to_b = Mutex::new(Frames::default());
+    let b_to_a = Mutex::new(Frames::default());
+
+    let mut a_resources = StackResources::<6>::new();
+    let mut b_resources = StackResources::<4>::new();
+
+    let (a_stack, mut a_runner) =
+        create_enet_stack(Link::new(A_MAC, &a_to_b, &b_to_a), 1, &mut a_resources);
+    let (b_stack, mut b_runner) =
+        create_enet_stack(Link::new(B_MAC, &b_to_a, &a_to_b), 2, &mut b_resources);
+
+    let mut a_tcp_buffers = MaybeUninit::uninit();
+    let a_tcp_buffers = a_tcp_buffers.init_with(EnetMatterTcpBuffers::init());
+
+    let work = async {
+        let listener = EnetTcpListener::new(
+            a_stack,
+            a_tcp_buffers,
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 5540),
+        );
+
+        let mut rx_buf = [0u8; 256];
+        let mut tx_buf = [0u8; 256];
+        let mut b_sock = TcpSocket::new(b_stack, &mut rx_buf, &mut tx_buf);
+        let addr_a = a_stack.config_v6().unwrap().address.address();
+
+        let (accepted_res, connect_res) = rs_matter_embassy::matter::utils::futures::join(
+            listener.accept(),
+            b_sock.connect((addr_a, 5540)),
+        )
+        .await;
+
+        connect_res.unwrap();
+        let (_, mut accepted) = accepted_res.unwrap();
+
+        let keep_alive = TcpKeepAlive {
+            idle: Duration::from_secs(25),
+            interval: Duration::from_secs(25),
+            retries: 5,
+        };
+        accepted.set_keep_alive(Some(keep_alive)).unwrap();
+        assert_eq!(accepted.timeout(), Some(Duration::from_secs(150)));
+
+        accepted.set_keep_alive(None).unwrap();
+        assert_eq!(accepted.timeout(), None);
+
+        Ok::<(), Error>(())
+    };
+
+    let result = block_on(select3(
+        with_timeout(Duration::from_secs(10), work),
         a_runner.run(),
         b_runner.run(),
     ));

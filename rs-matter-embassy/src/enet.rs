@@ -34,8 +34,8 @@ use crate::stack::net::NetTcpStack;
 use crate::stack::net::{NetSocket, NetStack};
 #[cfg(feature = "matter-tcp")]
 use crate::stack::tcp::{
-    NetTcpListener, NetTcpRead, NetTcpSocket, NetTcpWrite, TcpBound, TcpBuffers as MatterTcpBuffers,
-    TcpKeepAlive,
+    TcpConfig, TcpKeepAlive, TcpNetwork, TcpNetworkBuffers, TcpNetworkRead, TcpNetworkSocket,
+    TcpNetworkSockets, TcpNetworkWrite,
 };
 
 /// Re-export the `embassy-net` crate
@@ -290,11 +290,10 @@ impl Drop for EnetTcpSlotRef<'_> {
 /// Caller-owned Matter TCP frame and slot buffers for [`EnetStack`].
 #[cfg(feature = "matter-tcp")]
 pub type EnetMatterTcpTransportBuffers<
-    'a,
     const N: usize = { MAX_RX_BUF_SIZE },
     const SLOTS: usize = 1,
     const TX_QUEUE: usize = 1,
-> = MatterTcpBuffers<EnetTcpSocket<'a>, N, SLOTS, TX_QUEUE>;
+> = TcpNetworkBuffers<N, SLOTS, TX_QUEUE>;
 
 /// A type alias for the `StackResources` type configured with the minimum number of sockets
 /// sufficient for the operation of the Matter stack
@@ -484,7 +483,7 @@ impl<'a> EnetStack<'a> {
         stack: Stack<'a>,
         buffers: &'a EnetMatterUdpBuffers,
         tcp_buffers: &'a EnetMatterTcpBuffers,
-        matter_tcp_buffers: &'a EnetMatterTcpTransportBuffers<'a>,
+        matter_tcp_buffers: &'a EnetMatterTcpTransportBuffers,
     ) -> Self {
         Self {
             stack,
@@ -551,28 +550,40 @@ impl<'a> NetStack for EnetStack<'a> {
 pub struct EnetTcpStack<'a> {
     stack: Stack<'a>,
     tcp_buffers: &'a EnetMatterTcpBuffers,
-    matter_tcp_buffers: &'a EnetMatterTcpTransportBuffers<'a>,
+    matter_tcp_buffers: &'a EnetMatterTcpTransportBuffers,
 }
 
 #[cfg(feature = "matter-tcp")]
-impl<'a> NetTcpStack for EnetTcpStack<'a> {
-    type Tcp<'t>
-        = TcpBound<'a, EnetTcpListener<'a>, { MAX_RX_BUF_SIZE }, 1, 1>
-    where
-        Self: 't;
-
-    fn bind(&self, addr: SocketAddr) -> impl Future<Output = Result<Self::Tcp<'_>, Error>> {
+impl<'a> EnetTcpStack<'a> {
+    /// Create a listener bound to `addr` using this stack's TCP buffers.
+    pub fn listener(&self, addr: SocketAddr) -> EnetTcpListener<'a> {
         let ip = addr.ip();
         let endpoint = IpListenEndpoint {
             addr: (!ip.is_unspecified()).then(|| ip.into()),
             port: addr.port(),
         };
 
-        ready(Ok(self.matter_tcp_buffers.bind(EnetTcpListener {
+        EnetTcpListener {
             stack: self.stack,
             buffers: self.tcp_buffers,
             endpoint,
-        })))
+        }
+    }
+}
+
+#[cfg(feature = "matter-tcp")]
+impl<'a> NetTcpStack for EnetTcpStack<'a> {
+    type Tcp<'t>
+        = TcpNetwork<'a, EnetTcpListener<'a>, { MAX_RX_BUF_SIZE }, 1, 1>
+    where
+        Self: 't;
+
+    fn bind(&self, addr: SocketAddr) -> impl Future<Output = Result<Self::Tcp<'_>, Error>> {
+        ready(TcpNetwork::try_new(
+            self.listener(addr),
+            self.matter_tcp_buffers,
+            &TcpConfig::new(),
+        ))
     }
 }
 
@@ -585,10 +596,28 @@ pub struct EnetTcpListener<'a> {
 }
 
 #[cfg(feature = "matter-tcp")]
-impl<'a> NetTcpListener for EnetTcpListener<'a> {
+impl<'a> EnetTcpListener<'a> {
+    /// Create a new Matter-over-TCP listener bound to `addr`.
+    pub fn new(stack: Stack<'a>, buffers: &'a EnetMatterTcpBuffers, addr: SocketAddr) -> Self {
+        let ip = addr.ip();
+        let endpoint = IpListenEndpoint {
+            addr: (!ip.is_unspecified()).then(|| ip.into()),
+            port: addr.port(),
+        };
+
+        Self {
+            stack,
+            buffers,
+            endpoint,
+        }
+    }
+}
+
+#[cfg(feature = "matter-tcp")]
+impl<'a> TcpNetworkSockets for EnetTcpListener<'a> {
     type Socket = EnetTcpSocket<'a>;
 
-    async fn accept(&mut self) -> Result<(SocketAddr, Self::Socket), Error> {
+    async fn accept(&self) -> Result<(SocketAddr, Self::Socket), Error> {
         let (slot_ref, slot) = self.buffers.take().ok_or(ErrorCode::ResourceExhausted)?;
 
         let mut socket = TcpSocket::new(self.stack, &mut slot.rx, &mut slot.tx);
@@ -602,6 +631,7 @@ impl<'a> NetTcpListener for EnetTcpListener<'a> {
             addr,
             EnetTcpSocket {
                 socket,
+                timeout: None,
                 _slot_ref: slot_ref,
             },
         ))
@@ -612,12 +642,21 @@ impl<'a> NetTcpListener for EnetTcpListener<'a> {
 #[cfg(feature = "matter-tcp")]
 pub struct EnetTcpSocket<'a> {
     socket: TcpSocket<'a>,
+    timeout: Option<Duration>,
     // Dropped after `socket`, so its buffers are given back only once the socket is gone.
     _slot_ref: EnetTcpSlotRef<'a>,
 }
 
 #[cfg(feature = "matter-tcp")]
-impl NetTcpSocket for EnetTcpSocket<'_> {
+impl EnetTcpSocket<'_> {
+    /// Return the configured inactivity timeout of the underlying `embassy-net` socket.
+    pub fn timeout(&self) -> Option<Duration> {
+        self.timeout
+    }
+}
+
+#[cfg(feature = "matter-tcp")]
+impl TcpNetworkSocket for EnetTcpSocket<'_> {
     type Read<'a>
         = EnetTcpReader<'a>
     where
@@ -643,6 +682,16 @@ impl NetTcpSocket for EnetTcpSocket<'_> {
             .and_then(|k| u64::try_from(k.interval.as_millis()).ok())
             .map(Duration::from_millis);
         self.socket.set_keep_alive(duration);
+
+        let timeout = keep_alive.and_then(|k| {
+            let interval_ms = u64::try_from(k.interval.as_millis()).ok()?;
+            let idle_ms = u64::try_from(k.idle.as_millis()).ok()?;
+            let total_ms = idle_ms.checked_add(interval_ms.checked_mul(u64::from(k.retries))?)?;
+            Some(Duration::from_millis(total_ms))
+        });
+        self.socket.set_timeout(timeout);
+        self.timeout = timeout;
+
         Ok(())
     }
 }
@@ -652,7 +701,7 @@ impl NetTcpSocket for EnetTcpSocket<'_> {
 pub struct EnetTcpReader<'a>(TcpReader<'a>);
 
 #[cfg(feature = "matter-tcp")]
-impl NetTcpRead for EnetTcpReader<'_> {
+impl TcpNetworkRead for EnetTcpReader<'_> {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
         self.0.read(buf).await.map_err(to_net_error)
     }
@@ -663,7 +712,7 @@ impl NetTcpRead for EnetTcpReader<'_> {
 pub struct EnetTcpWriter<'a>(TcpWriter<'a>);
 
 #[cfg(feature = "matter-tcp")]
-impl NetTcpWrite for EnetTcpWriter<'_> {
+impl TcpNetworkWrite for EnetTcpWriter<'_> {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, Error> {
         self.0.write(buf).await.map_err(to_net_error)
     }

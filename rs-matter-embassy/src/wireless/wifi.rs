@@ -20,8 +20,6 @@ use crate::matter::utils::futures::{select, Coalesce};
 use crate::matter::utils::init::InitMaybeUninit;
 use crate::stack::ble::GattPeripheral;
 use crate::stack::network::{Embedding, StackNetwork, WifiStackNetwork};
-#[cfg(feature = "matter-tcp")]
-use crate::stack::tcp::TcpConfig;
 use crate::stack::wireless::{
     GattDriver, GattTask, WifiCoexDriver, WifiCoexTask, WifiDriver, WifiTask,
 };
@@ -231,11 +229,10 @@ where
         let (stack, mut runner) = create_enet_stack(driver, u64::from_le_bytes(seed), resources);
 
         #[cfg(feature = "matter-tcp")]
-        let mut matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers<'_>>::uninit();
+        let mut matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers>::uninit();
         #[cfg(feature = "matter-tcp")]
-        let matter_tcp_buffers = matter_tcp_buffers.init_with(
-            EnetMatterTcpTransportBuffers::init_with_config(TcpConfig::new()),
-        );
+        let matter_tcp_buffers =
+            matter_tcp_buffers.init_with(EnetMatterTcpTransportBuffers::init());
         #[cfg(feature = "matter-tcp")]
         let net_stack =
             EnetStack::new_with_tcp(stack, udp_buffers, tcp_buffers, matter_tcp_buffers);
@@ -284,11 +281,10 @@ where
         let (stack, mut runner) = create_enet_stack(driver, u64::from_le_bytes(seed), resources);
 
         #[cfg(feature = "matter-tcp")]
-        let mut matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers<'_>>::uninit();
+        let mut matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers>::uninit();
         #[cfg(feature = "matter-tcp")]
-        let matter_tcp_buffers = matter_tcp_buffers.init_with(
-            EnetMatterTcpTransportBuffers::init_with_config(TcpConfig::new()),
-        );
+        let matter_tcp_buffers =
+            matter_tcp_buffers.init_with(EnetMatterTcpTransportBuffers::init());
         #[cfg(feature = "matter-tcp")]
         let net_stack =
             EnetStack::new_with_tcp(stack, udp_buffers, tcp_buffers, matter_tcp_buffers);

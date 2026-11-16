@@ -27,8 +27,6 @@ use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::sync::IfMutex;
 use crate::stack::eth::{EthernetDriver, EthernetTask};
 use crate::stack::network::{Embedding, EthStackNetwork, StackNetwork};
-#[cfg(feature = "matter-tcp")]
-use crate::stack::tcp::TcpConfig;
 use crate::stack::MatterStack;
 
 /// The network of a `MatterStack` that runs Ethernet with [`EmbassyEthernet`]: the networks
@@ -107,11 +105,10 @@ where
         );
 
         #[cfg(feature = "matter-tcp")]
-        let mut matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers<'_>>::uninit();
+        let mut matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers>::uninit();
         #[cfg(feature = "matter-tcp")]
-        let matter_tcp_buffers = matter_tcp_buffers.init_with(
-            EnetMatterTcpTransportBuffers::init_with_config(TcpConfig::new()),
-        );
+        let matter_tcp_buffers =
+            matter_tcp_buffers.init_with(EnetMatterTcpTransportBuffers::init());
         #[cfg(feature = "matter-tcp")]
         let net_stack =
             EnetStack::new_with_tcp(stack, udp_buffers, tcp_buffers, matter_tcp_buffers);
