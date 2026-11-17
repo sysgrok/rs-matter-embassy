@@ -20,6 +20,8 @@ use crate::error::to_net_error;
 use crate::matter::dm::clusters::gen_diag::{InterfaceTypeEnum, NetifDiag, NetifInfo};
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::{Error, ErrorCode};
+#[cfg(feature = "matter-tcp")]
+use crate::matter::transport::network::tcp::FRAME_HDR_LEN;
 use crate::matter::transport::network::{
     Address, NetworkMulticast, NetworkReceive, NetworkSend, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE,
 };
@@ -292,8 +294,8 @@ impl Drop for EnetTcpSlotRef<'_> {
 pub type EnetMatterTcpTransportBuffers<
     const N: usize = { MAX_RX_BUF_SIZE },
     const SLOTS: usize = 1,
-    const TX_QUEUE: usize = 1,
-> = TcpNetworkBuffers<N, SLOTS, TX_QUEUE>;
+    const TX_BUF: usize = { MAX_RX_BUF_SIZE + FRAME_HDR_LEN },
+> = TcpNetworkBuffers<N, SLOTS, TX_BUF>;
 
 /// A type alias for the `StackResources` type configured with the minimum number of sockets
 /// sufficient for the operation of the Matter stack
@@ -484,6 +486,7 @@ impl<'a> EnetStack<'a> {
         buffers: &'a EnetMatterUdpBuffers,
         tcp_buffers: &'a EnetMatterTcpBuffers,
         matter_tcp_buffers: &'a EnetMatterTcpTransportBuffers,
+        tcp_config: &'a TcpConfig,
     ) -> Self {
         Self {
             stack,
@@ -492,6 +495,7 @@ impl<'a> EnetStack<'a> {
                 stack,
                 tcp_buffers,
                 matter_tcp_buffers,
+                tcp_config,
             }),
         }
     }
@@ -551,6 +555,7 @@ pub struct EnetTcpStack<'a> {
     stack: Stack<'a>,
     tcp_buffers: &'a EnetMatterTcpBuffers,
     matter_tcp_buffers: &'a EnetMatterTcpTransportBuffers,
+    tcp_config: &'a TcpConfig,
 }
 
 #[cfg(feature = "matter-tcp")]
@@ -574,15 +579,15 @@ impl<'a> EnetTcpStack<'a> {
 #[cfg(feature = "matter-tcp")]
 impl<'a> NetTcpStack for EnetTcpStack<'a> {
     type Tcp<'t>
-        = TcpNetwork<'a, EnetTcpListener<'a>, { MAX_RX_BUF_SIZE }, 1, 1>
+        = TcpNetwork<'a, EnetTcpListener<'a>, { MAX_RX_BUF_SIZE }, 1>
     where
         Self: 't;
 
     fn bind(&self, addr: SocketAddr) -> impl Future<Output = Result<Self::Tcp<'_>, Error>> {
-        ready(TcpNetwork::try_new(
+        ready(TcpNetwork::new(
             self.listener(addr),
             self.matter_tcp_buffers,
-            &TcpConfig::new(),
+            self.tcp_config,
         ))
     }
 }
@@ -678,14 +683,12 @@ impl TcpNetworkSocket for EnetTcpSocket<'_> {
     }
 
     fn set_keep_alive(&mut self, keep_alive: Option<TcpKeepAlive>) -> Result<(), Error> {
-        let duration = keep_alive
-            .and_then(|k| u64::try_from(k.interval.as_millis()).ok())
-            .map(Duration::from_millis);
+        let duration = keep_alive.map(|k| Duration::from_millis(k.interval.as_millis()));
         self.socket.set_keep_alive(duration);
 
         let timeout = keep_alive.and_then(|k| {
-            let interval_ms = u64::try_from(k.interval.as_millis()).ok()?;
-            let idle_ms = u64::try_from(k.idle.as_millis()).ok()?;
+            let interval_ms = k.interval.as_millis();
+            let idle_ms = k.idle.as_millis();
             let total_ms = idle_ms.checked_add(interval_ms.checked_mul(u64::from(k.retries))?)?;
             Some(Duration::from_millis(total_ms))
         });
