@@ -225,6 +225,66 @@ fn tcp_socket_keep_alive_configures_timeout() {
 }
 
 #[cfg(feature = "matter-tcp")]
+#[test]
+fn tcp_socket_close_aborts_unresponsive_peer() {
+    use core::net::{Ipv6Addr, SocketAddr};
+    use rs_matter_embassy::enet::EnetTcpListener;
+    use rs_matter_embassy::matter::utils::futures::{select, Either};
+    use rs_matter_embassy::stack::tcp::{TcpNetworkSocket, TcpNetworkSockets};
+
+    let a_to_b = Mutex::new(Frames::default());
+    let b_to_a = Mutex::new(Frames::default());
+
+    let mut a_resources = StackResources::<6>::new();
+    let mut b_resources = StackResources::<4>::new();
+
+    let (a_stack, mut a_runner) =
+        create_enet_stack(Link::new(A_MAC, &a_to_b, &b_to_a), 1, &mut a_resources);
+    let (b_stack, mut b_runner) =
+        create_enet_stack(Link::new(B_MAC, &b_to_a, &a_to_b), 2, &mut b_resources);
+
+    let mut a_tcp_buffers = MaybeUninit::uninit();
+    let a_tcp_buffers = a_tcp_buffers.init_with(EnetMatterTcpBuffers::init());
+
+    let listener = EnetTcpListener::new(
+        a_stack,
+        a_tcp_buffers,
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 5540),
+    );
+
+    let mut rx_buf = [0u8; 256];
+    let mut tx_buf = [0u8; 256];
+    let mut b_sock = TcpSocket::new(b_stack, &mut rx_buf, &mut tx_buf);
+    let addr_a = a_stack.config_v6().unwrap().address.address();
+
+    let connect = rs_matter_embassy::matter::utils::futures::join(
+        listener.accept(),
+        b_sock.connect((addr_a, 5540)),
+    );
+
+    let mut accepted = match block_on(select3(
+        with_timeout(Duration::from_secs(5), connect),
+        a_runner.run(),
+        b_runner.run(),
+    )) {
+        Either3::First(Ok((accepted_res, connect_res))) => {
+            connect_res.unwrap();
+            accepted_res.unwrap().1
+        }
+        _ => panic!("connect timed out"),
+    };
+
+    // Stop polling `b_runner` so the peer never ACKs our FIN.
+    // `close()` must time out and abort instead of hanging forever.
+    let result = block_on(select(
+        with_timeout(Duration::from_secs(5), accepted.close()),
+        a_runner.run(),
+    ));
+
+    assert!(matches!(result, Either::First(Ok(Ok(())))));
+}
+
+#[cfg(feature = "matter-tcp")]
 async fn exchange_tcp(
     a: &EnetStack<'_>,
     b_stack: rs_matter_embassy::enet::net::Stack<'_>,

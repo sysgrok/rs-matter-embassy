@@ -27,7 +27,10 @@ use crate::matter::transport::network::{
 };
 #[cfg(feature = "matter-tcp")]
 use crate::matter::transport::MAX_RX_BUF_SIZE;
+#[cfg(not(feature = "matter-tcp"))]
 use crate::matter::utils::futures::select;
+#[cfg(feature = "matter-tcp")]
+use crate::matter::utils::futures::{select, Either};
 use crate::matter::utils::init::{init, init_array_from_fn, zeroed, Init, UnsafeCellInit};
 use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::timers::{Duration, Timer};
@@ -291,11 +294,8 @@ impl Drop for EnetTcpSlotRef<'_> {
 
 /// Caller-owned Matter TCP frame and slot buffers for [`EnetStack`].
 #[cfg(feature = "matter-tcp")]
-pub type EnetMatterTcpTransportBuffers<
-    const N: usize = { MAX_RX_BUF_SIZE },
-    const SLOTS: usize = 1,
-    const TX_BUF: usize = { MAX_RX_BUF_SIZE + FRAME_HDR_LEN },
-> = TcpNetworkBuffers<N, SLOTS, TX_BUF>;
+pub type EnetMatterTcpTransportBuffers =
+    TcpNetworkBuffers<{ MAX_RX_BUF_SIZE }, 1, { MAX_RX_BUF_SIZE + FRAME_HDR_LEN }>;
 
 /// A type alias for the `StackResources` type configured with the minimum number of sockets
 /// sufficient for the operation of the Matter stack
@@ -562,17 +562,7 @@ pub struct EnetTcpStack<'a> {
 impl<'a> EnetTcpStack<'a> {
     /// Create a listener bound to `addr` using this stack's TCP buffers.
     pub fn listener(&self, addr: SocketAddr) -> EnetTcpListener<'a> {
-        let ip = addr.ip();
-        let endpoint = IpListenEndpoint {
-            addr: (!ip.is_unspecified()).then(|| ip.into()),
-            port: addr.port(),
-        };
-
-        EnetTcpListener {
-            stack: self.stack,
-            buffers: self.tcp_buffers,
-            endpoint,
-        }
+        EnetTcpListener::new(self.stack, self.tcp_buffers, addr)
     }
 }
 
@@ -652,9 +642,15 @@ pub struct EnetTcpSocket<'a> {
     _slot_ref: EnetTcpSlotRef<'a>,
 }
 
+/// Maximum time to wait for the peer to acknowledge our FIN during graceful TCP close
+/// before aborting the socket with RST.
+#[cfg(feature = "matter-tcp")]
+const TCP_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+
 #[cfg(feature = "matter-tcp")]
 impl EnetTcpSocket<'_> {
     /// Return the configured inactivity timeout of the underlying `embassy-net` socket.
+    #[doc(hidden)]
     pub fn timeout(&self) -> Option<Duration> {
         self.timeout
     }
@@ -679,7 +675,13 @@ impl TcpNetworkSocket for EnetTcpSocket<'_> {
 
     async fn close(&mut self) -> Result<(), Error> {
         self.socket.close();
-        self.socket.flush().await.map_err(to_net_error)
+        match select(self.socket.flush(), Timer::after(TCP_CLOSE_TIMEOUT)).await {
+            Either::First(res) => res.map_err(to_net_error),
+            Either::Second(()) => {
+                self.socket.abort();
+                Ok(())
+            }
+        }
     }
 
     fn set_keep_alive(&mut self, keep_alive: Option<TcpKeepAlive>) -> Result<(), Error> {
