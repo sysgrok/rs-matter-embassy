@@ -11,6 +11,8 @@ use crate::matter::dm::clusters::wifi_diag::{WifiDiag, WirelessDiag};
 use crate::matter::dm::networks::wireless::WifiNetworks;
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
+#[cfg(feature = "matter-tcp")]
+use crate::matter::transport::network::tcp::TcpConfig;
 use crate::matter::utils::futures::{select, Coalesce};
 use crate::stack::ble::GattPeripheral;
 use crate::stack::network::{Embedding, StackNetwork, WifiStackNetwork};
@@ -156,6 +158,13 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
             runner: EnetWifiRunner::new(rand, use_ble_random_addr, context, ble_context),
         }
     }
+
+    /// Configure the Matter-over-TCP timeouts and keep-alive settings for this interface.
+    #[cfg(feature = "matter-tcp")]
+    pub const fn with_tcp_config(mut self, tcp_config: &'a TcpConfig) -> Self {
+        self.runner.tcp_config = tcp_config;
+        self
+    }
 }
 
 /// What the Wifi drivers have in common, whatever their radio: running a task of
@@ -165,11 +174,16 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
 pub struct EnetWifiRunner<'a, R> {
     rand: R,
     use_ble_random_addr: bool,
+    #[cfg(feature = "matter-tcp")]
+    tcp_config: &'a TcpConfig,
     context: &'a EmbassyNetContext,
     ble_context: &'a BtpGattContext,
 }
 
 impl<'a, R> EnetWifiRunner<'a, R> {
+    #[cfg(feature = "matter-tcp")]
+    const DEFAULT_TCP_CONFIG: TcpConfig = TcpConfig::new();
+
     /// Create a new instance of the `EnetWifiRunner` type.
     pub const fn new(
         rand: R,
@@ -180,9 +194,18 @@ impl<'a, R> EnetWifiRunner<'a, R> {
         Self {
             rand,
             use_ble_random_addr,
+            #[cfg(feature = "matter-tcp")]
+            tcp_config: &Self::DEFAULT_TCP_CONFIG,
             context,
             ble_context,
         }
+    }
+
+    /// Configure the Matter-over-TCP timeouts and keep-alive settings for this interface.
+    #[cfg(feature = "matter-tcp")]
+    pub const fn with_tcp_config(mut self, tcp_config: &'a TcpConfig) -> Self {
+        self.tcp_config = tcp_config;
+        self
     }
 }
 
@@ -212,7 +235,7 @@ where
 
         let resources = &mut *resources;
         let mdns = &mut *mdns;
-        let buffers = &self.context.buffers;
+        let udp_buffers = &self.context.udp_buffers;
 
         let mut rand = self.rand;
         let mut seed = [0; core::mem::size_of::<u64>()];
@@ -220,7 +243,16 @@ where
 
         let (stack, mut runner) = create_enet_stack(driver, u64::from_le_bytes(seed), resources);
 
-        let net_stack = EnetStack::new(stack, buffers);
+        #[cfg(feature = "matter-tcp")]
+        let net_stack = EnetStack::new_with_tcp(
+            stack,
+            udp_buffers,
+            &self.context.tcp.tcp_buffers,
+            &self.context.tcp.matter_tcp_buffers,
+            self.tcp_config,
+        );
+        #[cfg(not(feature = "matter-tcp"))]
+        let net_stack = EnetStack::new(stack, udp_buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
 
         let mut main = pin!(task.run(&net_stack, &netif, &net_ctl, mdns));
@@ -253,15 +285,23 @@ where
 
         let resources = &mut *resources;
         let mdns = &mut *mdns;
-        let buffers = &self.context.buffers;
-
+        let udp_buffers = &self.context.udp_buffers;
         let mut rand = self.rand;
         let mut seed = [0; core::mem::size_of::<u64>()];
         rand.fill_bytes(&mut seed);
 
         let (stack, mut runner) = create_enet_stack(driver, u64::from_le_bytes(seed), resources);
 
-        let net_stack = EnetStack::new(stack, buffers);
+        #[cfg(feature = "matter-tcp")]
+        let net_stack = EnetStack::new_with_tcp(
+            stack,
+            udp_buffers,
+            &self.context.tcp.tcp_buffers,
+            &self.context.tcp.matter_tcp_buffers,
+            self.tcp_config,
+        );
+        #[cfg(not(feature = "matter-tcp"))]
+        let net_stack = EnetStack::new(stack, udp_buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
 
         let mut main = pin!(task.run(&net_stack, &netif, &net_ctl, mdns, &mut gatt));

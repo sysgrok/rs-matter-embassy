@@ -8,6 +8,8 @@ use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use cfg_if::cfg_if;
 
 use embassy_net::driver::{Driver, HardwareAddress as DriverHardwareAddress};
+#[cfg(feature = "matter-tcp")]
+use embassy_net::tcp::{TcpReader, TcpSocket, TcpWriter};
 use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{
     Config, ConfigV6, HardwareAddress, IpEndpoint, IpListenEndpoint, Ipv6Cidr, Runner, Stack,
@@ -18,25 +20,48 @@ use crate::error::to_net_error;
 use crate::matter::dm::clusters::gen_diag::{InterfaceTypeEnum, NetifDiag, NetifInfo};
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::{Error, ErrorCode};
+#[cfg(feature = "matter-tcp")]
+use crate::matter::transport::network::tcp::FRAME_HDR_LEN;
 use crate::matter::transport::network::{
     Address, NetworkMulticast, NetworkReceive, NetworkSend, MAX_RX_PACKET_SIZE, MAX_TX_PACKET_SIZE,
 };
+#[cfg(feature = "matter-tcp")]
+use crate::matter::transport::MAX_RX_BUF_SIZE;
+#[cfg(not(feature = "matter-tcp"))]
 use crate::matter::utils::futures::select;
+#[cfg(feature = "matter-tcp")]
+use crate::matter::utils::futures::{select, Either};
 use crate::matter::utils::init::{init, init_array_from_fn, zeroed, Init, UnsafeCellInit};
 use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::timers::{Duration, Timer};
+#[cfg(feature = "matter-tcp")]
+use crate::stack::net::NetTcpStack;
 use crate::stack::net::{NetSocket, NetStack};
+#[cfg(feature = "matter-tcp")]
+use crate::stack::tcp::{
+    TcpConfig, TcpKeepAlive, TcpNetwork, TcpNetworkBuffers, TcpNetworkRead, TcpNetworkSocket,
+    TcpNetworkSockets, TcpNetworkWrite,
+};
 
 /// Re-export the `embassy-net` crate
 pub mod net {
     pub use ::embassy_net::*;
 }
 
+/// The maximum number of Matter-over-TCP sockets (`SLOTS = 1` active + `1` listening in
+/// `accept()` so incoming replacements can be accepted and evict an existing slot).
+#[cfg(feature = "matter-tcp")]
+const ENET_MAX_TCP_SOCKETS: usize = 2;
+#[cfg(not(feature = "matter-tcp"))]
+const ENET_MAX_TCP_SOCKETS: usize = 0;
+
 /// The minimum number of sockets that should be configured in the `embassy-net` `StackResources`:
-/// The UDP sockets used by the Matter stack, plus two sockets for DHCP + DNS, plus optional
-/// additional application sockets.
-pub const ENET_MIN_SOCKET_SET: usize =
-    ENET_MAX_UDP_SOCKETS + ENET_REQUIRED_EXTRA_SOCKET_SET + ENET_EXTRA_SOCKET_SET;
+/// The UDP and Matter-over-TCP sockets used by the Matter stack, plus two sockets for DHCP + DNS,
+/// plus optional additional application sockets.
+pub const ENET_MIN_SOCKET_SET: usize = ENET_MAX_UDP_SOCKETS
+    + ENET_MAX_TCP_SOCKETS
+    + ENET_REQUIRED_EXTRA_SOCKET_SET
+    + ENET_EXTRA_SOCKET_SET;
 
 const ENET_REQUIRED_EXTRA_SOCKET_SET: usize = 2;
 
@@ -156,6 +181,121 @@ impl Drop for EnetUdpSlotRef<'_> {
         });
     }
 }
+
+/// RX buffer size per Matter-over-TCP socket in `EnetMatterTcpBuffers`.
+#[cfg(feature = "matter-tcp")]
+pub const ENET_MATTER_TCP_RX_BUF_SIZE: usize = 1024;
+/// TX buffer size per Matter-over-TCP socket in `EnetMatterTcpBuffers`.
+#[cfg(feature = "matter-tcp")]
+pub const ENET_MATTER_TCP_TX_BUF_SIZE: usize = 1024;
+
+/// Static TCP socket buffers reserved for Matter-over-TCP.
+#[cfg(feature = "matter-tcp")]
+pub struct EnetMatterTcpBuffers {
+    taken: Mutex<Cell<[bool; ENET_MAX_TCP_SOCKETS]>>,
+    slots: [UnsafeCell<EnetTcpSlot>; ENET_MAX_TCP_SOCKETS],
+}
+
+#[cfg(feature = "matter-tcp")]
+impl EnetMatterTcpBuffers {
+    #[allow(clippy::declare_interior_mutable_const)]
+    const SLOT: UnsafeCell<EnetTcpSlot> = UnsafeCell::new(EnetTcpSlot::new());
+
+    /// Create a new `EnetMatterTcpBuffers` instance.
+    pub const fn new() -> Self {
+        Self {
+            taken: Mutex::new(Cell::new([false; ENET_MAX_TCP_SOCKETS])),
+            slots: [Self::SLOT; ENET_MAX_TCP_SOCKETS],
+        }
+    }
+
+    /// Return an in-place initializer for `EnetMatterTcpBuffers`.
+    pub fn init() -> impl Init<Self> {
+        init!(Self {
+            taken: Mutex::new(Cell::new([false; ENET_MAX_TCP_SOCKETS])),
+            slots <- init_array_from_fn(|_| UnsafeCell::init(EnetTcpSlot::init())),
+        })
+    }
+
+    /// Take a free TCP slot, which stays taken until the returned `EnetTcpSlotRef` is dropped.
+    #[allow(clippy::mut_from_ref)]
+    fn take(&self) -> Option<(EnetTcpSlotRef<'_>, &mut EnetTcpSlot)> {
+        let index = self.taken.lock(|taken| {
+            let mut slots = taken.get();
+            let index = slots.iter().position(|taken| !taken)?;
+
+            slots[index] = true;
+            taken.set(slots);
+
+            Some(index)
+        })?;
+
+        // SAFETY: The slot is marked as taken, so no other reference to it exists
+        // until `EnetTcpSlotRef` gives it back.
+        let slot = unsafe { &mut *self.slots[index].get() };
+
+        Some((
+            EnetTcpSlotRef {
+                buffers: self,
+                index,
+            },
+            slot,
+        ))
+    }
+}
+
+#[cfg(feature = "matter-tcp")]
+impl Default for EnetMatterTcpBuffers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "matter-tcp")]
+struct EnetTcpSlot {
+    rx: [u8; ENET_MATTER_TCP_RX_BUF_SIZE],
+    tx: [u8; ENET_MATTER_TCP_TX_BUF_SIZE],
+}
+
+#[cfg(feature = "matter-tcp")]
+impl EnetTcpSlot {
+    const fn new() -> Self {
+        Self {
+            rx: [0; ENET_MATTER_TCP_RX_BUF_SIZE],
+            tx: [0; ENET_MATTER_TCP_TX_BUF_SIZE],
+        }
+    }
+
+    fn init() -> impl Init<Self> {
+        init!(Self {
+            rx <- zeroed(),
+            tx <- zeroed(),
+        })
+    }
+}
+
+/// Gives a taken slot of `EnetMatterTcpBuffers` back when dropped.
+#[cfg(feature = "matter-tcp")]
+pub struct EnetTcpSlotRef<'a> {
+    buffers: &'a EnetMatterTcpBuffers,
+    index: usize,
+}
+
+#[cfg(feature = "matter-tcp")]
+impl Drop for EnetTcpSlotRef<'_> {
+    fn drop(&mut self) {
+        self.buffers.taken.lock(|taken| {
+            let mut slots = taken.get();
+            slots[self.index] = false;
+            taken.set(slots);
+        });
+    }
+}
+
+/// Caller-owned Matter TCP frame and slot buffers for [`EnetStack`].
+#[cfg(feature = "matter-tcp")]
+pub type EnetMatterTcpTransportBuffers =
+    TcpNetworkBuffers<{ MAX_RX_BUF_SIZE }, 1, { MAX_RX_BUF_SIZE + FRAME_HDR_LEN }>;
 
 /// A type alias for the `StackResources` type configured with the minimum number of sockets
 /// sufficient for the operation of the Matter stack
@@ -324,12 +464,40 @@ pub fn multicast_mac_for_link_local_ipv6(ip: &Ipv6Addr) -> [u8; 6] {
 pub struct EnetStack<'a> {
     stack: Stack<'a>,
     buffers: &'a EnetMatterUdpBuffers,
+    #[cfg(feature = "matter-tcp")]
+    tcp: Option<EnetTcpStack<'a>>,
 }
 
 impl<'a> EnetStack<'a> {
     /// Create a new `EnetStack` instance
     pub const fn new(stack: Stack<'a>, buffers: &'a EnetMatterUdpBuffers) -> Self {
-        Self { stack, buffers }
+        Self {
+            stack,
+            buffers,
+            #[cfg(feature = "matter-tcp")]
+            tcp: None,
+        }
+    }
+
+    /// Create a new `EnetStack` instance with Matter-over-TCP enabled.
+    #[cfg(feature = "matter-tcp")]
+    pub const fn new_with_tcp(
+        stack: Stack<'a>,
+        buffers: &'a EnetMatterUdpBuffers,
+        tcp_buffers: &'a EnetMatterTcpBuffers,
+        matter_tcp_buffers: &'a EnetMatterTcpTransportBuffers,
+        tcp_config: &'a TcpConfig,
+    ) -> Self {
+        Self {
+            stack,
+            buffers,
+            tcp: Some(EnetTcpStack {
+                stack,
+                tcp_buffers,
+                matter_tcp_buffers,
+                tcp_config,
+            }),
+        }
     }
 
     fn bind_socket(&self, addr: &SocketAddr) -> Result<EnetSocket<'a>, Error> {
@@ -372,6 +540,186 @@ impl<'a> NetStack for EnetStack<'a> {
         _ipv6_interface: u32,
     ) -> impl Future<Output = Result<Self::Socket<'_>, Error>> {
         ready(self.bind_socket(&addr))
+    }
+
+    #[cfg(feature = "matter-tcp")]
+    fn tcp(&self) -> Option<impl NetTcpStack + '_> {
+        self.tcp
+    }
+}
+
+/// An implementation of `NetTcpStack` for the `embassy-net` stack.
+#[cfg(feature = "matter-tcp")]
+#[derive(Copy, Clone)]
+pub struct EnetTcpStack<'a> {
+    stack: Stack<'a>,
+    tcp_buffers: &'a EnetMatterTcpBuffers,
+    matter_tcp_buffers: &'a EnetMatterTcpTransportBuffers,
+    tcp_config: &'a TcpConfig,
+}
+
+#[cfg(feature = "matter-tcp")]
+impl<'a> EnetTcpStack<'a> {
+    /// Create a listener bound to `addr` using this stack's TCP buffers.
+    pub fn listener(&self, addr: SocketAddr) -> EnetTcpListener<'a> {
+        EnetTcpListener::new(self.stack, self.tcp_buffers, addr)
+    }
+}
+
+#[cfg(feature = "matter-tcp")]
+impl<'a> NetTcpStack for EnetTcpStack<'a> {
+    type Tcp<'t>
+        = TcpNetwork<'a, EnetTcpListener<'a>, { MAX_RX_BUF_SIZE }, 1>
+    where
+        Self: 't;
+
+    fn bind(&self, addr: SocketAddr) -> impl Future<Output = Result<Self::Tcp<'_>, Error>> {
+        ready(TcpNetwork::new(
+            self.listener(addr),
+            self.matter_tcp_buffers,
+            self.tcp_config,
+        ))
+    }
+}
+
+/// Owned Matter-over-TCP listener for `embassy-net`.
+#[cfg(feature = "matter-tcp")]
+pub struct EnetTcpListener<'a> {
+    stack: Stack<'a>,
+    buffers: &'a EnetMatterTcpBuffers,
+    endpoint: IpListenEndpoint,
+}
+
+#[cfg(feature = "matter-tcp")]
+impl<'a> EnetTcpListener<'a> {
+    /// Create a new Matter-over-TCP listener bound to `addr`.
+    pub fn new(stack: Stack<'a>, buffers: &'a EnetMatterTcpBuffers, addr: SocketAddr) -> Self {
+        let ip = addr.ip();
+        let endpoint = IpListenEndpoint {
+            addr: (!ip.is_unspecified()).then(|| ip.into()),
+            port: addr.port(),
+        };
+
+        Self {
+            stack,
+            buffers,
+            endpoint,
+        }
+    }
+}
+
+#[cfg(feature = "matter-tcp")]
+impl<'a> TcpNetworkSockets for EnetTcpListener<'a> {
+    type Socket = EnetTcpSocket<'a>;
+
+    async fn accept(&self) -> Result<(SocketAddr, Self::Socket), Error> {
+        let (slot_ref, slot) = self.buffers.take().ok_or(ErrorCode::ResourceExhausted)?;
+
+        let mut socket = TcpSocket::new(self.stack, &mut slot.rx, &mut slot.tx);
+        socket.set_nagle_enabled(false);
+        socket.accept(self.endpoint).await.map_err(to_net_error)?;
+
+        let remote = socket.remote_endpoint().ok_or(ErrorCode::StdIoError)?;
+        let addr = SocketAddr::new(remote.addr.into(), remote.port);
+
+        Ok((
+            addr,
+            EnetTcpSocket {
+                socket,
+                timeout: None,
+                _slot_ref: slot_ref,
+            },
+        ))
+    }
+}
+
+/// The TCP stream socket of `EnetStack`.
+#[cfg(feature = "matter-tcp")]
+pub struct EnetTcpSocket<'a> {
+    socket: TcpSocket<'a>,
+    timeout: Option<Duration>,
+    // Dropped after `socket`, so its buffers are given back only once the socket is gone.
+    _slot_ref: EnetTcpSlotRef<'a>,
+}
+
+/// Maximum time to wait for the peer to acknowledge our FIN during graceful TCP close
+/// before aborting the socket with RST.
+#[cfg(feature = "matter-tcp")]
+const TCP_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[cfg(feature = "matter-tcp")]
+impl EnetTcpSocket<'_> {
+    /// Return the configured inactivity timeout of the underlying `embassy-net` socket.
+    #[doc(hidden)]
+    pub fn timeout(&self) -> Option<Duration> {
+        self.timeout
+    }
+}
+
+#[cfg(feature = "matter-tcp")]
+impl TcpNetworkSocket for EnetTcpSocket<'_> {
+    type Read<'a>
+        = EnetTcpReader<'a>
+    where
+        Self: 'a;
+
+    type Write<'a>
+        = EnetTcpWriter<'a>
+    where
+        Self: 'a;
+
+    fn split(&mut self) -> (Self::Read<'_>, Self::Write<'_>) {
+        let (reader, writer) = self.socket.split();
+        (EnetTcpReader(reader), EnetTcpWriter(writer))
+    }
+
+    async fn close(&mut self) -> Result<(), Error> {
+        self.socket.close();
+        match select(self.socket.flush(), Timer::after(TCP_CLOSE_TIMEOUT)).await {
+            Either::First(res) => res.map_err(to_net_error),
+            Either::Second(()) => {
+                self.socket.abort();
+                Ok(())
+            }
+        }
+    }
+
+    fn set_keep_alive(&mut self, keep_alive: Option<TcpKeepAlive>) -> Result<(), Error> {
+        let duration = keep_alive.map(|k| Duration::from_millis(k.interval.as_millis()));
+        self.socket.set_keep_alive(duration);
+
+        let timeout = keep_alive.and_then(|k| {
+            let interval_ms = k.interval.as_millis();
+            let idle_ms = k.idle.as_millis();
+            let total_ms = idle_ms.checked_add(interval_ms.checked_mul(u64::from(k.retries))?)?;
+            Some(Duration::from_millis(total_ms))
+        });
+        self.socket.set_timeout(timeout);
+        self.timeout = timeout;
+
+        Ok(())
+    }
+}
+
+/// Readable half of `EnetTcpSocket`.
+#[cfg(feature = "matter-tcp")]
+pub struct EnetTcpReader<'a>(TcpReader<'a>);
+
+#[cfg(feature = "matter-tcp")]
+impl TcpNetworkRead for EnetTcpReader<'_> {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Error> {
+        self.0.read(buf).await.map_err(to_net_error)
+    }
+}
+
+/// Writable half of `EnetTcpSocket`.
+#[cfg(feature = "matter-tcp")]
+pub struct EnetTcpWriter<'a>(TcpWriter<'a>);
+
+#[cfg(feature = "matter-tcp")]
+impl TcpNetworkWrite for EnetTcpWriter<'_> {
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, Error> {
+        self.0.write(buf).await.map_err(to_net_error)
     }
 }
 
