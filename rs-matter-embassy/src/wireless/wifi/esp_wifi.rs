@@ -8,10 +8,13 @@ use crate::wireless::esp::EspGattPeripheral;
 
 use super::EmbassyWifi;
 
+pub use esp_radio::wifi::{Protocol, Protocols};
+
 /// The Wifi and BLE radio of the ESP32 family of chips.
 pub struct EspWifiRadio<'d> {
     wifi_peripheral: esp_hal::peripherals::WIFI<'d>,
     bt_peripheral: esp_hal::peripherals::BT<'d>,
+    protocols: Option<Protocols>,
 }
 
 impl<'d> EspWifiRadio<'d> {
@@ -27,7 +30,14 @@ impl<'d> EspWifiRadio<'d> {
         Self {
             wifi_peripheral,
             bt_peripheral,
+            protocols: None,
         }
+    }
+
+    /// Override the 2.4 GHz 802.11 protocol mask used for station scanning and association.
+    pub const fn with_protocols(mut self, protocols: Protocols) -> Self {
+        self.protocols = Some(protocols);
+        self
     }
 }
 
@@ -57,12 +67,13 @@ where
         // with `AuthenticationExpired`, so restore the previous level.
         unwrap!(controller.set_max_tx_power(80));
 
+        let mut wifi = EspWifiController::new(controller);
+        if let Some(protocols) = self.radio.protocols {
+            wifi = wifi.with_protocols(protocols);
+        }
+
         self.runner
-            .run(
-                esp_radio::wifi::Interface::station(),
-                EspWifiController::new(controller),
-                task,
-            )
+            .run(esp_radio::wifi::Interface::station(), wifi, task)
             .await
     }
 }
@@ -100,10 +111,15 @@ where
             self.runner.ble_context(),
         );
 
+        let mut wifi = EspWifiController::new(controller);
+        if let Some(protocols) = self.radio.protocols {
+            wifi = wifi.with_protocols(protocols);
+        }
+
         self.runner
             .run_coex(
                 esp_radio::wifi::Interface::station(),
-                EspWifiController::new(controller),
+                wifi,
                 gatt,
                 task,
             )
