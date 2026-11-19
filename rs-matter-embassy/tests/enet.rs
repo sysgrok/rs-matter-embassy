@@ -1,6 +1,7 @@
 //! Tests for the UDP sockets of `EnetStack`, over two `embassy-net` stacks on a link in RAM
 
 #![cfg(feature = "embassy-net")]
+#![allow(clippy::large_unopt_stack_frames)]
 
 use core::mem::MaybeUninit;
 use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};

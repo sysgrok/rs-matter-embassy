@@ -1,5 +1,7 @@
 //! Tests for `SeqMapKvBlobStore`, on a RAM NOR flash shaped like the default ESP-IDF NVS partition
 
+#![allow(clippy::large_unopt_stack_frames)]
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ops::Range;
