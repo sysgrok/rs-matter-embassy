@@ -34,11 +34,7 @@ impl<'a> EspWifiController<'a> {
     /// # Arguments
     /// - `controller` - The `esp-wifi` Wifi controller instance.
     pub const fn new(controller: WifiController<'a>) -> Self {
-        Self(
-            IfMutex::new(controller),
-            Mutex::new(Cell::new(false)),
-            None,
-        )
+        Self(IfMutex::new(controller), Mutex::new(Cell::new(false)), None)
     }
 
     /// Override the 2.4 GHz 802.11 protocol mask used for station scanning and association.

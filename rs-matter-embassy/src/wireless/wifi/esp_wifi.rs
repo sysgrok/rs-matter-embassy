@@ -117,12 +117,7 @@ where
         }
 
         self.runner
-            .run_coex(
-                esp_radio::wifi::Interface::station(),
-                wifi,
-                gatt,
-                task,
-            )
+            .run_coex(esp_radio::wifi::Interface::station(), wifi, gatt, task)
             .await
     }
 }
