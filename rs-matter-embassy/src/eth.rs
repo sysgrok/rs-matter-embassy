@@ -11,7 +11,7 @@ use embassy_net::driver::{Capabilities, Driver, HardwareAddress, LinkState, RxTo
 use crate::enet::{
     create_enet_stack, EnetMatterStackResources, EnetMatterUdpBuffers, EnetNetif, EnetStack,
 };
-#[cfg(feature = "matter-tcp")]
+#[cfg(feature = "tcp")]
 use crate::enet::{EnetMatterTcpBuffers, EnetMatterTcpTransportBuffers};
 use crate::matter::crypto::Rng;
 use crate::matter::dm::clusters::eth_diag::EthDiag;
@@ -19,7 +19,7 @@ use crate::matter::dm::clusters::gen_diag::InterfaceTypeEnum;
 use crate::matter::dm::networks::eth::EthNetwork;
 use crate::matter::error::Error;
 use crate::matter::transport::network::mdns::builtin::BuiltinMdns;
-#[cfg(feature = "matter-tcp")]
+#[cfg(feature = "tcp")]
 use crate::matter::transport::network::tcp::TcpConfig;
 use crate::matter::utils::futures::{select, Coalesce};
 use crate::matter::utils::init::{init, Init};
@@ -48,13 +48,13 @@ impl<S> EthStackNetwork for EmbassyEthNetwork<S> where S: EthStackNetwork<Contex
 pub struct EmbassyEthernet<'a, D, R> {
     device: D,
     rand: R,
-    #[cfg(feature = "matter-tcp")]
+    #[cfg(feature = "tcp")]
     tcp_config: &'a TcpConfig,
     context: &'a EmbassyNetContext,
 }
 
 impl<'a, D, R> EmbassyEthernet<'a, D, R> {
-    #[cfg(feature = "matter-tcp")]
+    #[cfg(feature = "tcp")]
     const DEFAULT_TCP_CONFIG: TcpConfig = TcpConfig::new();
 
     /// Create a new instance of the `EmbassyEthernet` type.
@@ -75,14 +75,14 @@ impl<'a, D, R> EmbassyEthernet<'a, D, R> {
         Self {
             device,
             rand,
-            #[cfg(feature = "matter-tcp")]
+            #[cfg(feature = "tcp")]
             tcp_config: &Self::DEFAULT_TCP_CONFIG,
             context,
         }
     }
 
     /// Configure the Matter-over-TCP timeouts and keep-alive settings for this interface.
-    #[cfg(feature = "matter-tcp")]
+    #[cfg(feature = "tcp")]
     pub const fn with_tcp_config(mut self, tcp_config: &'a TcpConfig) -> Self {
         self.tcp_config = tcp_config;
         self
@@ -116,7 +116,7 @@ where
             resources,
         );
 
-        #[cfg(feature = "matter-tcp")]
+        #[cfg(feature = "tcp")]
         let net_stack = EnetStack::new_with_tcp(
             stack,
             udp_buffers,
@@ -124,7 +124,7 @@ where
             &self.context.tcp.matter_tcp_buffers,
             self.tcp_config,
         );
-        #[cfg(not(feature = "matter-tcp"))]
+        #[cfg(not(feature = "tcp"))]
         let net_stack = EnetStack::new(stack, udp_buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::Ethernet);
         let eth_diag = EnetEthDiag::new(stack, &counters);
@@ -140,13 +140,13 @@ where
     }
 }
 
-#[cfg(feature = "matter-tcp")]
+#[cfg(feature = "tcp")]
 pub(crate) struct EnetTcpContext {
     pub(crate) tcp_buffers: EnetMatterTcpBuffers,
     pub(crate) matter_tcp_buffers: EnetMatterTcpTransportBuffers,
 }
 
-#[cfg(feature = "matter-tcp")]
+#[cfg(feature = "tcp")]
 impl EnetTcpContext {
     const fn new() -> Self {
         Self {
@@ -163,10 +163,10 @@ impl EnetTcpContext {
     }
 }
 
-#[cfg(not(feature = "matter-tcp"))]
+#[cfg(not(feature = "tcp"))]
 pub(crate) struct EnetTcpContext {}
 
-#[cfg(not(feature = "matter-tcp"))]
+#[cfg(not(feature = "tcp"))]
 impl EnetTcpContext {
     const fn new() -> Self {
         Self {}

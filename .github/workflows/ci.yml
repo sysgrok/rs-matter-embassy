@@ -93,26 +93,35 @@ jobs:
         if: matrix.backend == 'nimble'
         run: cargo clippy --no-default-features --features rustcrypto,nimble-central,log --no-deps -- -Dwarnings
 
+      # Matter over TCP is backend-independent as well, so it is linted on the `trouble` leg only.
+      - name: Build | Clippy - tcp
+        if: matrix.backend == 'trouble'
+        run: cargo clippy --features log,embassy-net,tcp --no-deps -- -Dwarnings
+
+      - name: Build | Clippy - tcp, defmt
+        if: matrix.backend == 'trouble'
+        run: export DEFMT_LOG=trace; cargo clippy --features defmt,embassy-net,tcp --no-deps -- -Dwarnings
+
       - name: Build | Compile
         run: cargo build ${{ matrix.build }}
 
       # The tests are backend-independent; they run on the default (`trouble`) leg.
-      # `embassy-net` turns on the tests of its UDP sockets; `matter-tcp` adds the TCP ones.
+      # `embassy-net` turns on the tests of its UDP sockets; `tcp` adds the TCP ones.
       - name: Build | Clippy - tests
         if: matrix.backend == 'trouble'
         run: cargo clippy --tests --features embassy-net --no-deps -- -Dwarnings
 
-      - name: Build | Clippy - tests (matter-tcp)
+      - name: Build | Clippy - tests (tcp)
         if: matrix.backend == 'trouble'
-        run: cargo clippy --tests --features embassy-net,matter-tcp --no-deps -- -Dwarnings
+        run: cargo clippy --tests --features embassy-net,tcp --no-deps -- -Dwarnings
 
       - name: Test
         if: matrix.backend == 'trouble'
         run: cargo test --features embassy-net
 
-      - name: Test (matter-tcp)
+      - name: Test (tcp)
         if: matrix.backend == 'trouble'
-        run: cargo test --features embassy-net,matter-tcp
+        run: cargo test --features embassy-net,tcp
 
   # One job per (example set x BLE host backend). Previously all of this ran
   # sequentially in a single job; the split is what keeps the wall clock flat

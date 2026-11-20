@@ -13,25 +13,25 @@ use std::sync::Mutex;
 use rs_matter_embassy::enet::net::driver::{
     Capabilities, Driver, HardwareAddress, LinkState, RxToken, TxToken,
 };
-#[cfg(feature = "matter-tcp")]
+#[cfg(feature = "tcp")]
 use rs_matter_embassy::enet::net::tcp::TcpSocket;
 use rs_matter_embassy::enet::net::StackResources;
 use rs_matter_embassy::enet::{
     create_enet_stack, create_link_local_ipv6, EnetMatterUdpBuffers, EnetStack,
 };
-#[cfg(feature = "matter-tcp")]
+#[cfg(feature = "tcp")]
 use rs_matter_embassy::enet::{EnetMatterTcpBuffers, EnetMatterTcpTransportBuffers};
 use rs_matter_embassy::matter::error::{Error, ErrorCode};
 use rs_matter_embassy::matter::transport::network::{
     Address, NetworkMulticast, NetworkReceive, NetworkSend,
 };
-#[cfg(feature = "matter-tcp")]
+#[cfg(feature = "tcp")]
 use rs_matter_embassy::matter::utils::futures::select;
 use rs_matter_embassy::matter::utils::futures::{block_on, select3, Either3};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::timers::{with_timeout, Duration};
 use rs_matter_embassy::stack::net::{NetSocket, NetStack};
-#[cfg(feature = "matter-tcp")]
+#[cfg(feature = "tcp")]
 use rs_matter_embassy::stack::net::{NetTcp, NetTcpStack};
 
 const A_MAC: [u8; 6] = [0x02, 0, 0, 0, 0, 0x01];
@@ -121,7 +121,7 @@ async fn exchange(a: &EnetStack<'_>, b: &EnetStack<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-#[cfg(feature = "matter-tcp")]
+#[cfg(feature = "tcp")]
 #[test]
 fn tcp_sockets_exchange_framed_messages() {
     let a_to_b = Mutex::new(Frames::default());
@@ -160,7 +160,7 @@ fn tcp_sockets_exchange_framed_messages() {
     assert!(matches!(result, Either3::First(Ok(Ok(())))));
 }
 
-#[cfg(feature = "matter-tcp")]
+#[cfg(feature = "tcp")]
 #[test]
 fn tcp_socket_keep_alive_configures_timeout() {
     use core::net::{Ipv6Addr, SocketAddr};
@@ -225,9 +225,9 @@ fn tcp_socket_keep_alive_configures_timeout() {
     assert!(matches!(result, Either3::First(Ok(Ok(())))));
 }
 
-#[cfg(feature = "matter-tcp")]
+#[cfg(feature = "tcp")]
 #[test]
-fn tcp_socket_close_aborts_unresponsive_peer() {
+fn tcp_socket_abort_resets_unresponsive_peer() {
     use core::net::{Ipv6Addr, SocketAddr};
     use rs_matter_embassy::enet::EnetTcpListener;
     use rs_matter_embassy::matter::utils::futures::{select, Either};
@@ -275,17 +275,29 @@ fn tcp_socket_close_aborts_unresponsive_peer() {
         _ => panic!("connect timed out"),
     };
 
-    // Stop polling `b_runner` so the peer never ACKs our FIN.
-    // `close()` must time out and abort instead of hanging forever.
+    // `b_runner` is not polled any more, so the peer never acknowledges the FIN, and
+    // `close()` does not finish
     let result = block_on(select(
-        with_timeout(Duration::from_secs(5), accepted.close()),
+        with_timeout(Duration::from_millis(500), accepted.close()),
+        a_runner.run(),
+    ));
+
+    assert!(matches!(result, Either::First(Err(_))));
+
+    // `abort()` waits only for the RST to go out
+    let result = block_on(select(
+        with_timeout(Duration::from_secs(5), accepted.abort()),
         a_runner.run(),
     ));
 
     assert!(matches!(result, Either::First(Ok(Ok(())))));
+
+    // The RST is on the link, although the socket is dropped right after `abort()`
+    drop(accepted);
+    assert!(a_to_b.lock().unwrap().frames.iter().any(|f| is_tcp_rst(f)));
 }
 
-#[cfg(feature = "matter-tcp")]
+#[cfg(feature = "tcp")]
 async fn exchange_tcp(
     a: &EnetStack<'_>,
     b_stack: rs_matter_embassy::enet::net::Stack<'_>,
@@ -371,6 +383,17 @@ fn udp(addr: Ipv6Addr) -> Address {
 
 fn link_local(mac: &[u8; 6]) -> Ipv6Addr {
     create_link_local_ipv6(mac)
+}
+
+/// Whether `frame` carries a TCP segment over IPv6 with the RST flag set
+#[cfg(feature = "tcp")]
+fn is_tcp_rst(frame: &[u8]) -> bool {
+    const TCP_HDR: usize = 14 + 40;
+
+    frame.len() >= TCP_HDR + 20
+        && frame[12..14] == [0x86, 0xdd]
+        && frame[14 + 6] == 6
+        && frame[TCP_HDR + 13] & 0x04 != 0
 }
 
 /// The frames going one way over a `Link`

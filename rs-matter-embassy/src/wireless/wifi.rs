@@ -11,7 +11,7 @@ use crate::matter::dm::clusters::wifi_diag::{WifiDiag, WirelessDiag};
 use crate::matter::dm::networks::wireless::WifiNetworks;
 use crate::matter::dm::networks::NetChangeNotif;
 use crate::matter::error::Error;
-#[cfg(feature = "matter-tcp")]
+#[cfg(feature = "tcp")]
 use crate::matter::transport::network::tcp::TcpConfig;
 use crate::matter::utils::futures::{select, Coalesce};
 use crate::stack::ble::GattPeripheral;
@@ -160,7 +160,7 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
     }
 
     /// Configure the Matter-over-TCP timeouts and keep-alive settings for this interface.
-    #[cfg(feature = "matter-tcp")]
+    #[cfg(feature = "tcp")]
     pub const fn with_tcp_config(mut self, tcp_config: &'a TcpConfig) -> Self {
         self.runner.tcp_config = tcp_config;
         self
@@ -174,14 +174,14 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
 pub struct EnetWifiRunner<'a, R> {
     rand: R,
     use_ble_random_addr: bool,
-    #[cfg(feature = "matter-tcp")]
+    #[cfg(feature = "tcp")]
     tcp_config: &'a TcpConfig,
     context: &'a EmbassyNetContext,
     ble_context: &'a BtpGattContext,
 }
 
 impl<'a, R> EnetWifiRunner<'a, R> {
-    #[cfg(feature = "matter-tcp")]
+    #[cfg(feature = "tcp")]
     const DEFAULT_TCP_CONFIG: TcpConfig = TcpConfig::new();
 
     /// Create a new instance of the `EnetWifiRunner` type.
@@ -194,7 +194,7 @@ impl<'a, R> EnetWifiRunner<'a, R> {
         Self {
             rand,
             use_ble_random_addr,
-            #[cfg(feature = "matter-tcp")]
+            #[cfg(feature = "tcp")]
             tcp_config: &Self::DEFAULT_TCP_CONFIG,
             context,
             ble_context,
@@ -202,7 +202,7 @@ impl<'a, R> EnetWifiRunner<'a, R> {
     }
 
     /// Configure the Matter-over-TCP timeouts and keep-alive settings for this interface.
-    #[cfg(feature = "matter-tcp")]
+    #[cfg(feature = "tcp")]
     pub const fn with_tcp_config(mut self, tcp_config: &'a TcpConfig) -> Self {
         self.tcp_config = tcp_config;
         self
@@ -243,7 +243,7 @@ where
 
         let (stack, mut runner) = create_enet_stack(driver, u64::from_le_bytes(seed), resources);
 
-        #[cfg(feature = "matter-tcp")]
+        #[cfg(feature = "tcp")]
         let net_stack = EnetStack::new_with_tcp(
             stack,
             udp_buffers,
@@ -251,7 +251,7 @@ where
             &self.context.tcp.matter_tcp_buffers,
             self.tcp_config,
         );
-        #[cfg(not(feature = "matter-tcp"))]
+        #[cfg(not(feature = "tcp"))]
         let net_stack = EnetStack::new(stack, udp_buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
 
@@ -292,7 +292,7 @@ where
 
         let (stack, mut runner) = create_enet_stack(driver, u64::from_le_bytes(seed), resources);
 
-        #[cfg(feature = "matter-tcp")]
+        #[cfg(feature = "tcp")]
         let net_stack = EnetStack::new_with_tcp(
             stack,
             udp_buffers,
@@ -300,7 +300,7 @@ where
             &self.context.tcp.matter_tcp_buffers,
             self.tcp_config,
         );
-        #[cfg(not(feature = "matter-tcp"))]
+        #[cfg(not(feature = "tcp"))]
         let net_stack = EnetStack::new(stack, udp_buffers);
         let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
 
