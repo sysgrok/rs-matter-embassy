@@ -3,8 +3,8 @@ use core::cell::Cell;
 use esp_radio::wifi::scan::ScanConfig;
 use esp_radio::wifi::sta::StationConfig;
 use esp_radio::wifi::{
-    AuthenticationMethod, AuthenticationMethodConfig, Config, ConnectionError, Password, Ssid,
-    WifiController, WifiError,
+    AuthenticationMethod, AuthenticationMethodConfig, Config, ConnectionError, Password, Protocols,
+    Ssid, WifiController, WifiError,
 };
 
 use crate::matter::dm::clusters::net_comm::{
@@ -22,7 +22,11 @@ use crate::matter::utils::sync::IfMutex;
 use crate::matter::utils::timers::{Duration, Timer};
 
 /// An adaptor from the `esp-wifi` Wifi controller API to the `rs-matter` Wifi controller API
-pub struct EspWifiController<'a>(IfMutex<WifiController<'a>>, Mutex<Cell<bool>>);
+pub struct EspWifiController<'a>(
+    IfMutex<WifiController<'a>>,
+    Mutex<Cell<bool>>,
+    Option<Protocols>,
+);
 
 impl<'a> EspWifiController<'a> {
     /// Create a new instance of the `Esp32Controller` type.
@@ -30,7 +34,13 @@ impl<'a> EspWifiController<'a> {
     /// # Arguments
     /// - `controller` - The `esp-wifi` Wifi controller instance.
     pub const fn new(controller: WifiController<'a>) -> Self {
-        Self(IfMutex::new(controller), Mutex::new(Cell::new(false)))
+        Self(IfMutex::new(controller), Mutex::new(Cell::new(false)), None)
+    }
+
+    /// Override the 2.4 GHz 802.11 protocol mask used for station scanning and association.
+    pub const fn with_protocols(mut self, protocols: Protocols) -> Self {
+        self.2 = Some(protocols);
+        self
     }
 
     /// The AP the station is associated with.
@@ -71,7 +81,11 @@ impl NetCtl for EspWifiController<'_> {
         let mut ctl = self.0.lock().await;
 
         // Start Wifi in client mode for scanning
-        ctl.set_config(&Config::Station(StationConfig::default()))
+        let mut sta_config = StationConfig::default();
+        if let Some(protocols) = self.2 {
+            sta_config = sta_config.with_protocols(protocols);
+        }
+        ctl.set_config(&Config::Station(sta_config))
             .map_err(to_ctl_err)?;
         info!("Wifi configuration updated for scanning");
 
@@ -150,12 +164,15 @@ impl NetCtl for EspWifiController<'_> {
             AuthenticationMethodConfig::Wpa2Personal(Password::try_from(*pass).map_err(to_ctl_err)?)
         };
 
-        ctl.set_config(&Config::Station(
-            StationConfig::default()
-                .with_ssid(Ssid::try_from(*ssid).map_err(to_ctl_err)?)
-                .with_authentication(authentication),
-        ))
-        .map_err(to_ctl_err)?;
+        let mut sta_config = StationConfig::default()
+            .with_ssid(Ssid::try_from(*ssid).map_err(to_ctl_err)?)
+            .with_authentication(authentication);
+        if let Some(protocols) = self.2 {
+            sta_config = sta_config.with_protocols(protocols);
+        }
+
+        ctl.set_config(&Config::Station(sta_config))
+            .map_err(to_ctl_err)?;
         info!("Wifi configuration updated");
 
         ctl.connect_async().await.map_err(to_ctl_err2)?;
