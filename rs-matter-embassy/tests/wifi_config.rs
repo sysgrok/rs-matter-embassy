@@ -5,21 +5,11 @@
 use rs_matter_embassy::matter::error::Error;
 use rs_matter_embassy::wifi::scan::resolve_scan_config;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct MockScanConfig {
     ssid: Option<Vec<u8>>,
     active_min_ms: u32,
     channel: Option<u8>,
-}
-
-impl Default for MockScanConfig {
-    fn default() -> Self {
-        Self {
-            ssid: None,
-            active_min_ms: 0,
-            channel: None,
-        }
-    }
 }
 
 #[test]
