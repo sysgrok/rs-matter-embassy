@@ -1,11 +1,13 @@
 use core::cell::Cell;
 
 use esp_radio::wifi::scan::ScanConfig;
-use esp_radio::wifi::sta::StationConfig;
+use esp_radio::wifi::sta::{ScanMethod, StationConfig};
 use esp_radio::wifi::{
     AuthenticationMethod, AuthenticationMethodConfig, Config, ConnectionError, Password, Protocols,
     Ssid, WifiController, WifiError,
 };
+
+use super::scan::{report_scan_results, resolve_scan_config, WifiScanResultConfig};
 
 use crate::matter::dm::clusters::net_comm::{
     NetCtl, NetCtlError, NetworkScanInfo, NetworkType, WiFiBandEnum, WiFiSecurityBitmap,
@@ -21,11 +23,63 @@ use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::sync::IfMutex;
 use crate::matter::utils::timers::{Duration, Timer};
 
+/// Configuration for ESP Wi-Fi scanning, station association, and Matter scan result reporting.
+///
+/// `WifiConfig::default()` preserves the driver's default behavior for every setting.
+#[derive(Clone, Copy, Default)]
+pub struct WifiConfig {
+    /// Optional driver configuration for Matter network discovery scans.
+    pub scan: Option<ScanConfig>,
+    /// Optional station association scan method override (independent of `scan`).
+    pub scan_method: Option<ScanMethod>,
+    /// Optional station association failure retry count override.
+    pub failure_retry_cnt: Option<u8>,
+    /// Post-scan result filtering, deduplication, sorting, and capping options.
+    pub scan_results: WifiScanResultConfig,
+}
+
+impl WifiConfig {
+    /// Create a default `WifiConfig` preserving existing driver behavior.
+    pub const fn new() -> Self {
+        Self {
+            scan: None,
+            scan_method: None,
+            failure_retry_cnt: None,
+            scan_results: WifiScanResultConfig::new(),
+        }
+    }
+
+    /// Set the driver `ScanConfig` used for Matter network discovery scans.
+    pub const fn with_scan(mut self, scan: ScanConfig) -> Self {
+        self.scan = Some(scan);
+        self
+    }
+
+    /// Set the station association `ScanMethod` override.
+    pub const fn with_scan_method(mut self, scan_method: ScanMethod) -> Self {
+        self.scan_method = Some(scan_method);
+        self
+    }
+
+    /// Set the station association failure retry count override.
+    pub const fn with_failure_retry_cnt(mut self, failure_retry_cnt: u8) -> Self {
+        self.failure_retry_cnt = Some(failure_retry_cnt);
+        self
+    }
+
+    /// Set the post-scan result processing configuration.
+    pub const fn with_scan_results(mut self, scan_results: WifiScanResultConfig) -> Self {
+        self.scan_results = scan_results;
+        self
+    }
+}
+
 /// An adaptor from the `esp-wifi` Wifi controller API to the `rs-matter` Wifi controller API
 pub struct EspWifiController<'a>(
     IfMutex<WifiController<'a>>,
     Mutex<Cell<bool>>,
     Option<Protocols>,
+    Option<WifiConfig>,
 );
 
 impl<'a> EspWifiController<'a> {
@@ -34,12 +88,23 @@ impl<'a> EspWifiController<'a> {
     /// # Arguments
     /// - `controller` - The `esp-wifi` Wifi controller instance.
     pub const fn new(controller: WifiController<'a>) -> Self {
-        Self(IfMutex::new(controller), Mutex::new(Cell::new(false)), None)
+        Self(
+            IfMutex::new(controller),
+            Mutex::new(Cell::new(false)),
+            None,
+            None,
+        )
     }
 
     /// Override the 2.4 GHz 802.11 protocol mask used for station scanning and association.
     pub const fn with_protocols(mut self, protocols: Protocols) -> Self {
         self.2 = Some(protocols);
+        self
+    }
+
+    /// Supply the aggregate ESP Wi-Fi configuration for scanning, association, and result handling.
+    pub const fn with_wifi_config(mut self, wifi_config: WifiConfig) -> Self {
+        self.3 = Some(wifi_config);
         self
     }
 
@@ -89,43 +154,59 @@ impl NetCtl for EspWifiController<'_> {
             .map_err(to_ctl_err)?;
         info!("Wifi configuration updated for scanning");
 
-        let mut scan_config = ScanConfig::default();
-        if let Some(network) = network.filter(|n| !n.is_empty()) {
-            scan_config = scan_config.with_ssid(Ssid::try_from(network).map_err(to_ctl_err)?);
-        }
+        let scan_config = resolve_scan_config(
+            self.3.and_then(|c| c.scan),
+            network,
+            ScanConfig::default,
+            |cfg, ssid| {
+                Ok::<_, NetCtlError>(cfg.with_ssid(Ssid::try_from(ssid).map_err(to_ctl_err)?))
+            },
+        )?;
 
-        let aps = ctl.scan_async(&scan_config).await.map_err(to_err)?;
+        let mut aps = ctl.scan_async(&scan_config).await.map_err(to_err)?;
+        let result_config = self.3.map(|c| c.scan_results).unwrap_or_default();
 
-        info!("Wifi scan complete, reporting {} results", aps.len());
+        info!("Wifi scan complete, found {} raw results", aps.len());
 
-        for ap in aps {
-            f(&NetworkScanInfo::Wifi {
-                ssid: ap.ssid.as_str().as_bytes(),
-                bssid: &ap.bssid,
-                channel: ap.channel as _,
-                rssi: ap.signal_strength,
-                band: WiFiBandEnum::V2G4, // TODO: Once c5 is out we can no longer hard-code this
-                security: match ap.auth_method {
-                    Some(AuthenticationMethod::None) => WiFiSecurityBitmap::UNENCRYPTED,
-                    Some(AuthenticationMethod::Wep) => WiFiSecurityBitmap::WEP,
-                    Some(AuthenticationMethod::Wpa) => WiFiSecurityBitmap::WPA_PERSONAL,
-                    Some(AuthenticationMethod::Wpa2Personal) => WiFiSecurityBitmap::WPA_2_PERSONAL,
-                    Some(AuthenticationMethod::WpaWpa2Personal) => {
-                        WiFiSecurityBitmap::WPA_PERSONAL | WiFiSecurityBitmap::WPA_2_PERSONAL
-                    }
-                    Some(AuthenticationMethod::Wpa2Wpa3Personal) => {
-                        WiFiSecurityBitmap::WPA_2_PERSONAL | WiFiSecurityBitmap::WPA_3_PERSONAL
-                    }
-                    Some(AuthenticationMethod::Wpa3Personal) => WiFiSecurityBitmap::WPA_3_PERSONAL,
-                    Some(AuthenticationMethod::Wpa2Enterprise) => {
-                        WiFiSecurityBitmap::WPA_2_PERSONAL
-                    }
-                    _ => WiFiSecurityBitmap::WPA_2_PERSONAL, // Best guess
-                },
-            })?;
-        }
+        let count = report_scan_results(
+            &mut aps,
+            network,
+            &result_config,
+            |ap| ap.ssid.as_str(),
+            |ap| ap.signal_strength,
+            |ap, _idx| {
+                f(&NetworkScanInfo::Wifi {
+                    ssid: ap.ssid.as_str().as_bytes(),
+                    bssid: &ap.bssid,
+                    channel: ap.channel as _,
+                    rssi: ap.signal_strength,
+                    band: WiFiBandEnum::V2G4, // TODO: Once c5 is out we can no longer hard-code this
+                    security: match ap.auth_method {
+                        Some(AuthenticationMethod::None) => WiFiSecurityBitmap::UNENCRYPTED,
+                        Some(AuthenticationMethod::Wep) => WiFiSecurityBitmap::WEP,
+                        Some(AuthenticationMethod::Wpa) => WiFiSecurityBitmap::WPA_PERSONAL,
+                        Some(AuthenticationMethod::Wpa2Personal) => {
+                            WiFiSecurityBitmap::WPA_2_PERSONAL
+                        }
+                        Some(AuthenticationMethod::WpaWpa2Personal) => {
+                            WiFiSecurityBitmap::WPA_PERSONAL | WiFiSecurityBitmap::WPA_2_PERSONAL
+                        }
+                        Some(AuthenticationMethod::Wpa2Wpa3Personal) => {
+                            WiFiSecurityBitmap::WPA_2_PERSONAL | WiFiSecurityBitmap::WPA_3_PERSONAL
+                        }
+                        Some(AuthenticationMethod::Wpa3Personal) => {
+                            WiFiSecurityBitmap::WPA_3_PERSONAL
+                        }
+                        Some(AuthenticationMethod::Wpa2Enterprise) => {
+                            WiFiSecurityBitmap::WPA_2_PERSONAL
+                        }
+                        _ => WiFiSecurityBitmap::WPA_2_PERSONAL, // Best guess
+                    },
+                })
+            },
+        )?;
 
-        info!("Wifi scan complete");
+        info!("Wifi scan complete, reported {} results", count);
 
         Ok(())
     }
@@ -169,6 +250,14 @@ impl NetCtl for EspWifiController<'_> {
             .with_authentication(authentication);
         if let Some(protocols) = self.2 {
             sta_config = sta_config.with_protocols(protocols);
+        }
+        if let Some(wifi_config) = self.3 {
+            if let Some(scan_method) = wifi_config.scan_method {
+                sta_config = sta_config.with_scan_method(scan_method);
+            }
+            if let Some(failure_retry_cnt) = wifi_config.failure_retry_cnt {
+                sta_config = sta_config.with_failure_retry_cnt(failure_retry_cnt);
+            }
         }
 
         ctl.set_config(&Config::Station(sta_config))

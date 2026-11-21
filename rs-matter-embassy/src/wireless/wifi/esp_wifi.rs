@@ -8,6 +8,10 @@ use crate::wireless::esp::EspGattPeripheral;
 
 use super::EmbassyWifi;
 
+pub use crate::wifi::esp::WifiConfig;
+pub use crate::wifi::scan::WifiScanResultConfig;
+pub use esp_radio::wifi::scan::{ScanConfig, ScanTypeConfig};
+pub use esp_radio::wifi::sta::ScanMethod;
 pub use esp_radio::wifi::{Protocol, Protocols};
 
 /// The Wifi and BLE radio of the ESP32 family of chips.
@@ -15,6 +19,7 @@ pub struct EspWifiRadio<'d> {
     wifi_peripheral: esp_hal::peripherals::WIFI<'d>,
     bt_peripheral: esp_hal::peripherals::BT<'d>,
     protocols: Option<Protocols>,
+    wifi_config: Option<WifiConfig>,
 }
 
 impl<'d> EspWifiRadio<'d> {
@@ -31,6 +36,7 @@ impl<'d> EspWifiRadio<'d> {
             wifi_peripheral,
             bt_peripheral,
             protocols: None,
+            wifi_config: None,
         }
     }
 
@@ -38,6 +44,27 @@ impl<'d> EspWifiRadio<'d> {
     pub const fn with_protocols(mut self, protocols: Protocols) -> Self {
         self.protocols = Some(protocols);
         self
+    }
+
+    /// Supply the aggregate ESP Wi-Fi configuration for scanning, association, and result handling.
+    pub const fn with_wifi_config(mut self, wifi_config: WifiConfig) -> Self {
+        self.wifi_config = Some(wifi_config);
+        self
+    }
+
+    fn configure_controller<'a>(
+        controller: esp_radio::wifi::WifiController<'a>,
+        protocols: Option<Protocols>,
+        wifi_config: Option<WifiConfig>,
+    ) -> EspWifiController<'a> {
+        let mut wifi = EspWifiController::new(controller);
+        if let Some(protocols) = protocols {
+            wifi = wifi.with_protocols(protocols);
+        }
+        if let Some(wifi_config) = wifi_config {
+            wifi = wifi.with_wifi_config(wifi_config);
+        }
+        wifi
     }
 }
 
@@ -67,10 +94,11 @@ where
         // with `AuthenticationExpired`, so restore the previous level.
         unwrap!(controller.set_max_tx_power(80));
 
-        let mut wifi = EspWifiController::new(controller);
-        if let Some(protocols) = self.radio.protocols {
-            wifi = wifi.with_protocols(protocols);
-        }
+        let wifi = EspWifiRadio::configure_controller(
+            controller,
+            self.radio.protocols,
+            self.radio.wifi_config,
+        );
 
         self.runner
             .run(esp_radio::wifi::Interface::station(), wifi, task)
@@ -111,10 +139,11 @@ where
             self.runner.ble_context(),
         );
 
-        let mut wifi = EspWifiController::new(controller);
-        if let Some(protocols) = self.radio.protocols {
-            wifi = wifi.with_protocols(protocols);
-        }
+        let wifi = EspWifiRadio::configure_controller(
+            controller,
+            self.radio.protocols,
+            self.radio.wifi_config,
+        );
 
         self.runner
             .run_coex(esp_radio::wifi::Interface::station(), wifi, gatt, task)

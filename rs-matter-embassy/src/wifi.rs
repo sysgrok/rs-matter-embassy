@@ -2,3 +2,4 @@
 pub mod esp;
 #[cfg(feature = "rp")]
 pub mod rp;
+pub mod scan;
