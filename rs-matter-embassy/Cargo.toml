@@ -19,6 +19,13 @@ harness = false
 [features]
 default = ["rustcrypto", "trouble"]
 
+# Compatibility shim for embassy-net / smoltcp on Wi-Fi APs that only snoop MLDv1.
+#
+# `mld-v1-compat`: rewrites smoltcp's outgoing MLDv2 Reports into an MLDv1
+# Membership Report on the TX path, so APs that only snoop MLDv1 learn that
+# the station joined its solicited-node and mDNS multicast groups.
+mld-v1-compat = []
+
 # Sizing
 
 # Additional `embassy-net` sockets beyond the Matter, DHCP, and DNS sockets.

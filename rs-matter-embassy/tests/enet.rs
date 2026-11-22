@@ -16,6 +16,8 @@ use rs_matter_embassy::enet::net::driver::{
 #[cfg(feature = "tcp")]
 use rs_matter_embassy::enet::net::tcp::TcpSocket;
 use rs_matter_embassy::enet::net::StackResources;
+#[cfg(feature = "mld-v1-compat")]
+use rs_matter_embassy::enet::Mldv1ConvertingDriver;
 use rs_matter_embassy::enet::{
     create_enet_stack, create_link_local_ipv6, EnetMatterUdpBuffers, EnetStack,
 };
@@ -487,5 +489,194 @@ impl TxToken for Tx<'_> {
         }
 
         result
+    }
+}
+
+#[cfg(feature = "mld-v1-compat")]
+fn noop_waker() -> Waker {
+    use core::task::{RawWaker, RawWakerVTable};
+    unsafe fn clone(_: *const ()) -> RawWaker {
+        RawWaker::new(core::ptr::null(), &VTABLE)
+    }
+    unsafe fn wake(_: *const ()) {}
+    unsafe fn wake_by_ref(_: *const ()) {}
+    unsafe fn drop(_: *const ()) {}
+    static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
+    unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VTABLE)) }
+}
+
+#[cfg(feature = "mld-v1-compat")]
+fn icmpv6_checksum_over_ipv6_frame(frame: &[u8], icmp_offset: usize, icmp_len: usize) -> u16 {
+    let mut sum: u32 = 0;
+    let mut i = 22;
+    while i < 54 {
+        sum += u16::from_be_bytes([frame[i], frame[i + 1]]) as u32;
+        i += 2;
+    }
+    sum += icmp_len as u32;
+    sum += 58u32; // Next Header = ICMPv6
+    let icmp = &frame[icmp_offset..icmp_offset + icmp_len];
+    let mut j = 0;
+    while j < icmp.len() {
+        if j != 2 {
+            let hi = icmp[j];
+            let lo = if j + 1 < icmp.len() { icmp[j + 1] } else { 0 };
+            sum += u16::from_be_bytes([hi, lo]) as u32;
+        }
+        j += 2;
+    }
+    while (sum >> 16) != 0 {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    !(sum as u16)
+}
+
+#[cfg(feature = "mld-v1-compat")]
+mod mldv1_compat_tests {
+    use super::*;
+
+    fn build_mldv2_join_frame(src_mac: [u8; 6], src_ip: [u8; 16], group: [u8; 16]) -> [u8; 90] {
+        let mut f = [0u8; 90];
+        // dst MAC = 33:33:00:00:00:16 (all-MLDv2-routers)
+        f[0..6].copy_from_slice(&[0x33, 0x33, 0x00, 0x00, 0x00, 0x16]);
+        f[6..12].copy_from_slice(&src_mac);
+        f[12..14].copy_from_slice(&[0x86, 0xDD]);
+        // IPv6 header
+        f[14] = 0x60;
+        f[18..20].copy_from_slice(&36u16.to_be_bytes()); // HbH(8) + MLDv2(28)
+        f[20] = 0; // Hop-by-Hop
+        f[21] = 1; // Hop Limit
+        f[22..38].copy_from_slice(&src_ip);
+        f[38..54].copy_from_slice(&[0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x16]);
+        // Hop-by-Hop Router Alert
+        f[54] = 58; // ICMPv6
+        f[55] = 0;
+        f[56..62].copy_from_slice(&[5, 2, 0, 0, 1, 0]);
+        // ICMPv6 MLDv2 Membership Report (type 143)
+        f[62] = 143;
+        f[68..70].copy_from_slice(&1u16.to_be_bytes()); // nr_records = 1
+        f[70] = 4; // CHANGE_TO_EXCLUDE_MODE
+        f[74..90].copy_from_slice(&group);
+        f
+    }
+
+    #[test]
+    fn mldv1_driver_rewrites_mldv2_join_with_valid_checksum() {
+        let tx = Mutex::new(Frames::default());
+        let rx = Mutex::new(Frames::default());
+        let mut driver = Mldv1ConvertingDriver::new(Link::new(A_MAC, &tx, &rx));
+
+        let src_ip = create_link_local_ipv6(&A_MAC).octets();
+        let group = [
+            0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0xa6, 0x78, 0x44,
+        ];
+        let input = build_mldv2_join_frame(A_MAC, src_ip, group);
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let tok = driver.transmit(&mut cx).expect("tx token");
+        tok.consume(input.len(), |buf| buf.copy_from_slice(&input));
+
+        let out = tx.lock().unwrap().frames.pop_front().expect("tx frame");
+        assert_eq!(out[0..6], [0x33, 0x33, 0xff, 0xa6, 0x78, 0x44]);
+        assert_eq!(u16::from_be_bytes([out[18], out[19]]), 32); // HbH(8) + MLDv1(24)
+        assert_eq!(out[38..54], group);
+        assert_eq!(out[62], 131); // MLDv1 Membership Report
+        assert_eq!(out[70..86], group);
+
+        let written_cksum = u16::from_be_bytes([out[64], out[65]]);
+        let expected_cksum = icmpv6_checksum_over_ipv6_frame(&out, 62, 24);
+        assert_eq!(written_cksum, expected_cksum);
+        assert_ne!(written_cksum, 0);
+    }
+
+    #[test]
+    fn mldv1_driver_passes_non_mld_frames_untouched() {
+        let tx = Mutex::new(Frames::default());
+        let rx = Mutex::new(Frames::default());
+        let mut driver = Mldv1ConvertingDriver::new(Link::new(A_MAC, &tx, &rx));
+
+        let src_ip = create_link_local_ipv6(&A_MAC).octets();
+        let group = [
+            0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0xa6, 0x78, 0x44,
+        ];
+        let base = build_mldv2_join_frame(A_MAC, src_ip, group);
+
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        // Exercise passthrough Driver trait methods (link_state, capabilities, hardware_address, receive).
+        assert!(driver.link_state(&mut cx) == LinkState::Up);
+        assert_eq!(driver.capabilities().max_transmission_unit, 1514);
+        assert_eq!(driver.hardware_address(), HardwareAddress::Ethernet(A_MAC));
+        rx.lock().unwrap().frames.push_back(vec![1, 2, 3]);
+        let (rx_tok, tx_tok) = driver.receive(&mut cx).expect("rx+tx pair");
+        rx_tok.consume(|b| assert_eq!(b, &[1, 2, 3]));
+        tx_tok.consume(10, |b| b.fill(0xaa)); // len < 90 branch
+        assert_eq!(
+            tx.lock().unwrap().frames.pop_front().unwrap(),
+            vec![0xaa; 10]
+        );
+
+        // Also rewrite MODE_IS_EXCLUDE (record type = 2).
+        let mut mode_is_exclude = base;
+        mode_is_exclude[70] = 2;
+        driver
+            .transmit(&mut cx)
+            .unwrap()
+            .consume(90, |b| b.copy_from_slice(&mode_is_exclude));
+        let out = tx.lock().unwrap().frames.pop_front().unwrap();
+        assert_eq!(out[62], 131);
+
+        // Every guard branch in convert_mldv2_to_mldv1 must leave the frame untouched.
+        let mut cases: Vec<[u8; 90]> = Vec::new();
+
+        // 1. buf[12] != 0x86 (IPv4 0x0800)
+        let mut c = base;
+        c[12] = 0x08;
+        c[13] = 0x00;
+        cases.push(c);
+
+        // 2. buf[12] == 0x86 && buf[13] != 0xDD
+        let mut c = base;
+        c[13] = 0x00;
+        cases.push(c);
+
+        // 3. buf[20] != 0 (Next Header != Hop-by-Hop)
+        let mut c = base;
+        c[20] = 17;
+        cases.push(c);
+
+        // 4. buf[54] != 58 (HbH Next Header != ICMPv6)
+        let mut c = base;
+        c[54] = 17;
+        cases.push(c);
+
+        // 5. buf[62] != 143 (ICMPv6 type != MLDv2 Report)
+        let mut c = base;
+        c[62] = 130;
+        cases.push(c);
+
+        // 6. nr_records != 1
+        let mut c = base;
+        c[68..70].copy_from_slice(&2u16.to_be_bytes());
+        cases.push(c);
+
+        // 7. num_srcs != 0
+        let mut c = base;
+        c[72..74].copy_from_slice(&1u16.to_be_bytes());
+        cases.push(c);
+
+        // 8. record_type != 2 && record_type != 4 (e.g. CHANGE_TO_INCLUDE = 3)
+        let mut c = base;
+        c[70] = 3;
+        cases.push(c);
+
+        for input in cases {
+            let tok = driver.transmit(&mut cx).expect("tx token");
+            tok.consume(input.len(), |buf| buf.copy_from_slice(&input));
+            let out = tx.lock().unwrap().frames.pop_front().expect("tx frame");
+            assert_eq!(out.as_slice(), &input);
+        }
     }
 }

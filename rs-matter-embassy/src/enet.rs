@@ -398,13 +398,20 @@ impl NetChangeNotif for EnetNetif<'_> {
     }
 }
 
+/// Driver type returned by [`create_enet_stack`] after applying any enabled
+/// IPv6 compatibility shim (`mld-v1-compat`).
+///
+/// When `mld-v1-compat` is disabled, this is a zero-cost alias for `D`.
+pub type EnetDriverChain<D> = mld_v1::Driver<D>;
+
 /// Create an `embassy-net` stack suitable for the `rs-matter` stack
 pub fn create_enet_stack<const N: usize, D: Driver>(
     driver: D,
     seed: u64,
     resources: &mut StackResources<N>,
-) -> (Stack<'_>, Runner<'_, D>) {
+) -> (Stack<'_>, Runner<'_, EnetDriverChain<D>>) {
     let config = create_enet_config(&driver);
+    let driver = mld_v1::wrap(driver);
 
     net::new(driver, config, resources, seed)
 }
@@ -455,6 +462,10 @@ pub fn multicast_mac_for_link_local_ipv6(ip: &Ipv6Addr) -> [u8; 6] {
 
     mac
 }
+
+mod mld_v1;
+#[cfg(feature = "mld-v1-compat")]
+pub use mld_v1::{Mldv1ConvertingDriver, Mldv1ConvertingTxToken};
 
 /// An implementation of `NetStack` for the `embassy-net` stack
 #[derive(Copy, Clone)]
