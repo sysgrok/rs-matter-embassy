@@ -214,7 +214,7 @@ async fn main(_s: Spawner) {
     #[cfg(feature = "nrf52840")]
     let trng = embassy_nrf::rng::Rng::new_blocking(p.RNG);
     #[cfg(feature = "nrf54l15")]
-    let trng = embassy_nrf::cracen::Cracen::new_blocking(p.CRACEN);
+    let trng = embassy_nrf::crypto::rng::Rng::new_blocking(p.CRYPTO_RNG);
 
     // Create the crypto provider, using the NRF hardware TRNG as the source of randomness for a reseeding CSPRNG.
     let crypto = default_crypto(reseeding_csprng(trng, 1000).unwrap(), DAC_PRIVKEY);

@@ -25,6 +25,10 @@ use esp_radio::wifi::{AuthenticationMethodConfig, Config, WifiController};
 
 use log::info;
 
+use static_cell::ConstStaticCell;
+
+use rs_matter_embassy::enet::net::StaticPool;
+use rs_matter_embassy::enet::EnetLegacyDriver;
 use rs_matter_embassy::eth::{EmbassyEthNetwork, EmbassyEthernet};
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
@@ -48,6 +52,9 @@ use rs_matter_embassy::utils::futures::IntoFaillble;
 use tinyrlibc as _;
 
 extern crate alloc;
+
+/// The packet buffers of the `embassy-net` stack
+static POOL: ConstStaticCell<StaticPool> = ConstStaticCell::new(StaticPool::new());
 
 macro_rules! mk_static {
     ($t:ty) => {{
@@ -186,7 +193,12 @@ async fn main(_s: Spawner) {
     // Using `pin!` is completely optional, but reduces the size of the final future
     let mut matter = pin!(stack.run_eth(
         // The Matter stack needs the ethernet inteface to run
-        EmbassyEthernet::new(station, weak_rand, stack,),
+        EmbassyEthernet::new(
+            EnetLegacyDriver::new(station),
+            POOL.take(),
+            weak_rand,
+            stack
+        ),
         // The crypto provider
         &crypto,
         // Our `AsyncHandler` + `AsyncMetadata` impl

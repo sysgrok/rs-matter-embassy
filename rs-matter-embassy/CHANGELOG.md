@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [?.??.?] - ????-??-??
+* Breaking: on `embassy-net` from GIT, which runs on `xarxa` instead of `smoltcp`
+* nRF54L: `embassy-time` runs on GRTC CC 0, as MPSL takes CC 7 to 11
 * New: Matter over TCP with `embassy-net`, behind the `tcp` feature (`EnetStack::new_with_tcp`, `with_tcp_config`)
 * New: `WifiConfig` and `with_wifi_config` on `EspWifiRadio` and `EspWifiController`, to configure Matter scan settings, 802.11 protocols (e.g. 802.11ax on ESP32-C6), and station association options
 * Fix: with the `nimble` backend, the BLE peripheral stops advertising and disconnects when the commissioning window closes; before, a controller that outlives the peripheral's run (`ControllerGattPeripheral`, e.g. the Pico W) kept advertising. The `trouble` backend still has this problem (TODO)

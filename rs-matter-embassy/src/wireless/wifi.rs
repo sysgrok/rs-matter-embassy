@@ -2,8 +2,11 @@ use core::marker::PhantomData;
 use core::pin::pin;
 
 use crate::ble::{BtpGattContext, Controller};
-use crate::enet::{create_enet_stack, EnetNetif, EnetStack};
-use crate::eth::EmbassyNetContext;
+use embassy_net::driver::Driver;
+use embassy_net::Pool;
+
+use crate::enet::{create_enet_stack, EnetNetif, EnetPool, EnetStack};
+use crate::eth::{remove_iface, EmbassyNetContext};
 use crate::matter::crypto::Rng;
 use crate::matter::dm::clusters::gen_diag::InterfaceTypeEnum;
 use crate::matter::dm::clusters::net_comm::NetCtl;
@@ -54,11 +57,12 @@ impl<D, C, B> PreexistingWifiRadio<D, C, B> {
     }
 }
 
-impl<D, C, B, R> WifiDriver for EmbassyWifi<'_, PreexistingWifiRadio<D, C, B>, R>
+impl<D, C, B, R, P> WifiDriver for EmbassyWifi<'_, PreexistingWifiRadio<D, C, B>, R, P>
 where
-    D: embassy_net::driver::Driver,
+    D: Driver,
     C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
     R: Rng + Copy,
+    P: Pool,
 {
     // The operational task receives `&self.radio.1` (a `&C`), so the chain net-ctl type
     // is `&'a C`. `&C` satisfies the diag/net-ctl bounds via the blanket impls.
@@ -77,12 +81,13 @@ where
     }
 }
 
-impl<D, C, B, R> WifiCoexDriver for EmbassyWifi<'_, PreexistingWifiRadio<D, C, B>, R>
+impl<D, C, B, R, P> WifiCoexDriver for EmbassyWifi<'_, PreexistingWifiRadio<D, C, B>, R, P>
 where
-    D: embassy_net::driver::Driver,
+    D: Driver,
     C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
     B: Controller,
     R: Rng + Copy,
+    P: Pool,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -100,10 +105,11 @@ where
     }
 }
 
-impl<D, C, B, R> GattDriver for EmbassyWifi<'_, PreexistingWifiRadio<D, C, B>, R>
+impl<D, C, B, R, P> GattDriver for EmbassyWifi<'_, PreexistingWifiRadio<D, C, B>, R, P>
 where
     B: Controller,
     R: Rng + Copy,
+    P: Pool,
 {
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
@@ -118,16 +124,28 @@ where
     }
 }
 
-/// The Wifi drivers of the stack over `embassy-net`, one for each of the radios `T`.
-pub struct EmbassyWifi<'a, T, R> {
+/// The Wifi drivers of the stack over `embassy-net`, one for each of the radios `T`, with the
+/// packet buffers of the `embassy-net` stack coming from the pool `P`.
+pub struct EmbassyWifi<'a, T, R, P: 'static> {
     radio: T,
-    runner: EnetWifiRunner<'a, R>,
+    runner: EnetWifiRunner<'a, R, P>,
 }
 
-impl<'a, T, R> EmbassyWifi<'a, T, R> {
+impl<'a, T, R, P> EmbassyWifi<'a, T, R, P>
+where
+    P: Pool,
+{
     /// Create a new instance of the `EmbassyWifi` type.
+    ///
+    /// # Arguments
+    /// - `radio` - The Wifi radio
+    /// - `pool` - The packet pool of the `embassy-net` stack; see [`EnetPool`]
+    /// - `rand` - The random number generator
+    /// - `use_ble_random_addr` - Whether to use a random BLE address
+    /// - `stack` - The Matter stack
     pub fn new<const B: usize, S, E>(
         radio: T,
+        pool: &'static mut P,
         rand: R,
         use_ble_random_addr: bool,
         stack: &'a MatterStack<'a, B, S, E>,
@@ -138,6 +156,7 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
     {
         Self::wrap(
             radio,
+            pool,
             rand,
             use_ble_random_addr,
             stack.context().net_context(),
@@ -148,6 +167,7 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
     /// Wrap the `EmbassyWifi` type around a Wifi radio and a network context.
     pub const fn wrap(
         radio: T,
+        pool: &'static mut P,
         rand: R,
         use_ble_random_addr: bool,
         context: &'a EmbassyNetContext,
@@ -155,7 +175,7 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
     ) -> Self {
         Self {
             radio,
-            runner: EnetWifiRunner::new(rand, use_ble_random_addr, context, ble_context),
+            runner: EnetWifiRunner::new(pool, rand, use_ble_random_addr, context, ble_context),
         }
     }
 
@@ -171,7 +191,8 @@ impl<'a, T, R> EmbassyWifi<'a, T, R> {
 /// the stack over an `embassy-net` driver.
 ///
 /// For implementing the Wifi drivers of the stack for a radio this crate does not know.
-pub struct EnetWifiRunner<'a, R> {
+pub struct EnetWifiRunner<'a, R, P: 'static> {
+    pool: EnetPool<P>,
     rand: R,
     use_ble_random_addr: bool,
     #[cfg(feature = "tcp")]
@@ -180,18 +201,23 @@ pub struct EnetWifiRunner<'a, R> {
     ble_context: &'a BtpGattContext,
 }
 
-impl<'a, R> EnetWifiRunner<'a, R> {
+impl<'a, R, P> EnetWifiRunner<'a, R, P>
+where
+    P: Pool,
+{
     #[cfg(feature = "tcp")]
     const DEFAULT_TCP_CONFIG: TcpConfig = TcpConfig::new();
 
     /// Create a new instance of the `EnetWifiRunner` type.
     pub const fn new(
+        pool: &'static mut P,
         rand: R,
         use_ble_random_addr: bool,
         context: &'a EmbassyNetContext,
         ble_context: &'a BtpGattContext,
     ) -> Self {
         Self {
+            pool: EnetPool::new(pool),
             rand,
             use_ble_random_addr,
             #[cfg(feature = "tcp")]
@@ -209,9 +235,10 @@ impl<'a, R> EnetWifiRunner<'a, R> {
     }
 }
 
-impl<'a, R> EnetWifiRunner<'a, R>
+impl<'a, R, P> EnetWifiRunner<'a, R, P>
 where
     R: Rng + Copy,
+    P: Pool,
 {
     /// Return the random number generator for the BLE address, if a random one should be used.
     pub fn ble_rand(&self) -> Option<R> {
@@ -224,36 +251,44 @@ where
     }
 
     /// Run a Wifi task over the given driver and network controller.
-    pub async fn run<D, C, A>(&self, driver: D, net_ctl: C, mut task: A) -> Result<(), Error>
+    pub async fn run<D, C, A>(
+        &mut self,
+        mut driver: D,
+        net_ctl: C,
+        mut task: A,
+    ) -> Result<(), Error>
     where
-        D: embassy_net::driver::Driver,
+        D: Driver,
         C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
         A: WifiTask,
     {
-        let mut resources = self.context.resources.lock().await;
+        let mut storage = self.context.storage.lock().await;
         let mut mdns = self.context.mdns.lock().await;
 
-        let resources = &mut *resources;
         let mdns = &mut *mdns;
-        let udp_buffers = &self.context.udp_buffers;
 
         let mut rand = self.rand;
         let mut seed = [0; core::mem::size_of::<u64>()];
         rand.fill_bytes(&mut seed);
 
-        let (stack, mut runner) = create_enet_stack(driver, u64::from_le_bytes(seed), resources);
+        let (iface, mut runner) = create_enet_stack(
+            &mut driver,
+            &mut self.pool,
+            &mut storage,
+            u64::from_le_bytes(seed),
+        )?;
+        let _iface_guard = scopeguard::guard(iface, remove_iface);
 
         #[cfg(feature = "tcp")]
         let net_stack = EnetStack::new_with_tcp(
-            stack,
-            udp_buffers,
+            iface,
             &self.context.tcp.tcp_buffers,
             &self.context.tcp.matter_tcp_buffers,
             self.tcp_config,
         );
         #[cfg(not(feature = "tcp"))]
-        let net_stack = EnetStack::new(stack, udp_buffers);
-        let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
+        let net_stack = EnetStack::new(iface);
+        let netif = EnetNetif::new(iface, InterfaceTypeEnum::WiFi);
 
         let mut main = pin!(task.run(&net_stack, &netif, &net_ctl, mdns));
         let mut run = pin!(async {
@@ -268,41 +303,44 @@ where
     /// Run a Wifi task with concurrent commissioning over the given driver, network
     /// controller and GATT peripheral.
     pub async fn run_coex<D, C, G, A>(
-        &self,
-        driver: D,
+        &mut self,
+        mut driver: D,
         net_ctl: C,
         mut gatt: G,
         mut task: A,
     ) -> Result<(), Error>
     where
-        D: embassy_net::driver::Driver,
+        D: Driver,
         C: NetCtl + NetChangeNotif + WirelessDiag + WifiDiag,
         G: GattPeripheral,
         A: WifiCoexTask,
     {
-        let mut resources = self.context.resources.lock().await;
+        let mut storage = self.context.storage.lock().await;
         let mut mdns = self.context.mdns.lock().await;
 
-        let resources = &mut *resources;
         let mdns = &mut *mdns;
-        let udp_buffers = &self.context.udp_buffers;
         let mut rand = self.rand;
         let mut seed = [0; core::mem::size_of::<u64>()];
         rand.fill_bytes(&mut seed);
 
-        let (stack, mut runner) = create_enet_stack(driver, u64::from_le_bytes(seed), resources);
+        let (iface, mut runner) = create_enet_stack(
+            &mut driver,
+            &mut self.pool,
+            &mut storage,
+            u64::from_le_bytes(seed),
+        )?;
+        let _iface_guard = scopeguard::guard(iface, remove_iface);
 
         #[cfg(feature = "tcp")]
         let net_stack = EnetStack::new_with_tcp(
-            stack,
-            udp_buffers,
+            iface,
             &self.context.tcp.tcp_buffers,
             &self.context.tcp.matter_tcp_buffers,
             self.tcp_config,
         );
         #[cfg(not(feature = "tcp"))]
-        let net_stack = EnetStack::new(stack, udp_buffers);
-        let netif = EnetNetif::new(stack, InterfaceTypeEnum::WiFi);
+        let net_stack = EnetStack::new(iface);
+        let netif = EnetNetif::new(iface, InterfaceTypeEnum::WiFi);
 
         let mut main = pin!(task.run(&net_stack, &netif, &net_ctl, mdns, &mut gatt));
         let mut run = pin!(async {

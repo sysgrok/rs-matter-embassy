@@ -20,9 +20,10 @@ use esp_backtrace as _;
 use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 use esp_metadata_generated::memory_range;
-use esp_radio::ieee802154::Ieee802154;
 
 use log::info;
+
+use openthread_driver_esp::{EspRadio, Ieee802154};
 
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto, Rng};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
@@ -40,7 +41,6 @@ use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::futures::{select, Coalesce};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
-use rs_matter_embassy::ot::openthread::esp::EspRadio;
 use rs_matter_embassy::ot::openthread::{OpenThread, Radio, RamSettings};
 use rs_matter_embassy::ot::{OtMatterResources, OtMdns, OtNetStack, OtNetif};
 use rs_matter_embassy::rand::reseeding_csprng;

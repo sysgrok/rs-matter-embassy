@@ -158,10 +158,10 @@ cargo run --bin light_thread
 
 ### Nordic nRF54L15
 
-Only the `light_thread_coex` example runs here: `light_thread` and `light_eth` drive
-the `embassy-nrf` IEEE 802.15.4 radio directly, and that one exists on the nRF52
-family only. The chip is picked with a Cargo feature, and the target and the
-`probe-rs` chip name have to be matched to it by hand.
+The `light_thread`, `light_thread_coex` and `trv_battery_thread` examples run here;
+`light_eth` sets up the radio with the nRF52 peripherals, so it runs on the nRF52840
+only. The chip is picked with a Cargo feature, and the target and the `probe-rs` chip
+name have to be matched to it by hand.
 
 Note that `--no-default-features` drops the default BLE host backend along with the
 default chip, so the backend has to be named too - `trouble` here, or `nimble` for

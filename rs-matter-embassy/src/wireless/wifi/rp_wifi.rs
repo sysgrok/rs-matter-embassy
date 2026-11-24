@@ -15,10 +15,10 @@ use embedded_io::ErrorType;
 use cyw43::{Aligned, Control, A4};
 use cyw43_pio::PioSpi;
 
+use embassy_net::Pool;
+
 use crate::matter::utils::futures::select;
 use crate::matter::utils::futures::Either::{First, Second};
-
-use embassy_net_driver_channel::Device;
 
 use embassy_rp::dma::{self, Channel};
 use embassy_rp::gpio::{Level, Output};
@@ -30,11 +30,6 @@ use embassy_rp::Peri;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 
 use crate::ble::BtpGattPeripheral;
-use crate::enet::net::driver::{Driver as _, HardwareAddress as DriverHardwareAddress};
-use crate::enet::{
-    create_link_local_ipv6, multicast_mac_for_link_local_ipv6, MDNS_MULTICAST_MAC_IPV4,
-    MDNS_MULTICAST_MAC_IPV6,
-};
 use crate::matter::crypto::Rng;
 use crate::matter::error::Error;
 use crate::matter::utils::sync::blocking::Mutex;
@@ -304,45 +299,22 @@ impl<'d> RpWifiRadio<'d> {
         }
     }
 
-    async fn init_net_controller<const N: usize>(
-        net_device: &mut Device<'_, N>,
+    async fn init_net_controller(
         net_controller: &mut Control<'_>,
         fmw_clm: Option<&Aligned<A4, [u8]>>,
     ) {
-        net_controller.init(fmw_clm.unwrap_or(&Aligned([]))).await;
-
-        // cyw43 is a bit special in that it needs to have allowlisted all multicast MAC addresses
-        // it should listen on. Therefore, add the mDNS ipv4 and ipv6 multicast MACs to the list,
-        // as well as the ipv6 neightbour solicitation requests' MAC.
-        let DriverHardwareAddress::Ethernet(mac) = net_device.hardware_address() else {
-            unreachable!()
-        };
-        unwrap!(
-            net_controller
-                .add_multicast_address(MDNS_MULTICAST_MAC_IPV4)
-                .await,
-            "Adding multicast addr failed",
-        );
-        unwrap!(
-            net_controller
-                .add_multicast_address(MDNS_MULTICAST_MAC_IPV6)
-                .await,
-            "Adding multicast addr failed",
-        );
-        unwrap!(
-            net_controller
-                .add_multicast_address(multicast_mac_for_link_local_ipv6(&create_link_local_ipv6(
-                    &mac,
-                )))
-                .await,
-            "Adding multicast addr failed",
-        );
+        // No need to allowlist the multicast MAC addresses the stack listens on (mDNS, IPv6
+        // neighbour solicitation) here: `embassy-net` hands them to the `cyw43` driver itself
+        net_controller
+            .init(fmw_clm.unwrap_or(&Aligned([])), cyw43::Config::default())
+            .await;
     }
 }
 
-impl<R> WifiDriver for EmbassyWifi<'_, RpWifiRadio<'_>, R>
+impl<R, P> WifiDriver for EmbassyWifi<'_, RpWifiRadio<'_>, R, P>
 where
     R: Rng + Copy,
+    P: Pool,
 {
     type NetCtl<'a>
         = crate::wifi::rp::Cyw43WifiController<'a>
@@ -377,7 +349,7 @@ where
             dma1,
         );
 
-        let (mut net_device, mut net_controller, runner) = cyw43::new(
+        let (net_device, mut net_controller, runner) = cyw43::new(
             &mut *state.0,
             pwr,
             spi,
@@ -391,7 +363,7 @@ where
         // or else the initialization would hang forever.
         let mut runner = pin!(runner.run());
         let mut run_task = pin!(async {
-            RpWifiRadio::init_net_controller(&mut net_device, &mut net_controller, fmw_clm).await;
+            RpWifiRadio::init_net_controller(&mut net_controller, fmw_clm).await;
 
             self.runner
                 .run(net_device, Cyw43WifiController::new(net_controller), task)
@@ -405,9 +377,10 @@ where
     }
 }
 
-impl<R> WifiCoexDriver for EmbassyWifi<'_, RpWifiRadio<'_>, R>
+impl<R, P> WifiCoexDriver for EmbassyWifi<'_, RpWifiRadio<'_>, R, P>
 where
     R: Rng + Copy,
+    P: Pool,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -437,7 +410,7 @@ where
             dma1,
         );
 
-        let (mut net_device, bt_device, mut net_controller, runner) = cyw43::new_with_bluetooth(
+        let (net_device, bt_device, mut net_controller, runner) = cyw43::new_with_bluetooth(
             &mut *state.0,
             pwr,
             spi,
@@ -454,7 +427,7 @@ where
         let runner = SharedRunner::new(runner_fut.as_mut());
 
         let mut run_task = pin!(async {
-            RpWifiRadio::init_net_controller(&mut net_device, &mut net_controller, fmw_clm).await;
+            RpWifiRadio::init_net_controller(&mut net_controller, fmw_clm).await;
 
             // The CYW43 BLE controller stays up for the whole run; the stack starts and stops
             // advertising on it as commissioning windows come and go.
@@ -487,9 +460,10 @@ where
     }
 }
 
-impl<R> GattDriver for EmbassyWifi<'_, RpWifiRadio<'_>, R>
+impl<R, P> GattDriver for EmbassyWifi<'_, RpWifiRadio<'_>, R, P>
 where
     R: Rng + Copy,
+    P: Pool,
 {
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where

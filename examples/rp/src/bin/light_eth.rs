@@ -20,9 +20,11 @@ use embassy_net_wiznet::chip::W5500;
 use embassy_net_wiznet::{Runner, State};
 
 use embassy_rp::clocks::RoscRng;
-use embassy_rp::gpio::{Input, Level, Output, Pull};
-use embassy_rp::peripherals::{DMA_CH0, DMA_CH1};
-use embassy_rp::spi::{Async as SpiAsync, Config as SpiConfig, Spi};
+use embassy_rp::gpio::{self, Input, Level, Output, Pull};
+use embassy_rp::mode::Async as AsyncMode;
+use embassy_rp::peripherals::{DMA_CH0, DMA_CH1, PIN_21};
+use embassy_rp::spi::{Config as SpiConfig, Spi};
+use embassy_rp::time::Hertz;
 use embassy_rp::{bind_interrupts, dma};
 
 use embassy_time::Delay;
@@ -35,6 +37,9 @@ use tinyrlibc as _;
 
 use embedded_hal_bus::spi::ExclusiveDevice;
 
+use static_cell::ConstStaticCell;
+
+use rs_matter_embassy::enet::net::StaticPool;
 use rs_matter_embassy::eth::{EmbassyEthNetwork, EmbassyEthernet};
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
@@ -54,7 +59,10 @@ use rs_matter_embassy::stack::MatterStack;
 use defmt::{info, unwrap};
 
 use panic_rtt_target as _;
-use rs_matter_embassy::rand::{reseeding_csprng, RngAdaptor};
+use rs_matter_embassy::rand::reseeding_csprng;
+
+/// The packet buffers of the `embassy-net` stack, and of the W5500 driver
+static POOL: ConstStaticCell<StaticPool> = ConstStaticCell::new(StaticPool::new());
 
 macro_rules! mk_static {
     ($t:ty) => {{
@@ -68,6 +76,7 @@ macro_rules! mk_static {
 
 bind_interrupts!(struct Irqs {
     DMA_IRQ_0 => dma::InterruptHandler<DMA_CH0>, dma::InterruptHandler<DMA_CH1>;
+    IO_IRQ_BANK0 => gpio::InterruptHandler<PIN_21>;
 });
 
 /// The amount of memory for allocating all `rs-matter-stack` futures created during
@@ -113,11 +122,13 @@ async fn main(spawner: Spawner) {
     info!("Starting...");
 
     let mut spi_cfg = SpiConfig::default();
-    spi_cfg.frequency = 50_000_000;
+    spi_cfg.frequency = Hertz(50_000_000);
     let (miso, mosi, clk) = (p.PIN_16, p.PIN_19, p.PIN_18);
-    let spi = Spi::new(p.SPI0, clk, mosi, miso, p.DMA_CH0, p.DMA_CH1, Irqs, spi_cfg);
+    let spi = unwrap!(Spi::new(
+        p.SPI0, clk, mosi, miso, p.DMA_CH0, p.DMA_CH1, Irqs, spi_cfg
+    ));
     let cs = Output::new(p.PIN_17, Level::High);
-    let w5500_int = Input::new(p.PIN_21, Pull::Up);
+    let w5500_int = Input::new_async(p.PIN_21, Irqs, Pull::Up);
     let w5500_reset = Output::new(p.PIN_20, Level::High);
 
     let (device, runner) = unwrap!(
@@ -144,10 +155,7 @@ async fn main(spawner: Spawner) {
     ));
 
     // Create the crypto provider, using the ROSC RNG peripheral (which is a TRNG) as the source of randomness for a reseeding CSPRNG.
-    let crypto = default_crypto(
-        reseeding_csprng(RngAdaptor::new(RoscRng), 1000).unwrap(),
-        DAC_PRIVKEY,
-    );
+    let crypto = default_crypto(reseeding_csprng(RoscRng, 1000).unwrap(), DAC_PRIVKEY);
 
     let mut weak_rand = crypto.weak_rand().unwrap();
 
@@ -201,7 +209,7 @@ async fn main(spawner: Spawner) {
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
     let matter = pin!(stack.run_eth(
         // The Matter stack needs the ethernet inteface to run
-        EmbassyEthernet::new(device, crypto.rand().unwrap(), stack,),
+        EmbassyEthernet::new(device, POOL.take(), crypto.rand().unwrap(), stack),
         // The crypto provider
         &crypto,
         // Our `AsyncHandler` + `AsyncMetadata` impl
@@ -221,8 +229,8 @@ async fn ethernet_task(
     runner: Runner<
         'static,
         W5500,
-        ExclusiveDevice<Spi<'static, SpiAsync>, Output<'static>, Delay>,
-        Input<'static>,
+        ExclusiveDevice<Spi<'static, AsyncMode>, Output<'static>, Delay>,
+        Input<'static, AsyncMode>,
         Output<'static>,
     >,
 ) -> ! {

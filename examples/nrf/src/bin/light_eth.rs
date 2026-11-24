@@ -14,12 +14,9 @@ use core::mem::MaybeUninit;
 use core::pin::pin;
 use core::ptr::addr_of_mut;
 
-use embassy_nrf::interrupt;
-use embassy_nrf::interrupt::{InterruptExt, Priority};
-use embassy_nrf::radio::InterruptHandler;
 use embassy_nrf::{bind_interrupts, rng};
 
-use embassy_executor::{InterruptExecutor, Spawner};
+use embassy_executor::Spawner;
 
 use embedded_alloc::LlffHeap;
 
@@ -41,14 +38,19 @@ use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::futures::{select, Coalesce};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices, BasicCommData};
-use rs_matter_embassy::ot::openthread::nrf::NrfRadio;
-use rs_matter_embassy::ot::openthread::{
-    EmbassyTimeTimer, MacRadio, MacRadioResources, OpenThread, PhyRadioRunner, ProxyRadio,
-    ProxyRadioResources, Radio, RamSettings,
-};
+use rs_matter_embassy::ot::openthread::{OpenThread, Radio, RamSettings};
 use rs_matter_embassy::ot::{OtMatterResources, OtMdns, OtNetStack, OtNetif};
 use rs_matter_embassy::stack::eth::PreexistingEthernet;
 use rs_matter_embassy::stack::MatterStack;
+use rs_matter_embassy::wireless::nrf::{
+    EguInterruptHandler, LpTimerInterruptHandler, NrfIeee802154Peripherals, NrfMpslPeripherals,
+    NrfThreadClockInterruptHandler, NrfThreadHighPrioInterruptHandler,
+    NrfThreadLowPrioInterruptHandler,
+};
+
+use nrf_mpsl::MultiprotocolServiceLayer;
+
+use openthread_driver_nrf::NrfRadio;
 
 use panic_rtt_target as _;
 
@@ -66,15 +68,17 @@ macro_rules! mk_static {
 }
 
 bind_interrupts!(struct Irqs {
-    RADIO => InterruptHandler<embassy_nrf::peripherals::RADIO>;
+    // MPSL's low-priority handler and the 802.15.4 notifications share EGU0_SWI0
+    EGU0_SWI0 => NrfThreadLowPrioInterruptHandler, EguInterruptHandler;
+    // MPSL clock handler
+    CLOCK_POWER => NrfThreadClockInterruptHandler;
+    // MPSL high-priority handlers
+    RADIO => NrfThreadHighPrioInterruptHandler;
+    TIMER0 => NrfThreadHighPrioInterruptHandler;
+    RTC0 => NrfThreadHighPrioInterruptHandler;
+    // 802.15.4 LP timer
+    RTC2 => LpTimerInterruptHandler;
 });
-
-#[interrupt]
-unsafe fn EGU1_SWI1() {
-    RADIO_EXECUTOR.on_interrupt()
-}
-
-static RADIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
 /// The amount of memory for allocating all `rs-matter-stack` futures created during
 /// the execution of the `run*` methods.
@@ -151,26 +155,34 @@ async fn main(_s: Spawner) {
         &TEST_DEV_ATT,
     ));
 
-    let (mut radio_proxy, radio_runner) =
-        ProxyRadio::new(mk_static!(ProxyRadioResources, ProxyRadioResources::new()));
-    let radio = NrfRadio::new(embassy_nrf::radio::ieee802154::Radio::new(p.RADIO, Irqs));
+    // The IEEE 802.15.4 radio runs on top of MPSL, clocked off the internal RC oscillator
+    let lfclk_cfg = nrf_mpsl::raw::mpsl_clock_lfclk_cfg_t {
+        source: nrf_mpsl::raw::MPSL_CLOCK_LF_SRC_RC as u8,
+        rc_ctiv: nrf_mpsl::raw::MPSL_RECOMMENDED_RC_CTIV as u8,
+        rc_temp_ctiv: nrf_mpsl::raw::MPSL_RECOMMENDED_RC_TEMP_CTIV as u8,
+        accuracy_ppm: nrf_mpsl::raw::MPSL_DEFAULT_CLOCK_ACCURACY_PPM as u16,
+        skip_wait_lfclk_started: nrf_mpsl::raw::MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED != 0,
+    };
 
-    // High-priority executor: EGU1_SWI1, priority level 6
-    interrupt::EGU1_SWI1.set_priority(Priority::P6);
+    let mpsl = unwrap!(MultiprotocolServiceLayer::new(
+        NrfMpslPeripherals::new(p.RTC0, p.TIMER0, p.TEMP, p.PPI_CH19, p.PPI_CH30, p.PPI_CH31),
+        Irqs,
+        lfclk_cfg,
+    ));
 
-    // The NRF radio needs to run in a high priority executor
-    // because it is lacking hardware MAC-filtering and ACK caps,
-    // hence these are emulated in software, so low latency is crucial
-    RADIO_EXECUTOR
-        .start(interrupt::EGU1_SWI1)
-        .spawn(unwrap!(run_radio(radio_runner, radio)));
+    let mut radio = NrfRadio::new(nrf_802154::Radio::new(
+        p.RADIO,
+        NrfIeee802154Peripherals::new(p.EGU0, p.TIMER2, p.RTC2),
+        Irqs,
+        &mpsl,
+    ));
 
     let ot_resources = mk_static!(OtMatterResources).init_with(OtMatterResources::init());
 
     let mut ot_settings = RamSettings::new(&mut ot_resources.settings_buf);
     let mut ot_rng = crypto.rand().unwrap();
 
-    let radio_caps = unwrap!(radio_proxy.init().await);
+    let radio_caps = unwrap!(radio.init().await);
 
     let ot = unwrap!(OpenThread::new_with_udp_srp(
         ieee_eui64,
@@ -182,8 +194,9 @@ async fn main(_s: Spawner) {
         &mut ot_resources.srp,
     ));
 
+    // MPSL's low-priority work has to be driven for the radio to work at all
     let mut ot_runner = pin!(async {
-        ot.run(radio_proxy).await;
+        select(mpsl.run(), ot.run(radio)).await;
         #[allow(unreachable_code)]
         Ok(())
     });
@@ -287,17 +300,3 @@ const NODE: Node = Node {
         ),
     ],
 };
-
-#[embassy_executor::task]
-async fn run_radio(mut runner: PhyRadioRunner<'static>, radio: NrfRadio<'static>) -> ! {
-    // The proxy runner requires a full-MAC radio; wrapping the bare PHY in the
-    // software MAC here, in the high-priority executor, is what lets the MAC's
-    // ACK deadlines be served with low latency.
-    static MAC_RADIO_RESOURCES: static_cell::StaticCell<MacRadioResources> =
-        static_cell::StaticCell::new();
-    let mac_radio_resources = MAC_RADIO_RESOURCES.init(MacRadioResources::new());
-
-    runner
-        .run(MacRadio::new(radio, EmbassyTimeTimer, mac_radio_resources))
-        .await
-}

@@ -181,23 +181,22 @@ jobs:
             config: defmtlogs-optz-ltofat-nimble
             flags: "--no-default-features --features nrf52840,nimble,case-resumption,log-rtt,csl"
             reports: "nrf52_light_eth:light_eth nrf52_light_thread:light_thread nrf52_light_thread_coex:light_thread_coex nrf52_trv_battery_thread:trv_battery_thread"
-          # Only `light_thread_coex` and `trv_battery_thread` build here: the other
-          # two examples drive the `embassy-nrf` IEEE 802.15.4 radio, which is an
-          # nRF52-only affair.
+          # `light_eth` does not build here: it sets up the radio with the nRF52
+          # peripherals.
           - name: nrf54l
             backend: trouble
             dir: examples/nrf
             triple: thumbv8m.main-none-eabihf
             config: defmtlogs-optz-ltofat
             flags: "--no-default-features --features nrf54l15,trouble,case-resumption,log-rtt,csl --target thumbv8m.main-none-eabihf"
-            reports: "nrf54l_light_thread_coex:light_thread_coex nrf54l_trv_battery_thread:trv_battery_thread"
+            reports: "nrf54l_light_thread:light_thread nrf54l_light_thread_coex:light_thread_coex nrf54l_trv_battery_thread:trv_battery_thread"
           - name: nrf54l
             backend: nimble
             dir: examples/nrf
             triple: thumbv8m.main-none-eabihf
             config: defmtlogs-optz-ltofat-nimble
             flags: "--no-default-features --features nrf54l15,nimble,case-resumption,log-rtt,csl --target thumbv8m.main-none-eabihf"
-            reports: "nrf54l_light_thread_coex:light_thread_coex nrf54l_trv_battery_thread:trv_battery_thread"
+            reports: "nrf54l_light_thread:light_thread nrf54l_light_thread_coex:light_thread_coex nrf54l_trv_battery_thread:trv_battery_thread"
           - name: rp
             backend: trouble
             dir: examples/rp
