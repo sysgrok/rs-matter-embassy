@@ -174,6 +174,17 @@ async fn main(_s: Spawner) {
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
+    // The Seeed XIAO ESP32-C6 routes the radio through an RF switch: GPIO3 low powers it, and
+    // GPIO14 low picks the onboard antenna (high: the U.FL connector). The pins keep their level
+    // after the drivers are dropped.
+    #[cfg(feature = "xiao")]
+    {
+        use esp_hal::gpio::{Level, Output, OutputConfig};
+
+        Output::new(peripherals.GPIO3, Level::Low, OutputConfig::default());
+        Output::new(peripherals.GPIO14, Level::Low, OutputConfig::default());
+    }
+
     // Why did we boot: a cold start, the sleep timer, or the user trigger?
     let cause = wakeup_cause();
     let timer_wake = !cause.is_empty() && !cause.contains(WakeupSource::Gpio);

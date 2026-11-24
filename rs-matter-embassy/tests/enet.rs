@@ -94,6 +94,37 @@ fn sockets_exchange_unicast_and_multicast_packets() {
     assert!(matches!(result, Either3::First(Ok(Ok(())))));
 }
 
+/// The stack is created again over the same storage and packet pool, as on every run of the
+/// network by the Matter stack, and works each time.
+#[test]
+fn stack_is_created_again_over_the_same_storage_and_pool() {
+    let a_to_b = Mutex::new(Frames::default());
+    let b_to_a = Mutex::new(Frames::default());
+
+    let mut a_node = Node::new(A_MAC, &a_to_b, &b_to_a);
+    let mut b_node = Node::new(B_MAC, &b_to_a, &a_to_b);
+
+    for run in 0..10 {
+        let (a_iface, mut a_runner) = a_node.stack(2 * run + 1);
+        let (b_iface, mut b_runner) = b_node.stack(2 * run + 2);
+
+        let a = EnetStack::new(a_iface);
+        let b = EnetStack::new(b_iface);
+
+        let result = block_on(select3(
+            with_timeout(Duration::from_secs(10), exchange(&a, &b)),
+            a_runner.run(),
+            b_runner.run(),
+        ));
+
+        assert!(matches!(result, Either3::First(Ok(Ok(())))), "run {run}");
+
+        for iface in [a_iface, b_iface] {
+            iface.stack().remove_iface(iface.handle());
+        }
+    }
+}
+
 async fn exchange(a: &EnetStack<'_>, b: &EnetStack<'_>) -> Result<(), Error> {
     let mut a_socket = a.bind(any(PORT), Ipv4Addr::UNSPECIFIED, 0).await?;
     let mut b_socket = b.bind(any(PORT), Ipv4Addr::UNSPECIFIED, 0).await?;
