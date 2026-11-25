@@ -267,6 +267,17 @@ impl NimbleBtpGattContext {
         });
     }
 
+    /// The handle of the connection to the peer, if there is one.
+    pub(crate) fn conn_handle(&self) -> Option<u16> {
+        self.state.lock(|state| {
+            state
+                .borrow()
+                .connection
+                .as_ref()
+                .map(|conn| conn.conn_handle)
+        })
+    }
+
     fn out_nack(&self) -> bool {
         self.out_nack.lock(|out_nack| out_nack.get())
     }
@@ -598,15 +609,7 @@ impl Drop for StopOnDrop<'_, '_> {
             info!("Advertising stopped");
         }
 
-        let conn_handle = self.context.state.lock(|state| {
-            state
-                .borrow()
-                .connection
-                .as_ref()
-                .map(|conn| conn.conn_handle)
-        });
-
-        if let Some(conn_handle) = conn_handle {
+        if let Some(conn_handle) = self.context.conn_handle() {
             // SAFETY: a plain NimBLE host call, like the ones `nimble-rs` wraps
             unsafe {
                 ble_gap_terminate(conn_handle, BLE_ERR_REM_USER_CONN_TERM);

@@ -125,6 +125,17 @@ async fn main(_s: Spawner) {
 
     let p = init();
 
+    // The Seeed XIAO nRF54L15 routes the radio through an RF switch: P2.03 high powers it, and
+    // P2.05 low picks the onboard antenna (high: the U.FL connector). `persist` keeps the pins at
+    // their level after the drivers are dropped.
+    #[cfg(all(feature = "xiao", feature = "nrf54l15"))]
+    {
+        use embassy_nrf::gpio::{Level, Output, OutputDrive};
+
+        Output::new(p.P2_03, Level::High, OutputDrive::Standard).persist();
+        Output::new(p.P2_05, Level::Low, OutputDrive::Standard).persist();
+    }
+
     // The nRF54L has no standalone `RNG` peripheral; its entropy comes out of the CRACEN crypto engine instead.
     #[cfg(feature = "nrf52840")]
     let trng = embassy_nrf::rng::Rng::new_blocking(p.RNG);

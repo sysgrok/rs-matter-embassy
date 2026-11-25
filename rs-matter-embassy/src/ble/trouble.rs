@@ -4,6 +4,7 @@
 #![allow(clippy::useless_conversion)] // https://github.com/embassy-rs/trouble/issues/248
 #![allow(clippy::needless_borrows_for_generic_args)] // In latest trouble-host: ^^^^^^^^ help: change this to: `External`
 
+use core::cell::Cell;
 use core::fmt::Debug;
 use core::mem::MaybeUninit;
 use core::ops::Deref;
@@ -19,6 +20,7 @@ use rs_matter::transport::network::BtAddr;
 use rs_matter::utils::futures::{select, Coalesce};
 use rs_matter::utils::init::{init, Init};
 use rs_matter::utils::storage::Vec;
+use rs_matter::utils::sync::blocking::Mutex;
 use rs_matter::utils::sync::{IfMutex, Notification};
 
 use trouble_host::att::{AttClient, AttReq, AttRsp};
@@ -89,6 +91,8 @@ impl TroubleBtpResources {
 /// and static allocation.
 pub struct TroubleBtpGattContext {
     resources: IfMutex<TroubleBtpResources>,
+    /// The handle of the connection to the peer, while there is one
+    conn_handle: Mutex<Cell<Option<u16>>>,
 }
 
 impl TroubleBtpGattContext {
@@ -98,6 +102,7 @@ impl TroubleBtpGattContext {
     pub const fn new() -> Self {
         Self {
             resources: IfMutex::new(TroubleBtpResources::new()),
+            conn_handle: Mutex::new(Cell::new(None)),
         }
     }
 
@@ -105,7 +110,18 @@ impl TroubleBtpGattContext {
     pub fn init() -> impl Init<Self> {
         init!(Self {
             resources <- IfMutex::init(TroubleBtpResources::init()),
+            conn_handle: Mutex::new(Cell::new(None)),
         })
+    }
+
+    /// The handle of the connection to the peer, while there is one.
+    #[allow(dead_code)]
+    pub(crate) fn conn_handle(&self) -> Option<u16> {
+        self.conn_handle.lock(Cell::get)
+    }
+
+    fn set_conn_handle(&self, conn_handle: Option<u16>) {
+        self.conn_handle.lock(|cell| cell.set(conn_handle));
     }
 
     // pub(crate) fn reset(&self) -> Result<(), ()> {
@@ -168,7 +184,12 @@ where
     ) -> Result<(), Error> {
         info!("Starting advertising and GATT service");
 
-        let mut resources = self.context.resources.lock().await;
+        let context = self.context;
+
+        // The host resets the controller first, so no handle from an earlier run is valid
+        context.set_conn_handle(None);
+
+        let mut resources = context.resources.lock().await;
         let resources = &mut *resources;
 
         unwrap!(resources.ind_buf.resize_default(MAX_MTU_SIZE));
@@ -228,7 +249,8 @@ where
             service_adv_data,
             &server,
             &mut peripheral,
-            ind_buf
+            ind_buf,
+            context,
         ));
 
         select(&mut ble_task, &mut peripheral_task)
@@ -253,6 +275,7 @@ where
         server: &Server<'_>,
         peripheral: &mut Peripheral<'_, impl Controller, DefaultPacketPool>,
         ind_buf: &mut [u8],
+        context: &TroubleBtpGattContext,
     ) -> Result<(), Error> {
         loop {
             let conn = Self::advertise(service_name, service_adv_data, peripheral)
@@ -263,6 +286,8 @@ where
                 .with_attribute_server(server.deref())
                 .map_err(to_matter_err)?;
 
+            context.set_conn_handle(Some(conn.raw().handle().raw()));
+
             btp.reset();
 
             let ind_ack = Notification::new();
@@ -271,6 +296,22 @@ where
             let indications = Self::handle_indications(server, &conn, ind_buf, &ind_ack, btp);
 
             select(events, indications).coalesce().await?;
+
+            // A controller with room for one connection only (as the nRF one is set up) refuses
+            // to advertise until this one is gone
+            Self::disconnect(&conn).await;
+
+            context.set_conn_handle(None);
+        }
+    }
+
+    /// Disconnect, unless the peer has already, and wait until the controller has dropped the
+    /// link.
+    async fn disconnect(conn: &GattConnection<'_, '_, DefaultPacketPool>) {
+        if conn.raw().is_connected() {
+            conn.raw().disconnect();
+
+            while !matches!(conn.next().await, GattConnectionEvent::Disconnected { .. }) {}
         }
     }
 

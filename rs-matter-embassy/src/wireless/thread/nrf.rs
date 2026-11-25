@@ -36,7 +36,7 @@ use rs_matter::stack::wireless::{GattDriver, GattTask, ThreadDriver, ThreadTask}
 use rs_matter::stack::wireless::{ThreadCoexDriver, ThreadCoexTask};
 use rs_matter::transport::network::btp::{AdvData, Btp};
 
-use crate::ble::{BtpGattContext, BtpGattPeripheral};
+use crate::ble::{BtpGattContext, BtpGattPeripheral, ControllerRef};
 use crate::ot::OtNetCtl;
 use crate::rand::RngAdaptor;
 
@@ -386,6 +386,9 @@ impl<'d> SdcParts<'d> {
             .map_err(to_matter_err)?
             .support_adv()
             .support_peripheral()
+            // NimBLE asks for the longest data length on every connection, and the controller
+            // asserts on the procedure if it is not supported
+            .support_dle_peripheral()
             .peripheral_count(1)
             .map_err(to_matter_err)?
             .buffer_cfg(L2CAP_MTU as _, L2CAP_MTU as _, L2CAP_TXQ, L2CAP_RXQ)
@@ -402,6 +405,8 @@ impl<'d> SdcParts<'d> {
 /// window is advertised over BLE - and dropping it (`sdc_disable`) stops whatever it was still
 /// doing, advertising included: the BLE host has no chance to stop that itself, as its future is
 /// dropped together with the run's.
+///
+/// Only for when the IEEE 802.15.4 radio is down: see `SdcCoexGattPeripheral`.
 struct SdcGattPeripheral<'a, 'm, 'd, R> {
     mpsl: &'a MultiprotocolServiceLayer<'m>,
     sdc: &'a mut SdcParts<'d>,
@@ -434,6 +439,79 @@ where
         peripheral.run(btp, service_name, service_adv).await
     }
 }
+
+/// A `GattPeripheral` over a SoftDevice Controller which stays up while the IEEE 802.15.4 radio
+/// runs.
+///
+/// The controller must not be dropped while the 802.15.4 driver is active: `sdc_disable` can
+/// switch the RADIO off in the middle of an 802.15.4 operation, and the driver then waits for it
+/// forever. So when the peripheral stops, only advertising and the link to the peer are stopped.
+struct SdcCoexGattPeripheral<'a, 'c, R> {
+    controller: &'a SoftdeviceController<'c>,
+    ble_rand: Option<R>,
+    context: &'a BtpGattContext,
+}
+
+impl<R> GattPeripheral for SdcCoexGattPeripheral<'_, '_, R>
+where
+    R: CryptoRng + Copy,
+{
+    async fn run(
+        &mut self,
+        btp: &Btp,
+        service_name: &str,
+        service_adv: &AdvData,
+    ) -> Result<(), Error> {
+        let _stop = SdcStopOnDrop {
+            context: self.context,
+        };
+
+        let mut peripheral = BtpGattPeripheral::new(
+            ControllerRef::new(self.controller),
+            self.ble_rand,
+            self.context,
+        );
+
+        peripheral.run(btp, service_name, service_adv).await
+    }
+}
+
+/// Stops advertising and drops the link to the peer when `run` returns or its future is dropped,
+/// as the stack does when a commissioning window closes.
+///
+/// The BLE host cannot do that itself, as its commands only reach the controller while its future
+/// runs, but the commands of the SoftDevice Controller are synchronous.
+struct SdcStopOnDrop<'a> {
+    context: &'a BtpGattContext,
+}
+
+impl Drop for SdcStopOnDrop<'_> {
+    fn drop(&mut self) {
+        // Disabling advertising which is already disabled is not an error
+        let adv = nrf_sdc::raw::sdc_hci_cmd_le_set_adv_enable_t { adv_enable: 0 };
+        // SAFETY: a plain SoftDevice Controller command, like the ones `nrf-sdc` wraps
+        let ret = unsafe { nrf_sdc::raw::sdc_hci_cmd_le_set_adv_enable(&adv) };
+        if ret != 0 {
+            warn!("BLE advertising not stopped: HCI error {}", ret);
+        }
+
+        if let Some(conn_handle) = self.context.conn_handle() {
+            let disconnect = nrf_sdc::raw::sdc_hci_cmd_lc_disconnect_t {
+                conn_handle,
+                reason: HCI_REMOTE_USER_TERMINATED_CONNECTION,
+            };
+
+            // Fails when the link is already gone, or going.
+            // SAFETY: as above
+            if unsafe { nrf_sdc::raw::sdc_hci_cmd_lc_disconnect(&disconnect) } == 0 {
+                info!("BLE link dropped");
+            }
+        }
+    }
+}
+
+/// The HCI reason "Remote User Terminated Connection"
+const HCI_REMOTE_USER_TERMINATED_CONNECTION: u8 = 0x13;
 
 /// The IEEE 802.15.4 part of a radio.
 struct IEEE802154Parts<'d> {
@@ -603,13 +681,19 @@ where
             .ieee802154
             .create_radio(&mpsl, csl_accuracy_ppm)?;
 
-        // Unlike MPSL and the 802.15.4 radio, the SoftDevice Controller does not stay up for
-        // the whole run: the stack runs it for each commissioning window advertised over BLE,
-        // so once the device is commissioned, the radio is Thread's alone.
-        let gatt = SdcGattPeripheral {
-            mpsl: &mpsl,
-            sdc: &mut self.radio.sdc,
-            rand: self.runner.rand(),
+        // The SoftDevice Controller stays up for the whole run too, even though the stack only
+        // uses it while a commissioning window is advertised over BLE: see
+        // `SdcCoexGattPeripheral`. It is dropped after the 802.15.4 radio, which `task` owns.
+        let mut sdc_mem = nrf_sdc::Mem::<3084>::new();
+        let mut sdc_rand = RngAdaptor::new(SendHack(self.runner.rand()));
+
+        let controller = self
+            .radio
+            .sdc
+            .create_controller(&mpsl, &mut sdc_mem, &mut sdc_rand)?;
+
+        let gatt = SdcCoexGattPeripheral {
+            controller: &controller,
             ble_rand: self.runner.ble_rand(),
             context: self.runner.ble_context(),
         };
