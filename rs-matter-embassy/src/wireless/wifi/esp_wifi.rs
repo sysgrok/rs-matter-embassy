@@ -11,10 +11,11 @@ use crate::wireless::esp::EspGattPeripheral;
 
 use super::EmbassyWifi;
 
-pub use crate::wifi::esp::WifiConfig;
 pub use esp_radio::wifi::scan::{ScanConfig, ScanTypeConfig};
 pub use esp_radio::wifi::sta::ScanMethod;
 pub use esp_radio::wifi::{Protocol, Protocols};
+
+pub use crate::wifi::esp::WifiConfig;
 
 /// The Wifi and BLE radio of the ESP32 family of chips.
 pub struct EspWifiRadio<'d> {
