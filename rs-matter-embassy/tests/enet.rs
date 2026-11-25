@@ -3,31 +3,36 @@
 #![cfg(feature = "embassy-net")]
 #![allow(clippy::large_unopt_stack_frames)]
 
+#[cfg(feature = "tcp")]
 use core::mem::MaybeUninit;
 use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use core::task::{Context, Waker};
+use core::task::Waker;
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use rs_matter_embassy::enet::net::driver::{
-    Capabilities, Driver, HardwareAddress, LinkState, RxToken, TxToken,
+    Capabilities, Driver, DriverBuf, HardwareAddress, LinkState, NotSupported, RxWanted,
 };
+use rs_matter_embassy::enet::net::iface::Iface;
 #[cfg(feature = "tcp")]
 use rs_matter_embassy::enet::net::tcp::TcpSocket;
-use rs_matter_embassy::enet::net::StackResources;
+use rs_matter_embassy::enet::net::{Runner, StaticPool};
 use rs_matter_embassy::enet::{
-    create_enet_stack, create_link_local_ipv6, EnetMatterUdpBuffers, EnetStack,
+    create_enet_stack, create_link_local_ipv6, EnetPool, EnetStack, EnetStackStorage,
 };
 #[cfg(feature = "tcp")]
 use rs_matter_embassy::enet::{EnetMatterTcpBuffers, EnetMatterTcpTransportBuffers};
-use rs_matter_embassy::matter::error::{Error, ErrorCode};
+use rs_matter_embassy::matter::error::Error;
+#[cfg(feature = "tcp")]
+use rs_matter_embassy::matter::error::ErrorCode;
 use rs_matter_embassy::matter::transport::network::{
     Address, NetworkMulticast, NetworkReceive, NetworkSend,
 };
 #[cfg(feature = "tcp")]
 use rs_matter_embassy::matter::utils::futures::select;
 use rs_matter_embassy::matter::utils::futures::{block_on, select3, Either3};
+#[cfg(feature = "tcp")]
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::utils::timers::{with_timeout, Duration};
 use rs_matter_embassy::stack::net::{NetSocket, NetStack};
@@ -39,26 +44,46 @@ const B_MAC: [u8; 6] = [0x02, 0, 0, 0, 0, 0x02];
 
 const PORT: u16 = 5540;
 
+/// The empty buffers a `Link` keeps to receive frames into
+const LINK_RX_BUFS: usize = 4;
+
+/// The packet pool of one stack in the tests
+type TestPool = StaticPool<1514, 16>;
+
+/// One end of the link in RAM, with the stack running over it
+struct Node<'a> {
+    link: Link<'a>,
+    pool: EnetPool<TestPool>,
+    storage: EnetStackStorage,
+}
+
+impl<'a> Node<'a> {
+    fn new(mac: [u8; 6], tx: &'a Mutex<Frames>, rx: &'a Mutex<Frames>) -> Self {
+        Self {
+            link: Link::new(mac, tx, rx),
+            pool: EnetPool::new(Box::leak(Box::new(TestPool::new()))),
+            storage: EnetStackStorage::new(),
+        }
+    }
+
+    fn stack(&mut self, seed: u64) -> (Iface<'_>, Runner<'_>) {
+        create_enet_stack(&mut self.link, &mut self.pool, &mut self.storage, seed).unwrap()
+    }
+}
+
 #[test]
 fn sockets_exchange_unicast_and_multicast_packets() {
     let a_to_b = Mutex::new(Frames::default());
     let b_to_a = Mutex::new(Frames::default());
 
-    let mut a_resources = StackResources::<4>::new();
-    let mut b_resources = StackResources::<4>::new();
+    let mut a_node = Node::new(A_MAC, &a_to_b, &b_to_a);
+    let mut b_node = Node::new(B_MAC, &b_to_a, &a_to_b);
 
-    let (a_stack, mut a_runner) =
-        create_enet_stack(Link::new(A_MAC, &a_to_b, &b_to_a), 1, &mut a_resources);
-    let (b_stack, mut b_runner) =
-        create_enet_stack(Link::new(B_MAC, &b_to_a, &a_to_b), 2, &mut b_resources);
+    let (a_iface, mut a_runner) = a_node.stack(1);
+    let (b_iface, mut b_runner) = b_node.stack(2);
 
-    // One side built with `new`, the other in place
-    let a_buffers = EnetMatterUdpBuffers::new();
-    let mut b_buffers = MaybeUninit::uninit();
-    let b_buffers = b_buffers.init_with(EnetMatterUdpBuffers::init());
-
-    let a = EnetStack::new(a_stack, &a_buffers);
-    let b = EnetStack::new(b_stack, b_buffers);
+    let a = EnetStack::new(a_iface);
+    let b = EnetStack::new(b_iface);
 
     let result = block_on(select3(
         with_timeout(Duration::from_secs(10), exchange(&a, &b)),
@@ -69,16 +94,44 @@ fn sockets_exchange_unicast_and_multicast_packets() {
     assert!(matches!(result, Either3::First(Ok(Ok(())))));
 }
 
+/// The stack is created again over the same storage and packet pool, as on every run of the
+/// network by the Matter stack, and works each time.
+#[test]
+fn stack_is_created_again_over_the_same_storage_and_pool() {
+    let a_to_b = Mutex::new(Frames::default());
+    let b_to_a = Mutex::new(Frames::default());
+
+    let mut a_node = Node::new(A_MAC, &a_to_b, &b_to_a);
+    let mut b_node = Node::new(B_MAC, &b_to_a, &a_to_b);
+
+    for run in 0..10 {
+        let (a_iface, mut a_runner) = a_node.stack(2 * run + 1);
+        let (b_iface, mut b_runner) = b_node.stack(2 * run + 2);
+
+        let a = EnetStack::new(a_iface);
+        let b = EnetStack::new(b_iface);
+
+        let result = block_on(select3(
+            with_timeout(Duration::from_secs(10), exchange(&a, &b)),
+            a_runner.run(),
+            b_runner.run(),
+        ));
+
+        assert!(matches!(result, Either3::First(Ok(Ok(())))), "run {run}");
+
+        for iface in [a_iface, b_iface] {
+            iface.stack().remove_iface(iface.handle());
+        }
+    }
+}
+
 async fn exchange(a: &EnetStack<'_>, b: &EnetStack<'_>) -> Result<(), Error> {
     let mut a_socket = a.bind(any(PORT), Ipv4Addr::UNSPECIFIED, 0).await?;
     let mut b_socket = b.bind(any(PORT), Ipv4Addr::UNSPECIFIED, 0).await?;
 
-    // The buffers have room for two sockets, and a dropped socket gives its room back
+    // A second socket on the same port is refused, and a dropped socket gives its port back
+    assert!(b.bind(any(PORT), Ipv4Addr::UNSPECIFIED, 0).await.is_err());
     let mdns_socket = b.bind(any(5353), Ipv4Addr::UNSPECIFIED, 0).await?;
-    assert!(matches!(
-        b.bind(any(5354), Ipv4Addr::UNSPECIFIED, 0).await,
-        Err(e) if e.code() == ErrorCode::ResourceExhausted
-    ));
     drop(mdns_socket);
     drop(b.bind(any(5353), Ipv4Addr::UNSPECIFIED, 0).await?);
 
@@ -105,8 +158,8 @@ async fn exchange(a: &EnetStack<'_>, b: &EnetStack<'_>) -> Result<(), Error> {
 
     b_multicast.leave(IpAddr::V6(group)).await?;
 
-    // A new socket in the slot that carried traffic works; more packets than a socket
-    // has metadata entries, so that its rings wrap
+    // A new socket on the port of one that carried traffic works; more packets than a socket
+    // queues, so that the packet buffers are given back to the pool
     drop(b_socket);
     let mut b_socket = b.bind(any(PORT), Ipv4Addr::UNSPECIFIED, 0).await?;
     let (_, mut b_recv, _) = b_socket.split();
@@ -127,15 +180,12 @@ fn tcp_sockets_exchange_framed_messages() {
     let a_to_b = Mutex::new(Frames::default());
     let b_to_a = Mutex::new(Frames::default());
 
-    let mut a_resources = StackResources::<6>::new();
-    let mut b_resources = StackResources::<4>::new();
+    let mut a_node = Node::new(A_MAC, &a_to_b, &b_to_a);
+    let mut b_node = Node::new(B_MAC, &b_to_a, &a_to_b);
 
-    let (a_stack, mut a_runner) =
-        create_enet_stack(Link::new(A_MAC, &a_to_b, &b_to_a), 1, &mut a_resources);
-    let (b_stack, mut b_runner) =
-        create_enet_stack(Link::new(B_MAC, &b_to_a, &a_to_b), 2, &mut b_resources);
+    let (a_iface, mut a_runner) = a_node.stack(1);
+    let (b_iface, mut b_runner) = b_node.stack(2);
 
-    let a_udp_buffers = EnetMatterUdpBuffers::new();
     let mut a_tcp_buffers = MaybeUninit::uninit();
     let a_tcp_buffers = a_tcp_buffers.init_with(EnetMatterTcpBuffers::init());
     let mut a_matter_tcp_buffers = MaybeUninit::<EnetMatterTcpTransportBuffers>::uninit();
@@ -143,16 +193,10 @@ fn tcp_sockets_exchange_framed_messages() {
         a_matter_tcp_buffers.init_with(EnetMatterTcpTransportBuffers::init());
 
     let a_tcp_config = rs_matter_embassy::stack::tcp::TcpConfig::new();
-    let a = EnetStack::new_with_tcp(
-        a_stack,
-        &a_udp_buffers,
-        a_tcp_buffers,
-        a_matter_tcp_buffers,
-        &a_tcp_config,
-    );
+    let a = EnetStack::new_with_tcp(a_iface, a_tcp_buffers, a_matter_tcp_buffers, &a_tcp_config);
 
     let result = block_on(select3(
-        with_timeout(Duration::from_secs(10), exchange_tcp(&a, b_stack)),
+        with_timeout(Duration::from_secs(10), exchange_tcp(&a, b_iface.stack())),
         a_runner.run(),
         b_runner.run(),
     ));
@@ -170,13 +214,12 @@ fn tcp_socket_keep_alive_configures_timeout() {
     let a_to_b = Mutex::new(Frames::default());
     let b_to_a = Mutex::new(Frames::default());
 
-    let mut a_resources = StackResources::<6>::new();
-    let mut b_resources = StackResources::<4>::new();
+    let mut a_node = Node::new(A_MAC, &a_to_b, &b_to_a);
+    let mut b_node = Node::new(B_MAC, &b_to_a, &a_to_b);
 
-    let (a_stack, mut a_runner) =
-        create_enet_stack(Link::new(A_MAC, &a_to_b, &b_to_a), 1, &mut a_resources);
-    let (b_stack, mut b_runner) =
-        create_enet_stack(Link::new(B_MAC, &b_to_a, &a_to_b), 2, &mut b_resources);
+    let (a_iface, mut a_runner) = a_node.stack(1);
+    let (b_iface, mut b_runner) = b_node.stack(2);
+    let (a_stack, b_stack) = (a_iface.stack(), b_iface.stack());
 
     let mut a_tcp_buffers = MaybeUninit::uninit();
     let a_tcp_buffers = a_tcp_buffers.init_with(EnetMatterTcpBuffers::init());
@@ -186,12 +229,12 @@ fn tcp_socket_keep_alive_configures_timeout() {
             a_stack,
             a_tcp_buffers,
             SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 5540),
-        );
+        )?;
 
         let mut rx_buf = [0u8; 256];
         let mut tx_buf = [0u8; 256];
-        let mut b_sock = TcpSocket::new(b_stack, &mut rx_buf, &mut tx_buf);
-        let addr_a = a_stack.config_v6().unwrap().address.address();
+        let mut b_sock = TcpSocket::new(b_stack, &mut rx_buf, &mut tx_buf).unwrap();
+        let addr_a = link_local(&A_MAC);
 
         let (accepted_res, connect_res) = rs_matter_embassy::matter::utils::futures::join(
             listener.accept(),
@@ -236,13 +279,12 @@ fn tcp_socket_abort_resets_unresponsive_peer() {
     let a_to_b = Mutex::new(Frames::default());
     let b_to_a = Mutex::new(Frames::default());
 
-    let mut a_resources = StackResources::<6>::new();
-    let mut b_resources = StackResources::<4>::new();
+    let mut a_node = Node::new(A_MAC, &a_to_b, &b_to_a);
+    let mut b_node = Node::new(B_MAC, &b_to_a, &a_to_b);
 
-    let (a_stack, mut a_runner) =
-        create_enet_stack(Link::new(A_MAC, &a_to_b, &b_to_a), 1, &mut a_resources);
-    let (b_stack, mut b_runner) =
-        create_enet_stack(Link::new(B_MAC, &b_to_a, &a_to_b), 2, &mut b_resources);
+    let (a_iface, mut a_runner) = a_node.stack(1);
+    let (b_iface, mut b_runner) = b_node.stack(2);
+    let (a_stack, b_stack) = (a_iface.stack(), b_iface.stack());
 
     let mut a_tcp_buffers = MaybeUninit::uninit();
     let a_tcp_buffers = a_tcp_buffers.init_with(EnetMatterTcpBuffers::init());
@@ -251,12 +293,13 @@ fn tcp_socket_abort_resets_unresponsive_peer() {
         a_stack,
         a_tcp_buffers,
         SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 5540),
-    );
+    )
+    .unwrap();
 
     let mut rx_buf = [0u8; 256];
     let mut tx_buf = [0u8; 256];
-    let mut b_sock = TcpSocket::new(b_stack, &mut rx_buf, &mut tx_buf);
-    let addr_a = a_stack.config_v6().unwrap().address.address();
+    let mut b_sock = TcpSocket::new(b_stack, &mut rx_buf, &mut tx_buf).unwrap();
+    let addr_a = link_local(&A_MAC);
 
     let connect = rs_matter_embassy::matter::utils::futures::join(
         listener.accept(),
@@ -309,7 +352,7 @@ async fn exchange_tcp(
 
     let mut rx_buf = [0u8; 1024];
     let mut tx_buf = [0u8; 1024];
-    let mut b_sock = TcpSocket::new(b_stack, &mut rx_buf, &mut tx_buf);
+    let mut b_sock = TcpSocket::new(b_stack, &mut rx_buf, &mut tx_buf).unwrap();
 
     let server = async {
         let mut buf = [0u8; 16];
@@ -408,44 +451,21 @@ struct Link<'a> {
     mac: [u8; 6],
     tx: &'a Mutex<Frames>,
     rx: &'a Mutex<Frames>,
+    rx_bufs: VecDeque<DriverBuf>,
 }
 
 impl<'a> Link<'a> {
     const fn new(mac: [u8; 6], tx: &'a Mutex<Frames>, rx: &'a Mutex<Frames>) -> Self {
-        Self { mac, tx, rx }
+        Self {
+            mac,
+            tx,
+            rx,
+            rx_bufs: VecDeque::new(),
+        }
     }
 }
 
 impl Driver for Link<'_> {
-    type RxToken<'a>
-        = Rx
-    where
-        Self: 'a;
-
-    type TxToken<'a>
-        = Tx<'a>
-    where
-        Self: 'a;
-
-    fn receive(&mut self, cx: &mut Context) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
-        let mut rx = self.rx.lock().unwrap();
-
-        if let Some(frame) = rx.frames.pop_front() {
-            Some((Rx(frame), Tx(self.tx)))
-        } else {
-            rx.waker = Some(cx.waker().clone());
-            None
-        }
-    }
-
-    fn transmit(&mut self, _cx: &mut Context) -> Option<Self::TxToken<'_>> {
-        Some(Tx(self.tx))
-    }
-
-    fn link_state(&mut self, _cx: &mut Context) -> LinkState {
-        LinkState::Up
-    }
-
     fn capabilities(&self) -> Capabilities {
         let mut caps = Capabilities::default();
         caps.max_transmission_unit = 1514;
@@ -456,36 +476,54 @@ impl Driver for Link<'_> {
     fn hardware_address(&self) -> HardwareAddress {
         HardwareAddress::Ethernet(self.mac)
     }
-}
 
-struct Rx(Vec<u8>);
-
-impl RxToken for Rx {
-    fn consume<R, F>(mut self, f: F) -> R
-    where
-        F: FnOnce(&mut [u8]) -> R,
-    {
-        f(&mut self.0)
+    fn link_state(&mut self) -> LinkState {
+        LinkState::Up
     }
-}
 
-struct Tx<'a>(&'a Mutex<Frames>);
+    fn register_waker(&mut self, waker: &Waker) -> Result<(), NotSupported> {
+        self.rx.lock().unwrap().waker = Some(waker.clone());
 
-impl TxToken for Tx<'_> {
-    fn consume<R, F>(self, len: usize, f: F) -> R
-    where
-        F: FnOnce(&mut [u8]) -> R,
-    {
-        let mut frame = vec![0; len];
-        let result = f(&mut frame);
+        Ok(())
+    }
 
-        let mut tx = self.0.lock().unwrap();
-        tx.frames.push_back(frame);
+    fn rx_wanted(&mut self) -> RxWanted {
+        RxWanted {
+            count: LINK_RX_BUFS - self.rx_bufs.len(),
+            starved: self.rx_bufs.is_empty(),
+        }
+    }
+
+    fn rx_give(&mut self, buf: DriverBuf) {
+        self.rx_bufs.push_back(buf);
+    }
+
+    fn receive(&mut self) -> Option<DriverBuf> {
+        if self.rx_bufs.is_empty() {
+            return None;
+        }
+
+        let frame = self.rx.lock().unwrap().frames.pop_front()?;
+
+        let mut buf = self.rx_bufs.pop_front()?;
+        buf.storage_mut()[..frame.len()].copy_from_slice(&frame);
+        buf.set_len(frame.len());
+
+        Some(buf)
+    }
+
+    fn can_transmit(&mut self) -> bool {
+        true
+    }
+
+    fn transmit(&mut self, buf: DriverBuf) -> Result<(), DriverBuf> {
+        let mut tx = self.tx.lock().unwrap();
+        tx.frames.push_back(buf.to_vec());
 
         if let Some(waker) = tx.waker.take() {
             waker.wake();
         }
 
-        result
+        Ok(())
     }
 }

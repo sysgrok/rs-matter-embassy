@@ -21,13 +21,6 @@ default = ["rustcrypto", "trouble"]
 
 # Sizing
 
-# Additional `embassy-net` sockets beyond the Matter, DHCP, and DNS sockets.
-# The default is 0 additional sockets. If multiple values are enabled, the largest wins.
-enet-extra-sockets-8 = []
-enet-extra-sockets-4 = []
-enet-extra-sockets-2 = []
-enet-extra-sockets-1 = []
-
 # Number of subscriptions
 max-subscriptions-32 = ["rs-matter/stack-max-subscriptions-32"]
 max-subscriptions-16 = ["rs-matter/stack-max-subscriptions-16"]
@@ -194,10 +187,14 @@ nimble = ["dep:nimble-rs"]
 nimble-central = ["nimble", "nimble-rs/central"]
 
 # General
-embassy-net = ["dep:embassy-net", "openthread?/embassy-net-driver-channel", "esp-radio?/wifi"]
+embassy-net = ["dep:embassy-net", "dep:embassy-net-driver", "esp-radio?/wifi"]
 # Enable operational Matter-over-TCP transport over `embassy-net`.
-tcp = ["embassy-net?/tcp"]
-esp = ["esp-radio", "esp-hal", "openthread?/esp-radio"]
+tcp = ["embassy-net?/tcp-listener"]
+esp = ["esp-radio", "esp-hal"]
+# Thread on the IEEE 802.15.4 radio of the ESP32 chips (`EspThreadRadio`). The chip has to be
+# selected on `openthread-driver-esp` too, e.g. `openthread-driver-esp/esp32c6`, as it does not
+# build for bare-metal targets without one.
+esp-thread = ["esp", "openthread", "dep:openthread-driver-esp"]
 rp = ["cyw43", "cyw43-pio", "embassy-rp", "embassy-net-driver-channel"]
 # Chip selection for the `rp` backend. `embassy-rp` requires exactly one of these
 # to be enabled; pick the one matching your MCU (these are pass-throughs to the
@@ -208,14 +205,14 @@ rp = ["cyw43", "cyw43-pio", "embassy-rp", "embassy-net-driver-channel"]
 rp2040 = ["embassy-rp/rp2040"]
 rp235xa = ["embassy-rp/rp235xa"]
 rp235xb = ["embassy-rp/rp235xb"]
-nrf = ["embassy-nrf", "nrf-sdc", "nrf-mpsl", "nrf-802154", "portable-atomic"]
+nrf = ["embassy-nrf", "nrf-sdc", "nrf-mpsl", "nrf-802154"]
 openthread = ["dep:openthread"]
 # Build OpenThread as a Full Thread Device (router-capable) rather than the
 # default Minimal Thread Device. Enables the route-table diagnostics and the
 # router-eligible (REED) routing-role refinement in the `ThreadDiag` impl.
 openthread-ftd = ["openthread?/ftd"]
-log = ["dep:log", "rs-matter/log", "openthread?/log", "embassy-net?/log", "trouble-host?/log", "nimble-rs?/log", "cyw43?/log", "embassy-nrf?/log", "nrf-mpsl?/log", "nrf-sdc?/log", "nrf-802154?/log"]
-defmt = ["dep:defmt", "rs-matter/defmt", "openthread?/defmt", "embassy-net?/defmt", "trouble-host?/defmt", "nimble-rs?/defmt", "cyw43?/defmt", "cyw43-pio?/defmt", "embassy-nrf?/defmt", "nrf-mpsl?/defmt", "nrf-sdc?/defmt", "nrf-802154?/defmt"]
+log = ["dep:log", "rs-matter/log", "openthread?/log", "openthread-driver-esp?/log", "openthread-driver-nrf?/log", "embassy-net?/log", "trouble-host?/log", "nimble-rs?/log", "cyw43?/log", "embassy-nrf?/log", "nrf-mpsl?/log", "nrf-sdc?/log", "nrf-802154?/log"]
+defmt = ["dep:defmt", "rs-matter/defmt", "openthread?/defmt", "openthread-driver-esp?/defmt", "openthread-driver-nrf?/defmt", "embassy-net?/defmt", "trouble-host?/defmt", "nimble-rs?/defmt", "cyw43?/defmt", "cyw43-pio?/defmt", "embassy-nrf?/defmt", "nrf-mpsl?/defmt", "nrf-sdc?/defmt", "nrf-802154?/defmt"]
 rustcrypto = ["rs-matter/rustcrypto"]
 mbedtls = ["rs-matter/mbedtls", "openthread?/mbedtls-rs-sys"]
 
@@ -234,25 +231,22 @@ case-responder-only = ["rs-matter/case-responder-only"]
 # `embassy-nrf`, `nrf-mpsl`, `nrf-sdc` and `nrf-802154` all need to be told
 # which part they are building for, and they all have to be told the same one.
 #
-# nRF52840 is the only part where the pure-Rust `NrfThreadRustRadioDriver` is
-# available - the nRF54L series has no `embassy-nrf` IEEE 802.15.4 radio driver,
-# so `NrfThreadMpslRadioDriver` (the Nordic C driver) is the only option there.
-nrf52840 = ["_nrf52", "embassy-nrf/nrf52840", "nrf-mpsl/nrf52840", "nrf-sdc/nrf52840", "nrf-802154/nrf52840"]
-nrf54l05-app-s = ["_nrf54l", "embassy-nrf/nrf54l05-app-s", "nrf-mpsl/nrf54l05-app-s", "nrf-sdc/nrf54l05-app-s", "nrf-802154/nrf54l05-app-s"]
-nrf54l10-app-s = ["_nrf54l", "embassy-nrf/nrf54l10-app-s", "nrf-mpsl/nrf54l10-app-s", "nrf-sdc/nrf54l10-app-s", "nrf-802154/nrf54l10-app-s"]
-nrf54l10-app-ns = ["_nrf54l", "embassy-nrf/nrf54l10-app-ns", "nrf-mpsl/nrf54l10-app-ns", "nrf-sdc/nrf54l10-app-ns", "nrf-802154/nrf54l10-app-ns"]
-nrf54l15-app-s = ["_nrf54l", "embassy-nrf/nrf54l15-app-s", "nrf-mpsl/nrf54l15-app-s", "nrf-sdc/nrf54l15-app-s", "nrf-802154/nrf54l15-app-s"]
-nrf54l15-app-ns = ["_nrf54l", "embassy-nrf/nrf54l15-app-ns", "nrf-mpsl/nrf54l15-app-ns", "nrf-sdc/nrf54l15-app-ns", "nrf-802154/nrf54l15-app-ns"]
-nrf54lm20-app-s = ["_nrf54l", "embassy-nrf/nrf54lm20-app-s", "nrf-mpsl/nrf54lm20-app-s", "nrf-sdc/nrf54lm20-app-s", "nrf-802154/nrf54lm20-app-s"]
+nrf52840 = ["_nrf52", "embassy-nrf/nrf52840", "nrf-mpsl/nrf52840", "nrf-sdc/nrf52840", "nrf-802154/nrf52840", "openthread-driver-nrf/nrf52840"]
+nrf54l05-app-s = ["_nrf54l", "embassy-nrf/nrf54l05-app-s", "nrf-mpsl/nrf54l05-app-s", "nrf-sdc/nrf54l05-app-s", "nrf-802154/nrf54l05-app-s", "openthread-driver-nrf/nrf54l05-app-s"]
+nrf54l10-app-s = ["_nrf54l", "embassy-nrf/nrf54l10-app-s", "nrf-mpsl/nrf54l10-app-s", "nrf-sdc/nrf54l10-app-s", "nrf-802154/nrf54l10-app-s", "openthread-driver-nrf/nrf54l10-app-s"]
+nrf54l10-app-ns = ["_nrf54l", "embassy-nrf/nrf54l10-app-ns", "nrf-mpsl/nrf54l10-app-ns", "nrf-sdc/nrf54l10-app-ns", "nrf-802154/nrf54l10-app-ns", "openthread-driver-nrf/nrf54l10-app-ns"]
+nrf54l15-app-s = ["_nrf54l", "embassy-nrf/nrf54l15-app-s", "nrf-mpsl/nrf54l15-app-s", "nrf-sdc/nrf54l15-app-s", "nrf-802154/nrf54l15-app-s", "openthread-driver-nrf/nrf54l15-app-s"]
+nrf54l15-app-ns = ["_nrf54l", "embassy-nrf/nrf54l15-app-ns", "nrf-mpsl/nrf54l15-app-ns", "nrf-sdc/nrf54l15-app-ns", "nrf-802154/nrf54l15-app-ns", "openthread-driver-nrf/nrf54l15-app-ns"]
+nrf54lm20-app-s = ["_nrf54l", "embassy-nrf/nrf54lm20-app-s", "nrf-mpsl/nrf54lm20-app-s", "nrf-sdc/nrf54lm20-app-s", "nrf-802154/nrf54lm20-app-s", "openthread-driver-nrf/nrf54lm20-app-s"]
 
 # Internal: the chip family, which is what the driver code actually branches on.
-# `openthread/embassy-nrf` is an nRF52-only affair, as it wraps the `embassy-nrf`
-# radio driver. `RTC0` belongs to MPSL and `RTC2` to the 802.15.4 driver, which
-# leaves `RTC1` for `embassy-time`.
-_nrf52 = ["nrf", "openthread?/embassy-nrf", "embassy-nrf/time-driver-rtc1"]
+# `RTC0` belongs to MPSL and `RTC2` to the 802.15.4 driver, which leaves `RTC1`
+# for `embassy-time`.
+_nrf52 = ["nrf", "embassy-nrf/time-driver-rtc1"]
 # The whole nRF54L series keeps time on the GRTC rather than on an RTC, so
-# `embassy-time` has to be pointed at that instead.
-_nrf54l = ["nrf", "embassy-nrf/time-driver-grtc"]
+# `embassy-time` has to be pointed at that instead. On CC 0: MPSL takes CC 7 to
+# 11, and the 802.15.4 driver CC 3 to 5.
+_nrf54l = ["nrf", "embassy-nrf/time-driver-grtc-cc0"]
 
 # OpenThread heap-configuration passthroughs (see the `openthread` crate).
 # OpenThread keeps one fixed-size internal heap buffer, shared by its own code
@@ -291,7 +285,9 @@ static_cell = "2"
 embedded-storage-async = "0.4.1"
 sequential-storage = "8"
 
-embassy-net = { version = "0.9", optional = true, features = ["udp", "proto-ipv4", "proto-ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
+embassy-net = { version = "0.9.1", optional = true, features = ["udp", "ipv4", "ipv6", "multicast", "dhcpv4", "medium-ethernet"] }
+# For `EnetLegacyDriver`: drivers which do not implement the `xarxa-driver` trait of `embassy-net` yet
+embassy-net-driver = { version = "0.2", optional = true }
 
 # `default-features = false` to shed `central`: Matter commissioning is
 # BLE-peripheral-only, and the central role drags the scanner/central HCI
@@ -308,6 +304,9 @@ nimble-rs = { version = "0.2", optional = true, default-features = false, featur
 bt-hci = "0.10"
 
 openthread = { version = "0.4", optional = true, default-features = false, features = ["matter"] }
+# The IEEE 802.15.4 radios of the ESP32 and nRF chips, for `openthread`
+openthread-driver-esp = { version = "0.1", optional = true }
+openthread-driver-nrf = { version = "0.1", optional = true }
 
 # TEMPORARY: `nrf-sdc` still consumes `rand_core` 0.9 RNGs; `rs-matter` is on 0.10 (bridged with `rand::RngAdaptor`)
 rand_core = "0.9"
@@ -328,8 +327,7 @@ embassy-net-driver-channel = { version = "0.4", optional = true }
 embassy-nrf = { version = "0.11", optional = true, features = ["time"], default-features = false }
 nrf-sdc = { version = "0.4", default-features = false, optional = true, features = ["peripheral"] }
 nrf-mpsl = { version = "0.4", default-features = false, optional = true, features = ["critical-section-impl"] }
-nrf-802154 = { version = "0.1", default-features = false, optional = true, features = ["openthread"] }
-portable-atomic = { version = "1", optional = true }
+nrf-802154 = { version = "0.1", default-features = false, optional = true }
 
 [dev-dependencies]
 # A time driver for the host tests of `embassy-net`

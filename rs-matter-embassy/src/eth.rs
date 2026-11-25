@@ -2,15 +2,13 @@
 
 use core::cell::Cell;
 use core::marker::PhantomData;
-use core::mem::MaybeUninit;
 use core::pin::pin;
-use core::task::Context;
 
-use embassy_net::driver::{Capabilities, Driver, HardwareAddress, LinkState, RxToken, TxToken};
+use embassy_net::driver::{Capabilities, Driver, DriverBuf, HardwareAddress, LinkState, RxWanted};
+use embassy_net::iface::Iface;
+use embassy_net::Pool;
 
-use crate::enet::{
-    create_enet_stack, EnetMatterStackResources, EnetMatterUdpBuffers, EnetNetif, EnetStack,
-};
+use crate::enet::{create_enet_stack, EnetNetif, EnetPool, EnetStack, EnetStackStorage};
 #[cfg(feature = "tcp")]
 use crate::enet::{EnetMatterTcpBuffers, EnetMatterTcpTransportBuffers};
 use crate::matter::crypto::Rng;
@@ -44,22 +42,34 @@ where
 
 impl<S> EthStackNetwork for EmbassyEthNetwork<S> where S: EthStackNetwork<Context = ()> {}
 
-/// An Ethernet driver of the stack over `embassy-net` and an `embassy-net` driver `D`.
-pub struct EmbassyEthernet<'a, D, R> {
+/// An Ethernet driver of the stack over `embassy-net` and an `embassy-net` driver `D`, with
+/// the packet buffers of the `embassy-net` stack coming from the pool `P`.
+pub struct EmbassyEthernet<'a, D, R, P: 'static> {
     device: D,
+    pool: EnetPool<P>,
     rand: R,
     #[cfg(feature = "tcp")]
     tcp_config: &'a TcpConfig,
     context: &'a EmbassyNetContext,
 }
 
-impl<'a, D, R> EmbassyEthernet<'a, D, R> {
+impl<'a, D, R, P> EmbassyEthernet<'a, D, R, P>
+where
+    P: Pool,
+{
     #[cfg(feature = "tcp")]
     const DEFAULT_TCP_CONFIG: TcpConfig = TcpConfig::new();
 
     /// Create a new instance of the `EmbassyEthernet` type.
+    ///
+    /// # Arguments
+    /// - `device` - The `embassy-net` driver
+    /// - `pool` - The packet pool of the `embassy-net` stack; see [`EnetPool`]
+    /// - `rand` - The random number generator
+    /// - `stack` - The Matter stack
     pub fn new<const B: usize, S, E>(
         device: D,
+        pool: &'static mut P,
         rand: R,
         stack: &'a MatterStack<'a, B, S, E>,
     ) -> Self
@@ -67,13 +77,14 @@ impl<'a, D, R> EmbassyEthernet<'a, D, R> {
         S: StackNetwork<Context = EmbassyNetContext>,
         E: Embedding,
     {
-        Self::wrap(device, rand, stack.context())
+        Self::wrap(device, pool, rand, stack.context())
     }
 
     /// Wrap an `embassy-net` driver with the `EmbassyEthernet` type.
-    pub fn wrap(device: D, rand: R, context: &'a EmbassyNetContext) -> Self {
+    pub fn wrap(device: D, pool: &'static mut P, rand: R, context: &'a EmbassyNetContext) -> Self {
         Self {
             device,
+            pool: EnetPool::new(pool),
             rand,
             #[cfg(feature = "tcp")]
             tcp_config: &Self::DEFAULT_TCP_CONFIG,
@@ -89,45 +100,46 @@ impl<'a, D, R> EmbassyEthernet<'a, D, R> {
     }
 }
 
-impl<D, R> EthernetDriver for EmbassyEthernet<'_, D, R>
+impl<D, R, P> EthernetDriver for EmbassyEthernet<'_, D, R, P>
 where
     D: Driver,
     R: Rng,
+    P: Pool,
 {
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where
         A: EthernetTask,
     {
-        let mut resources = self.context.resources.lock().await;
+        let mut storage = self.context.storage.lock().await;
         let mut mdns = self.context.mdns.lock().await;
 
-        let resources = &mut *resources;
         let mdns = &mut *mdns;
-        let udp_buffers = &self.context.udp_buffers;
 
         let mut seed = [0; core::mem::size_of::<u64>()];
         self.rand.fill_bytes(&mut seed);
 
         let counters = EnetCounters::new();
+        let mut driver = EnetCountingDriver::new(&mut self.device, &counters);
 
-        let (stack, mut runner) = create_enet_stack(
-            EnetCountingDriver::new(&mut self.device, &counters),
+        let (iface, mut runner) = create_enet_stack(
+            &mut driver,
+            &mut self.pool,
+            &mut storage,
             u64::from_le_bytes(seed),
-            resources,
-        );
+        )?;
+        let _iface_guard = scopeguard::guard(iface, remove_iface);
 
         #[cfg(feature = "tcp")]
         let net_stack = EnetStack::new_with_tcp(
-            stack,
-            udp_buffers,
+            iface,
             &self.context.tcp.tcp_buffers,
             &self.context.tcp.matter_tcp_buffers,
             self.tcp_config,
         );
         #[cfg(not(feature = "tcp"))]
-        let net_stack = EnetStack::new(stack, udp_buffers);
-        let netif = EnetNetif::new(stack, InterfaceTypeEnum::Ethernet);
-        let eth_diag = EnetEthDiag::new(stack, &counters);
+        let net_stack = EnetStack::new(iface);
+        let netif = EnetNetif::new(iface, InterfaceTypeEnum::Ethernet);
+        let eth_diag = EnetEthDiag::new(iface, &counters);
 
         let mut main = pin!(task.run(&net_stack, &netif, &eth_diag, mdns));
         let mut run = pin!(async {
@@ -138,6 +150,13 @@ where
 
         select(&mut main, &mut run).coalesce().await
     }
+}
+
+/// Remove the interface of a run from its stack, once the Matter stack is done with it: the
+/// stack is never dropped, so this is what gives back the packet buffers the interface still
+/// holds.
+pub(crate) fn remove_iface(iface: Iface<'_>) {
+    iface.stack().remove_iface(iface.handle());
 }
 
 #[cfg(feature = "tcp")]
@@ -179,9 +198,8 @@ impl EnetTcpContext {
 
 /// A context (storage) for the network layer of the Matter stack.
 pub struct EmbassyNetContext {
-    pub(crate) udp_buffers: EnetMatterUdpBuffers,
     pub(crate) tcp: EnetTcpContext,
-    pub(crate) resources: IfMutex<EnetMatterStackResources>,
+    pub(crate) storage: IfMutex<EnetStackStorage>,
     pub(crate) mdns: IfMutex<BuiltinMdns>,
 }
 
@@ -189,9 +207,8 @@ impl EmbassyNetContext {
     /// Create a new instance of the `EmbassyNetContext` type.
     pub const fn new() -> Self {
         Self {
-            udp_buffers: EnetMatterUdpBuffers::new(),
             tcp: EnetTcpContext::new(),
-            resources: IfMutex::new(EnetMatterStackResources::new()),
+            storage: IfMutex::new(EnetStackStorage::new()),
             mdns: IfMutex::new(BuiltinMdns::new()),
         }
     }
@@ -199,10 +216,9 @@ impl EmbassyNetContext {
     /// Return an in-place initializer for the `EmbassyNetContext` type.
     pub fn init() -> impl Init<Self> {
         init!(Self {
-            udp_buffers <- EnetMatterUdpBuffers::init(),
             tcp <- EnetTcpContext::init(),
-            // Note: below will break if `HostResources` stops being a bunch of `MaybeUninit`s
-            resources <- IfMutex::init(unsafe { MaybeUninit::<EnetMatterStackResources>::uninit().assume_init() }),
+            // `EnetStackStorage` is a `MaybeUninit`, so there is nothing to initialize in place
+            storage <- IfMutex::init(EnetStackStorage::new()),
             mdns <- IfMutex::init(BuiltinMdns::init()),
         })
     }
@@ -226,20 +242,20 @@ impl Embedding for EmbassyNetContext {
 ///
 /// Advertise what it reports with `eth_diag(carrier_detect, packet_counts)` on the root endpoint.
 pub struct EnetEthDiag<'a, 'd> {
-    stack: embassy_net::Stack<'d>,
+    iface: Iface<'d>,
     counters: &'a EnetCounters,
 }
 
 impl<'a, 'd> EnetEthDiag<'a, 'd> {
     /// Create a new instance of the `EnetEthDiag` type.
-    pub const fn new(stack: embassy_net::Stack<'d>, counters: &'a EnetCounters) -> Self {
-        Self { stack, counters }
+    pub const fn new(iface: Iface<'d>, counters: &'a EnetCounters) -> Self {
+        Self { iface, counters }
     }
 }
 
 impl EthDiag for EnetEthDiag<'_, '_> {
     fn carrier_detect(&self) -> Result<Option<bool>, Error> {
-        Ok(Some(self.stack.is_link_up()))
+        Ok(Some(self.iface.is_link_up()))
     }
 
     fn packet_rx_count(&self) -> Result<u64, Error> {
@@ -301,45 +317,6 @@ impl<D> Driver for EnetCountingDriver<'_, D>
 where
     D: Driver,
 {
-    type RxToken<'a>
-        = CountingRxToken<'a, D::RxToken<'a>>
-    where
-        Self: 'a;
-
-    type TxToken<'a>
-        = CountingTxToken<'a, D::TxToken<'a>>
-    where
-        Self: 'a;
-
-    fn receive(&mut self, cx: &mut Context) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
-        let counters = self.counters;
-
-        self.driver.receive(cx).map(|(rx, tx)| {
-            (
-                CountingRxToken {
-                    token: rx,
-                    counters,
-                },
-                CountingTxToken {
-                    token: tx,
-                    counters,
-                },
-            )
-        })
-    }
-
-    fn transmit(&mut self, cx: &mut Context) -> Option<Self::TxToken<'_>> {
-        let counters = self.counters;
-
-        self.driver
-            .transmit(cx)
-            .map(|token| CountingTxToken { token, counters })
-    }
-
-    fn link_state(&mut self, cx: &mut Context) -> LinkState {
-        self.driver.link_state(cx)
-    }
-
     fn capabilities(&self) -> Capabilities {
         self.driver.capabilities()
     }
@@ -347,44 +324,49 @@ where
     fn hardware_address(&self) -> HardwareAddress {
         self.driver.hardware_address()
     }
-}
 
-/// The RX token of `EnetCountingDriver`
-pub struct CountingRxToken<'a, T> {
-    token: T,
-    counters: &'a EnetCounters,
-}
-
-impl<T> RxToken for CountingRxToken<'_, T>
-where
-    T: RxToken,
-{
-    fn consume<R, F>(self, f: F) -> R
-    where
-        F: FnOnce(&mut [u8]) -> R,
-    {
-        EnetCounters::inc(&self.counters.rx);
-
-        self.token.consume(f)
+    fn link_state(&mut self) -> LinkState {
+        self.driver.link_state()
     }
-}
 
-/// The TX token of `EnetCountingDriver`
-pub struct CountingTxToken<'a, T> {
-    token: T,
-    counters: &'a EnetCounters,
-}
+    fn register_waker(
+        &mut self,
+        waker: &core::task::Waker,
+    ) -> Result<(), embassy_net::driver::NotSupported> {
+        self.driver.register_waker(waker)
+    }
 
-impl<T> TxToken for CountingTxToken<'_, T>
-where
-    T: TxToken,
-{
-    fn consume<R, F>(self, len: usize, f: F) -> R
-    where
-        F: FnOnce(&mut [u8]) -> R,
-    {
+    fn rx_wanted(&mut self) -> RxWanted {
+        self.driver.rx_wanted()
+    }
+
+    fn rx_give(&mut self, buf: DriverBuf) {
+        self.driver.rx_give(buf)
+    }
+
+    fn receive(&mut self) -> Option<DriverBuf> {
+        let buf = self.driver.receive();
+
+        if buf.is_some() {
+            EnetCounters::inc(&self.counters.rx);
+        }
+
+        buf
+    }
+
+    fn can_transmit(&mut self) -> bool {
+        self.driver.can_transmit()
+    }
+
+    fn transmit(&mut self, buf: DriverBuf) -> Result<(), DriverBuf> {
+        self.driver.transmit(buf)?;
+
         EnetCounters::inc(&self.counters.tx);
 
-        self.token.consume(len, f)
+        Ok(())
+    }
+
+    fn set_multicast_filter(&mut self, addrs: &[[u8; 6]]) {
+        self.driver.set_multicast_filter(addrs)
     }
 }

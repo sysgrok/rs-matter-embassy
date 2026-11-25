@@ -1,3 +1,6 @@
+use embassy_net::Pool;
+
+use crate::enet::EnetLegacyDriver;
 use crate::matter::crypto::Rng;
 use crate::matter::error::Error;
 use crate::stack::wireless::{
@@ -8,10 +11,11 @@ use crate::wireless::esp::EspGattPeripheral;
 
 use super::EmbassyWifi;
 
-pub use crate::wifi::esp::WifiConfig;
 pub use esp_radio::wifi::scan::{ScanConfig, ScanTypeConfig};
 pub use esp_radio::wifi::sta::ScanMethod;
 pub use esp_radio::wifi::{Protocol, Protocols};
+
+pub use crate::wifi::esp::WifiConfig;
 
 /// The Wifi and BLE radio of the ESP32 family of chips.
 pub struct EspWifiRadio<'d> {
@@ -44,9 +48,10 @@ impl<'d> EspWifiRadio<'d> {
     }
 }
 
-impl<R> WifiDriver for EmbassyWifi<'_, EspWifiRadio<'_>, R>
+impl<R, P> WifiDriver for EmbassyWifi<'_, EspWifiRadio<'_>, R, P>
 where
     R: Rng + Copy,
+    P: Pool,
 {
     type NetCtl<'a>
         = crate::wifi::esp::EspWifiController<'a>
@@ -73,14 +78,19 @@ where
         let wifi = EspWifiController::new(controller).with_wifi_config(self.radio.wifi_config);
 
         self.runner
-            .run(esp_radio::wifi::Interface::station(), wifi, task)
+            .run(
+                EnetLegacyDriver::new(esp_radio::wifi::Interface::station()),
+                wifi,
+                task,
+            )
             .await
     }
 }
 
-impl<R> WifiCoexDriver for EmbassyWifi<'_, EspWifiRadio<'_>, R>
+impl<R, P> WifiCoexDriver for EmbassyWifi<'_, EspWifiRadio<'_>, R, P>
 where
     R: Rng + Copy,
+    P: Pool,
 {
     async fn run<A>(&mut self, task: A) -> Result<(), Error>
     where
@@ -114,14 +124,20 @@ where
         let wifi = EspWifiController::new(controller).with_wifi_config(self.radio.wifi_config);
 
         self.runner
-            .run_coex(esp_radio::wifi::Interface::station(), wifi, gatt, task)
+            .run_coex(
+                EnetLegacyDriver::new(esp_radio::wifi::Interface::station()),
+                wifi,
+                gatt,
+                task,
+            )
             .await
     }
 }
 
-impl<R> GattDriver for EmbassyWifi<'_, EspWifiRadio<'_>, R>
+impl<R, P> GattDriver for EmbassyWifi<'_, EspWifiRadio<'_>, R, P>
 where
     R: Rng + Copy,
+    P: Pool,
 {
     async fn run<A>(&mut self, mut task: A) -> Result<(), Error>
     where

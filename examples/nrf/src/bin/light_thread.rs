@@ -1,8 +1,8 @@
 //! An example utilizing the `MatterStack` struct over `EmbassyThreadNetwork`.
 //!
 //! As the name suggests, this Matter stack assembly uses Thread as the main transport,
-//! and thus BLE for commissioning, in non-concurrent commissioning mode
-//! (the IEEE802154 radio and BLE cannot not run at the same time yet with `embassy-nrf` and `nrf-sdc`).
+//! and thus BLE for commissioning, in non-concurrent commissioning mode: the radio runs either
+//! BLE or Thread, not both at the same time.
 //!
 //! The example implements a fictitious Light device (an On-Off Matter cluster).
 #![no_std]
@@ -13,12 +13,9 @@ use core::mem::MaybeUninit;
 use core::pin::pin;
 use core::ptr::addr_of_mut;
 
-use embassy_nrf::interrupt;
-use embassy_nrf::interrupt::{InterruptExt, Priority};
-use embassy_nrf::peripherals::RNG;
-use embassy_nrf::{bind_interrupts, rng};
+use embassy_nrf::bind_interrupts;
 
-use embassy_executor::{InterruptExecutor, Spawner};
+use embassy_executor::Spawner;
 
 use embedded_alloc::LlffHeap;
 
@@ -42,10 +39,12 @@ use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices, root_endpoint, BasicCommData};
 use rs_matter_embassy::rand::reseeding_csprng;
 use rs_matter_embassy::stack::MatterStack;
+#[cfg(feature = "nrf54l15")]
+use rs_matter_embassy::wireless::nrf::CcmInterruptHandler;
 use rs_matter_embassy::wireless::nrf::{
-    NrfMpslPeripherals, NrfSdcPeripherals, NrfThreadClockInterruptHandler,
-    NrfThreadHighPrioInterruptHandler, NrfThreadLowPrioInterruptHandler, NrfThreadRadioResources,
-    NrfThreadRustRadio, NrfThreadRustRadioRunner,
+    EguInterruptHandler, LpTimerInterruptHandler, NrfIeee802154Peripherals, NrfMpslPeripherals,
+    NrfSdcPeripherals, NrfThreadClockInterruptHandler, NrfThreadHighPrioInterruptHandler,
+    NrfThreadLowPrioInterruptHandler, NrfThreadMpslRadio,
 };
 use rs_matter_embassy::wireless::{EmbassyThread, EmbassyThreadNetwork};
 
@@ -63,21 +62,38 @@ macro_rules! mk_static {
     }};
 }
 
+#[cfg(feature = "nrf52840")]
 bind_interrupts!(struct Irqs {
-    RNG => rng::InterruptHandler<RNG>;
-    EGU0_SWI0 => NrfThreadLowPrioInterruptHandler;
+    // MPSL's low-priority handler and the 802.15.4 notifications share EGU0_SWI0
+    EGU0_SWI0 => NrfThreadLowPrioInterruptHandler, EguInterruptHandler;
+    // MPSL clock handler
     CLOCK_POWER => NrfThreadClockInterruptHandler;
+    // MPSL high-priority handlers
     RADIO => NrfThreadHighPrioInterruptHandler;
     TIMER0 => NrfThreadHighPrioInterruptHandler;
     RTC0 => NrfThreadHighPrioInterruptHandler;
+    // 802.15.4 LP timer
+    RTC2 => LpTimerInterruptHandler;
 });
 
-#[interrupt]
-unsafe fn EGU1_SWI1() {
-    RADIO_EXECUTOR.on_interrupt()
-}
-
-static RADIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
+#[cfg(feature = "nrf54l15")]
+bind_interrupts!(struct Irqs {
+    // MPSL low-priority handler. Unlike on nRF52, nothing is shared with the
+    // 802.15.4 driver here: it has its own EGU instance (EGU10).
+    SWI00 => NrfThreadLowPrioInterruptHandler;
+    // MPSL clock handler
+    CLOCK_POWER => NrfThreadClockInterruptHandler;
+    // MPSL high-priority handlers
+    RADIO_0 => NrfThreadHighPrioInterruptHandler;
+    TIMER10 => NrfThreadHighPrioInterruptHandler;
+    GRTC_3 => NrfThreadHighPrioInterruptHandler;
+    // 802.15.4 notifications
+    EGU10 => EguInterruptHandler;
+    // 802.15.4 LP timer (GRTC interrupt group 0)
+    GRTC_0 => LpTimerInterruptHandler;
+    // 802.15.4 frame encryption offload
+    AAR00_CCM00 => CcmInterruptHandler;
+});
 
 /// The amount of memory for allocating all `rs-matter-stack` futures created during
 /// the execution of the `run*` methods.
@@ -118,16 +134,27 @@ async fn main(_s: Spawner) {
 
     info!("Starting...");
 
-    let mut config = embassy_nrf::config::Config::default();
-    config.hfclk_source = embassy_nrf::config::HfclkSource::ExternalXtal;
+    let p = init();
 
-    let p = embassy_nrf::init(config);
+    // The Seeed XIAO nRF54L15 routes the radio through an RF switch: P2.03 high powers it, and
+    // P2.05 low picks the onboard antenna (high: the U.FL connector). `persist` keeps the pins at
+    // their level after the drivers are dropped.
+    #[cfg(all(feature = "xiao", feature = "nrf54l15"))]
+    {
+        use embassy_nrf::gpio::{Level, Output, OutputDrive};
 
-    // Create the crypto provider, using the NRF RNG peripheral (which is a TRNG) as the source of randomness for a reseeding CSPRNG.
-    let crypto = default_crypto(
-        reseeding_csprng(rng::Rng::new_blocking(p.RNG), 1000).unwrap(),
-        DAC_PRIVKEY,
-    );
+        Output::new(p.P2_03, Level::High, OutputDrive::Standard).persist();
+        Output::new(p.P2_05, Level::Low, OutputDrive::Standard).persist();
+    }
+
+    // The nRF54L has no standalone `RNG` peripheral; its entropy comes out of the CRACEN crypto engine instead.
+    #[cfg(feature = "nrf52840")]
+    let trng = embassy_nrf::rng::Rng::new_blocking(p.RNG);
+    #[cfg(feature = "nrf54l15")]
+    let trng = embassy_nrf::crypto::rng::Rng::new_blocking(p.CRYPTO_RNG);
+
+    // Create the crypto provider, using the NRF hardware TRNG as the source of randomness for a reseeding CSPRNG.
+    let crypto = default_crypto(reseeding_csprng(trng, 1000).unwrap(), DAC_PRIVKEY);
 
     let mut weak_rand = crypto.weak_rand().unwrap();
 
@@ -153,26 +180,71 @@ async fn main(_s: Spawner) {
             &TEST_DEV_ATT,
         ));
 
-    let (thread_radio, thread_radio_runner) = NrfThreadRustRadio::new(
-        mk_static!(NrfThreadRadioResources, NrfThreadRadioResources::new()),
-        p.RADIO,
+    #[cfg(feature = "nrf52840")]
+    let (mpsl_p, sdc_p, ieee802154_p) = (
         NrfMpslPeripherals::new(p.RTC0, p.TIMER0, p.TEMP, p.PPI_CH19, p.PPI_CH30, p.PPI_CH31),
         NrfSdcPeripherals::new(
             p.PPI_CH17, p.PPI_CH18, p.PPI_CH20, p.PPI_CH21, p.PPI_CH22, p.PPI_CH23, p.PPI_CH24,
             p.PPI_CH25, p.PPI_CH26, p.PPI_CH27, p.PPI_CH28, p.PPI_CH29,
         ),
-        Irqs,
+        NrfIeee802154Peripherals::new(p.EGU0, p.TIMER2, p.RTC2),
     );
 
-    // High-priority executor: EGU1_SWI1, priority level 6
-    interrupt::EGU1_SWI1.set_priority(Priority::P6);
+    // The nRF54L set looks nothing like the nRF52 one: the time base is the GRTC
+    // rather than an RTC, and the GRTC lives in a different peripheral domain from
+    // the radio, so carrying timestamps and hardware-timed radio tasks between the
+    // two costs a PPIB channel pair in each direction.
+    #[cfg(feature = "nrf54l15")]
+    let (mpsl_p, sdc_p, ieee802154_p) = (
+        NrfMpslPeripherals::new(
+            p.GRTC_CH7,
+            p.GRTC_CH8,
+            p.GRTC_CH9,
+            p.GRTC_CH10,
+            p.GRTC_CH11,
+            p.TIMER10,
+            p.TIMER20,
+            p.TEMP,
+            p.PPI10_CH0,
+            p.PPI20_CH1,
+            p.PPIB11_CH0,
+            p.PPIB21_CH0,
+        ),
+        NrfSdcPeripherals::new(
+            p.PPI00_CH1,
+            p.PPI00_CH3,
+            p.PPI10_CH1,
+            p.PPI10_CH2,
+            p.PPI10_CH3,
+            p.PPI10_CH4,
+            p.PPI10_CH5,
+            p.PPI10_CH6,
+            p.PPI10_CH7,
+            p.PPI10_CH8,
+            p.PPI10_CH9,
+            p.PPI10_CH10,
+            p.PPI10_CH11,
+            p.PPIB00_CH1,
+            p.PPIB00_CH2,
+            p.PPIB00_CH3,
+            p.PPIB10_CH1,
+            p.PPIB10_CH2,
+            p.PPIB10_CH3,
+        ),
+        NrfIeee802154Peripherals::new(
+            p.GRTC_CH3,
+            p.GRTC_CH4,
+            p.GRTC_CH5,
+            p.PPI20_CH2,
+            p.PPI20_CH3,
+            p.PPIB11_CH1,
+            p.PPIB21_CH1,
+            p.PPIB11_CH2,
+            p.PPIB21_CH2,
+        ),
+    );
 
-    // The NRF radio needs to run in a high priority executor
-    // because it is lacking hardware MAC-filtering and ACK caps,
-    // hence these are emulated in software, so low latency is crucial
-    RADIO_EXECUTOR
-        .start(interrupt::EGU1_SWI1)
-        .spawn(unwrap!(run_radio(thread_radio_runner)));
+    let thread_radio = NrfThreadMpslRadio::new(p.RADIO, mpsl_p, sdc_p, ieee802154_p, Irqs);
 
     // Our "light" on-off cluster.
     // It will toggle the light state every 5 seconds
@@ -269,7 +341,56 @@ const NODE: Node = Node {
     ],
 };
 
-#[embassy_executor::task]
-async fn run_radio(mut runner: NrfThreadRustRadioRunner<'static, 'static>) -> ! {
-    runner.run().await
+/// Initialize `embassy-nrf` with a configuration MPSL and the 802.15.4 driver
+/// can live with.
+fn init() -> embassy_nrf::Peripherals {
+    #[cfg(feature = "nrf54l15")]
+    scrub_grtc();
+
+    #[allow(unused_mut)]
+    let mut config = embassy_nrf::config::Config::default();
+
+    #[cfg(feature = "nrf52840")]
+    {
+        config.hfclk_source = embassy_nrf::config::HfclkSource::ExternalXtal;
+    }
+
+    // On nRF54L, force the 128 MHz PLL: `embassy-nrf` defaults to 64 MHz, but MPSL
+    // asserts on anything else at startup, and 128 MHz is the only frequency the
+    // 802.15.4 driver supports on this series.
+    #[cfg(feature = "nrf54l15")]
+    {
+        config.clock_speed = embassy_nrf::config::ClockSpeed::CK128;
+    }
+
+    embassy_nrf::init(config)
+}
+
+/// Drop any GRTC interrupt state inherited from the firmware that ran before us.
+///
+/// The GRTC is in the always-on domain, so a soft reset - which is what a
+/// debugger's `SYSRESETREQ` and therefore `probe-rs run` issues - leaves its
+/// compare events latched and its per-domain interrupt enables set. The NVIC
+/// *is* reset, so nothing fires until someone re-enables the line; embassy's
+/// GRTC time driver does exactly that at the end of `embassy_nrf::init`.
+///
+/// From there an inherited enable is fatal: embassy's ISR only ever clears its
+/// own channel, so a stale event on any other channel of the same domain
+/// re-fires the instant the handler returns, and `init` never comes back.
+/// Boards that shipped with Zephyr or Arduino hit this on the first flash,
+/// because nrfx hands out GRTC channels from CC[0] upwards.
+///
+/// Cheap insurance, and it has to happen before `embassy_nrf::init`.
+#[cfg(feature = "nrf54l15")]
+fn scrub_grtc() {
+    let r = embassy_nrf::pac::GRTC;
+
+    // Every domain, not just ours: at this point in boot nothing else - not
+    // MPSL, not the time driver - has claimed one yet.
+    for group in 0..4 {
+        r.intenclr(group).write(|w| w.0 = u32::MAX);
+    }
+    for cc in 0..12 {
+        r.events_compare(cc).write_value(0);
+    }
 }

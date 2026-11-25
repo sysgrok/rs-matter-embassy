@@ -37,7 +37,7 @@ pub struct WifiConfig {
     ///
     /// When `None`, active scans use `min: 0ms, max: 120ms` per channel.
     pub scan: Option<ScanConfig>,
-    /// Optional 2.4 GHz 802.11 protocol mask used for station scanning and association.
+    /// Optional 802.11 protocols used for station scanning and association.
     pub protocols: Option<Protocols>,
     /// Optional station association scan method override (independent of `scan`).
     pub scan_method: Option<ScanMethod>,
@@ -64,7 +64,7 @@ impl WifiConfig {
         self
     }
 
-    /// Override the 2.4 GHz 802.11 protocol mask used for station scanning and association.
+    /// Override the 802.11 protocols used for station scanning and association.
     pub const fn with_protocols(mut self, protocols: Protocols) -> Self {
         self.protocols = Some(protocols);
         self

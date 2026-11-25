@@ -67,6 +67,7 @@ use log::info;
 
 use rs_matter_embassy::stack::wireless::BTP_BUMP_SIZE;
 
+use rs_matter_embassy::enet::net::StaticPool;
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
 use rs_matter_embassy::matter::dm::clusters::app::on_off::{self, OnOffHooks};
@@ -85,9 +86,14 @@ use rs_matter_embassy::stack::MatterStack;
 use rs_matter_embassy::wireless::esp::EspWifiRadio;
 use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiNetwork};
 
+use static_cell::ConstStaticCell;
+
 use tinyrlibc as _;
 
 extern crate alloc;
+
+/// The packet buffers of the `embassy-net` stack
+static POOL: ConstStaticCell<StaticPool> = ConstStaticCell::new(StaticPool::new());
 
 macro_rules! mk_static {
     ($t:ty) => {{
@@ -209,6 +215,7 @@ async fn main(_s: Spawner) {
         // The Matter stack needs to instantiate an `embassy-net` `Driver` and `Controller`
         EmbassyWifi::new(
             EspWifiRadio::new(peripherals.WIFI, peripherals.BT),
+            POOL.take(),
             weak_rand,
             true, // Use a random BLE address
             stack,

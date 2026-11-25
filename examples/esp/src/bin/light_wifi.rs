@@ -26,6 +26,9 @@ use esp_metadata_generated::memory_range;
 
 use log::info;
 
+use static_cell::ConstStaticCell;
+
+use rs_matter_embassy::enet::net::StaticPool;
 use rs_matter_embassy::stack::wireless::BTP_BUMP_SIZE;
 
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
@@ -49,6 +52,14 @@ use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiNetwork};
 use tinyrlibc as _;
 
 extern crate alloc;
+
+/// The packet buffers of the `embassy-net` stack
+#[cfg(not(feature = "esp32"))]
+static POOL: ConstStaticCell<StaticPool> = ConstStaticCell::new(StaticPool::new());
+/// The packet buffers of the `embassy-net` stack: 10 rather than 16 on the ESP32, which
+/// otherwise has too little RAM left for the main stack
+#[cfg(feature = "esp32")]
+static POOL: ConstStaticCell<StaticPool<1514, 10>> = ConstStaticCell::new(StaticPool::new());
 
 macro_rules! mk_static {
     ($t:ty) => {{
@@ -98,6 +109,17 @@ async fn main(_s: Spawner) {
     // Necessary `esp-hal` and `esp-wifi` initialization boilerplate
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
+
+    // The Seeed XIAO ESP32-C6 routes the radio through an RF switch: GPIO3 low powers it, and
+    // GPIO14 low picks the onboard antenna (high: the U.FL connector). The pins keep their level
+    // after the drivers are dropped.
+    #[cfg(feature = "xiao")]
+    {
+        use esp_hal::gpio::{Level, Output, OutputConfig};
+
+        Output::new(peripherals.GPIO3, Level::Low, OutputConfig::default());
+        Output::new(peripherals.GPIO14, Level::Low, OutputConfig::default());
+    }
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     // TEMPORARY: the `ieee802154-sleep` esp-hal branch takes no `FROM_CPU_INTR0`
@@ -171,6 +193,7 @@ async fn main(_s: Spawner) {
         // The Matter stack needs to instantiate an `embassy-net` `Driver` and `Controller`
         EmbassyWifi::new(
             EspWifiRadio::new(peripherals.WIFI, peripherals.BT),
+            POOL.take(),
             weak_rand,
             true, // Use a random BLE address
             stack,

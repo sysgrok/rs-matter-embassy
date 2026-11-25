@@ -152,6 +152,17 @@ async fn main(_s: Spawner) {
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
+    // The Seeed XIAO ESP32-C6 routes the radio through an RF switch: GPIO3 low powers it, and
+    // GPIO14 low picks the onboard antenna (high: the U.FL connector). The pins keep their level
+    // after the drivers are dropped.
+    #[cfg(feature = "xiao")]
+    {
+        use esp_hal::gpio::{Level, Output, OutputConfig};
+
+        Output::new(peripherals.GPIO3, Level::Low, OutputConfig::default());
+        Output::new(peripherals.GPIO14, Level::Low, OutputConfig::default());
+    }
+
     // Automatic light sleep: whenever the scheduler runs out of ready tasks (and no wake lock
     // is held), the idle hook light-sleeps the chip until the next timer deadline or wake-up
     // source. See the module docs for why this does not engage with `esp-radio` yet.

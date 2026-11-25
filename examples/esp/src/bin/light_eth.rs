@@ -25,6 +25,10 @@ use esp_radio::wifi::{AuthenticationMethodConfig, Config, WifiController};
 
 use log::info;
 
+use static_cell::ConstStaticCell;
+
+use rs_matter_embassy::enet::net::StaticPool;
+use rs_matter_embassy::enet::EnetLegacyDriver;
 use rs_matter_embassy::eth::{EmbassyEthNetwork, EmbassyEthernet};
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
 use rs_matter_embassy::matter::dm::clusters::app::on_off::test::TestOnOffDeviceLogic;
@@ -48,6 +52,9 @@ use rs_matter_embassy::utils::futures::IntoFaillble;
 use tinyrlibc as _;
 
 extern crate alloc;
+
+/// The packet buffers of the `embassy-net` stack
+static POOL: ConstStaticCell<StaticPool> = ConstStaticCell::new(StaticPool::new());
 
 macro_rules! mk_static {
     ($t:ty) => {{
@@ -100,6 +107,17 @@ async fn main(_s: Spawner) {
     // Necessary `esp-hal` and `esp-wifi` initialization boilerplate
 
     let peripherals = esp_hal::init(esp_hal::Config::default());
+
+    // The Seeed XIAO ESP32-C6 routes the radio through an RF switch: GPIO3 low powers it, and
+    // GPIO14 low picks the onboard antenna (high: the U.FL connector). The pins keep their level
+    // after the drivers are dropped.
+    #[cfg(feature = "xiao")]
+    {
+        use esp_hal::gpio::{Level, Output, OutputConfig};
+
+        Output::new(peripherals.GPIO3, Level::Low, OutputConfig::default());
+        Output::new(peripherals.GPIO14, Level::Low, OutputConfig::default());
+    }
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     // TEMPORARY: the `ieee802154-sleep` esp-hal branch takes no `FROM_CPU_INTR0`
@@ -186,7 +204,12 @@ async fn main(_s: Spawner) {
     // Using `pin!` is completely optional, but reduces the size of the final future
     let mut matter = pin!(stack.run_eth(
         // The Matter stack needs the ethernet inteface to run
-        EmbassyEthernet::new(station, weak_rand, stack,),
+        EmbassyEthernet::new(
+            EnetLegacyDriver::new(station),
+            POOL.take(),
+            weak_rand,
+            stack
+        ),
         // The crypto provider
         &crypto,
         // Our `AsyncHandler` + `AsyncMetadata` impl

@@ -30,26 +30,33 @@ overflow-checks = false
 
 [patch.crates-io]
 rs-matter = { git = "https://github.com/project-chip/rs-matter" }
-#mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
+mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
 openthread = { git = "https://github.com/esp-rs/openthread" }
 openthread-sys = { git = "https://github.com/esp-rs/openthread" }
+openthread-driver = { git = "https://github.com/esp-rs/openthread" }
+openthread-driver-esp = { git = "https://github.com/esp-rs/openthread" }
+openthread-driver-nrf = { git = "https://github.com/esp-rs/openthread" }
 #nimble-rs = { git = "https://github.com/sysgrok/nimble-rs" }
 #nimble-rs-sys = { git = "https://github.com/sysgrok/nimble-rs" }
 #nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
 #nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154" }
 
-cyw43 = { git = "https://github.com/embassy-rs/embassy", rev = "a82b806018ba975fa84e33a199d60cf718628338" }
-cyw43-pio = { git = "https://github.com/embassy-rs/embassy", rev = "a82b806018ba975fa84e33a199d60cf718628338" }
-embassy-rp = { git = "https://github.com/embassy-rs/embassy", rev = "a82b806018ba975fa84e33a199d60cf718628338" }
-embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "a82b806018ba975fa84e33a199d60cf718628338" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "a82b806018ba975fa84e33a199d60cf718628338" }
-embassy-time-driver = { git = "https://github.com/embassy-rs/embassy", rev = "a82b806018ba975fa84e33a199d60cf718628338" }
-embassy-time-queue-utils = { git = "https://github.com/embassy-rs/embassy", rev = "a82b806018ba975fa84e33a199d60cf718628338" }
-embassy-futures = { git = "https://github.com/embassy-rs/embassy", rev = "a82b806018ba975fa84e33a199d60cf718628338" }
-embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "a82b806018ba975fa84e33a199d60cf718628338" }
-embassy-net = { git = "https://github.com/embassy-rs/embassy", rev = "a82b806018ba975fa84e33a199d60cf718628338" }
-embassy-net-driver-channel = { git = "https://github.com/embassy-rs/embassy", rev = "a82b806018ba975fa84e33a199d60cf718628338" }
-embassy-net-wiznet = { git = "https://github.com/embassy-rs/embassy", rev = "a82b806018ba975fa84e33a199d60cf718628338" }
+# embassy-net on `main` runs on `xarxa`. Everything that hands it a driver has to come from
+# `main` as well, and so do the embassy crates they share types with, or that may be linked only
+# once (`embassy-time-driver`, `embassy-time-queue-utils`). Not `embassy-sync`: `main` has breaking
+# changes that `esp-hal` does not build with, and two copies of it work side by side
+embassy-net = { git = "https://github.com/embassy-rs/embassy" }
+embassy-net-driver-channel = { git = "https://github.com/embassy-rs/embassy" }
+embassy-net-wiznet = { git = "https://github.com/embassy-rs/embassy" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy" }
+embassy-time-driver = { git = "https://github.com/embassy-rs/embassy" }
+embassy-time-queue-utils = { git = "https://github.com/embassy-rs/embassy" }
+embassy-executor = { git = "https://github.com/embassy-rs/embassy" }
+embassy-hal-internal = { git = "https://github.com/embassy-rs/embassy" }
+embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy" }
+embassy-rp = { git = "https://github.com/embassy-rs/embassy" }
+cyw43 = { git = "https://github.com/embassy-rs/embassy" }
+cyw43-pio = { git = "https://github.com/embassy-rs/embassy" }
 
 [features]
 default = ["trouble", "rp2040"]

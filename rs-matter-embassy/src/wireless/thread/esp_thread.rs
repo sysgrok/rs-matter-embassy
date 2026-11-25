@@ -1,4 +1,4 @@
-use openthread::esp::EspRadio;
+use openthread_driver_esp::{EspRadio, Ieee802154};
 
 use rs_matter::persist::KvBlobStoreAccess;
 
@@ -36,7 +36,7 @@ impl<'d> EspThreadRadio<'d> {
     }
 
     /// Override the esp-radio 802.15.4 receive-queue depth (frames buffered
-    /// before drops). Defaults to the `openthread` crate's default; raise it
+    /// before drops). Defaults to the `openthread-driver-esp` crate's default; raise it
     /// (e.g. 200) for bursty Matter commissioning / SRP load.
     #[must_use]
     pub fn with_rx_queue_size(mut self, rx_queue_size: usize) -> Self {
@@ -134,7 +134,7 @@ fn create_radio(
     peripheral: esp_hal::peripherals::IEEE802154<'_>,
     rx_queue_size: Option<usize>,
 ) -> EspRadio<'_> {
-    let radio = EspRadio::new(openthread::esp::Ieee802154::new(peripheral));
+    let radio = EspRadio::new(Ieee802154::new(peripheral));
 
     match rx_queue_size {
         Some(rx_queue_size) => radio.with_rx_queue_size(rx_queue_size),

@@ -34,7 +34,7 @@ mod esp_ble;
 #[cfg(feature = "esp")]
 pub mod esp {
     pub use super::esp_ble::*;
-    #[cfg(feature = "openthread")]
+    #[cfg(feature = "esp-thread")]
     pub use super::thread::esp_thread::*;
     #[cfg(feature = "embassy-net")]
     pub use super::wifi::esp_wifi::*;

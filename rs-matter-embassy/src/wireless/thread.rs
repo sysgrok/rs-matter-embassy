@@ -24,7 +24,7 @@ use crate::stack::MatterStack;
 
 use super::{ControllerGattPeripheral, EmbassyGatt};
 
-#[cfg(feature = "esp")]
+#[cfg(feature = "esp-thread")]
 pub mod esp_thread;
 #[cfg(feature = "nrf")]
 pub mod nrf;

@@ -39,6 +39,9 @@ use panic_rtt_target as _;
 
 use defmt::{info, unwrap};
 
+use static_cell::ConstStaticCell;
+
+use rs_matter_embassy::enet::net::StaticPool;
 use rs_matter_embassy::stack::wireless::BTP_BUMP_SIZE;
 
 use rs_matter_embassy::matter::crypto::{default_crypto, Crypto};
@@ -54,10 +57,15 @@ use rs_matter_embassy::matter::dm::{Async, Dataver, EmptyHandler, Endpoint, Node
 use rs_matter_embassy::matter::persist::{DummyKvBlobStore, VENDOR_KEYS_START};
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices};
-use rs_matter_embassy::rand::{reseeding_csprng, RngAdaptor};
+use rs_matter_embassy::rand::reseeding_csprng;
 use rs_matter_embassy::stack::MatterStack;
 use rs_matter_embassy::wireless::rp::RpWifiRadio;
 use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiNetwork};
+
+/// The packet buffers of the `embassy-net` stack, and of the `cyw43` driver, which needs them
+/// sized and aligned in its own way
+static POOL: ConstStaticCell<StaticPool<{ cyw43::RX_BUF_SIZE }, 16, { cyw43::RX_BUF_ALIGN }>> =
+    ConstStaticCell::new(StaticPool::new());
 
 macro_rules! mk_static {
     ($t:ty) => {{
@@ -146,10 +154,7 @@ async fn main(_spawner: Spawner) {
     );
 
     // Create the crypto provider, using the ROSC RNG peripheral (which is a TRNG) as the source of randomness for a reseeding CSPRNG.
-    let crypto = default_crypto(
-        reseeding_csprng(RngAdaptor::new(RoscRng), 1000).unwrap(),
-        DAC_PRIVKEY,
-    );
+    let crypto = default_crypto(reseeding_csprng(RoscRng, 1000).unwrap(), DAC_PRIVKEY);
 
     let mut weak_rand = crypto.weak_rand().unwrap();
 
@@ -208,6 +213,7 @@ async fn main(_spawner: Spawner) {
                 p.PIN_23, p.PIN_25, p.PIN_24, p.PIN_29, p.DMA_CH0, p.DMA_CH1, p.PIO0, Irqs, fw,
                 clm, btfw, nvram,
             ),
+            POOL.take(),
             crypto.rand().unwrap(),
             true, // Use a random BLE address
             stack,
