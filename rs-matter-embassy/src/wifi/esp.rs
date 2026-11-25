@@ -1,7 +1,8 @@
 use core::cell::Cell;
+use core::cmp::Reverse;
 
-use esp_radio::wifi::scan::ScanConfig;
-use esp_radio::wifi::sta::StationConfig;
+use esp_radio::wifi::scan::{ScanConfig, ScanTypeConfig};
+use esp_radio::wifi::sta::{ScanMethod, StationConfig};
 use esp_radio::wifi::{
     AuthenticationMethod, AuthenticationMethodConfig, Config, ConnectionError, Password, Protocols,
     Ssid, WifiController, WifiError,
@@ -21,12 +22,75 @@ use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::sync::IfMutex;
 use crate::matter::utils::timers::{Duration, Timer};
 
+const DEFAULT_SCAN_TYPE: ScanTypeConfig = ScanTypeConfig::Active {
+    min: esp_hal::time::Duration::from_millis(0),
+    max: esp_hal::time::Duration::from_millis(120),
+};
+
+/// Configuration for ESP Wi-Fi scanning, 802.11 protocols, and station association.
+///
+/// `WifiConfig::default()` uses ESP-IDF's 120 ms active scan dwell (`min: 0ms, max: 120ms`)
+/// when `scan` is `None`, and leaves protocol and station association overrides unset.
+#[derive(Clone, Copy, Default)]
+pub struct WifiConfig {
+    /// Optional driver configuration for Matter network discovery scans.
+    ///
+    /// When `None`, active scans use `min: 0ms, max: 120ms` per channel.
+    pub scan: Option<ScanConfig>,
+    /// Optional 2.4 GHz 802.11 protocol mask used for station scanning and association.
+    pub protocols: Option<Protocols>,
+    /// Optional station association scan method override (independent of `scan`).
+    pub scan_method: Option<ScanMethod>,
+    /// Optional station association failure retry count override.
+    ///
+    /// Note: in `esp-radio`, this only takes effect when `scan_method` is `ScanMethod::AllChannels`.
+    pub failure_retry_cnt: Option<u8>,
+}
+
+impl WifiConfig {
+    /// Create a default `WifiConfig` with all overrides unset.
+    pub const fn new() -> Self {
+        Self {
+            scan: None,
+            protocols: None,
+            scan_method: None,
+            failure_retry_cnt: None,
+        }
+    }
+
+    /// Set the driver `ScanConfig` used for Matter network discovery scans.
+    pub const fn with_scan(mut self, scan: ScanConfig) -> Self {
+        self.scan = Some(scan);
+        self
+    }
+
+    /// Override the 2.4 GHz 802.11 protocol mask used for station scanning and association.
+    pub const fn with_protocols(mut self, protocols: Protocols) -> Self {
+        self.protocols = Some(protocols);
+        self
+    }
+
+    /// Set the station association `ScanMethod` override.
+    pub const fn with_scan_method(mut self, scan_method: ScanMethod) -> Self {
+        self.scan_method = Some(scan_method);
+        self
+    }
+
+    /// Set the station association failure retry count override.
+    ///
+    /// Note: in `esp-radio`, this only takes effect when `scan_method` is `ScanMethod::AllChannels`.
+    pub const fn with_failure_retry_cnt(mut self, failure_retry_cnt: u8) -> Self {
+        self.failure_retry_cnt = Some(failure_retry_cnt);
+        self
+    }
+}
+
 /// An adaptor from the `esp-wifi` Wifi controller API to the `rs-matter` Wifi controller API
-pub struct EspWifiController<'a>(
-    IfMutex<WifiController<'a>>,
-    Mutex<Cell<bool>>,
-    Option<Protocols>,
-);
+pub struct EspWifiController<'a> {
+    controller: IfMutex<WifiController<'a>>,
+    connected: Mutex<Cell<bool>>,
+    config: WifiConfig,
+}
 
 impl<'a> EspWifiController<'a> {
     /// Create a new instance of the `Esp32Controller` type.
@@ -34,12 +98,16 @@ impl<'a> EspWifiController<'a> {
     /// # Arguments
     /// - `controller` - The `esp-wifi` Wifi controller instance.
     pub const fn new(controller: WifiController<'a>) -> Self {
-        Self(IfMutex::new(controller), Mutex::new(Cell::new(false)), None)
+        Self {
+            controller: IfMutex::new(controller),
+            connected: Mutex::new(Cell::new(false)),
+            config: WifiConfig::new(),
+        }
     }
 
-    /// Override the 2.4 GHz 802.11 protocol mask used for station scanning and association.
-    pub const fn with_protocols(mut self, protocols: Protocols) -> Self {
-        self.2 = Some(protocols);
+    /// Supply the ESP Wi-Fi configuration for scanning, 802.11 protocols, and station association.
+    pub const fn with_wifi_config(mut self, config: WifiConfig) -> Self {
+        self.config = config;
         self
     }
 
@@ -48,7 +116,7 @@ impl<'a> EspWifiController<'a> {
     /// `None` if not associated, or while a scan or a connect holds the controller.
     fn ap_info(&self) -> Option<ApInfo> {
         // Not returning `AccessPointInfo` as is, because its module differs across `esp-radio` versions
-        let ap_info = self.0.try_lock().ok()?.ap_info().ok()?;
+        let ap_info = self.controller.try_lock().ok()?.ap_info().ok()?;
 
         Some(ApInfo {
             bssid: ap_info.bssid,
@@ -78,23 +146,27 @@ impl NetCtl for EspWifiController<'_> {
     {
         info!("Wifi scan request");
 
-        let mut ctl = self.0.lock().await;
+        let mut ctl = self.controller.lock().await;
 
         // Start Wifi in client mode for scanning
         let mut sta_config = StationConfig::default();
-        if let Some(protocols) = self.2 {
+        if let Some(protocols) = self.config.protocols {
             sta_config = sta_config.with_protocols(protocols);
         }
         ctl.set_config(&Config::Station(sta_config))
             .map_err(to_ctl_err)?;
         info!("Wifi configuration updated for scanning");
 
-        let mut scan_config = ScanConfig::default();
+        let mut scan_config = self
+            .config
+            .scan
+            .unwrap_or_else(|| ScanConfig::default().with_scan_type(DEFAULT_SCAN_TYPE));
         if let Some(network) = network.filter(|n| !n.is_empty()) {
             scan_config = scan_config.with_ssid(Ssid::try_from(network).map_err(to_ctl_err)?);
         }
 
-        let aps = ctl.scan_async(&scan_config).await.map_err(to_err)?;
+        let mut aps = ctl.scan_async(&scan_config).await.map_err(to_err)?;
+        aps.sort_unstable_by_key(|ap| Reverse(ap.signal_strength));
 
         info!("Wifi scan complete, reporting {} results", aps.len());
 
@@ -135,7 +207,7 @@ impl NetCtl for EspWifiController<'_> {
             return Err(NetCtlError::Other(ErrorCode::InvalidAction.into()));
         };
 
-        let mut ctl = self.0.lock().await;
+        let mut ctl = self.controller.lock().await;
 
         info!(
             "Wifi connect request for SSID {}",
@@ -151,7 +223,7 @@ impl NetCtl for EspWifiController<'_> {
             info!("Wifi already connected, disconnecting first");
             let _ = ctl.disconnect_async().await;
 
-            self.1.lock(|connected| {
+            self.connected.lock(|connected| {
                 connected.set(false);
             });
         }
@@ -167,8 +239,14 @@ impl NetCtl for EspWifiController<'_> {
         let mut sta_config = StationConfig::default()
             .with_ssid(Ssid::try_from(*ssid).map_err(to_ctl_err)?)
             .with_authentication(authentication);
-        if let Some(protocols) = self.2 {
+        if let Some(protocols) = self.config.protocols {
             sta_config = sta_config.with_protocols(protocols);
+        }
+        if let Some(scan_method) = self.config.scan_method {
+            sta_config = sta_config.with_scan_method(scan_method);
+        }
+        if let Some(failure_retry_cnt) = self.config.failure_retry_cnt {
+            sta_config = sta_config.with_failure_retry_cnt(failure_retry_cnt);
         }
 
         ctl.set_config(&Config::Station(sta_config))
@@ -177,7 +255,7 @@ impl NetCtl for EspWifiController<'_> {
 
         ctl.connect_async().await.map_err(to_ctl_err2)?;
 
-        self.1.lock(|connected| {
+        self.connected.lock(|connected| {
             info!("Wifi state updated: {} -> {}", connected.get(), true);
             connected.set(true);
         });
@@ -191,10 +269,10 @@ impl NetCtl for EspWifiController<'_> {
 impl NetChangeNotif for EspWifiController<'_> {
     async fn wait_changed(&self) {
         let fetch_connected = || async {
-            let ctl = self.0.lock().await;
+            let ctl = self.controller.lock().await;
 
             let new_connected = ctl.is_connected();
-            self.1.lock(|connected| {
+            self.connected.lock(|connected| {
                 if connected.get() != new_connected {
                     warn!(
                         "Wifi state changed: {} -> {}",
@@ -232,7 +310,7 @@ impl NetChangeNotif for EspWifiController<'_> {
 
 impl WirelessDiag for EspWifiController<'_> {
     fn connected(&self) -> Result<bool, Error> {
-        Ok(self.1.lock(|connected| connected.get()))
+        Ok(self.connected.lock(|connected| connected.get()))
     }
 }
 

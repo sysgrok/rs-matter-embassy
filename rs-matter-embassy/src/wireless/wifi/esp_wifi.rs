@@ -8,13 +8,16 @@ use crate::wireless::esp::EspGattPeripheral;
 
 use super::EmbassyWifi;
 
+pub use crate::wifi::esp::WifiConfig;
+pub use esp_radio::wifi::scan::{ScanConfig, ScanTypeConfig};
+pub use esp_radio::wifi::sta::ScanMethod;
 pub use esp_radio::wifi::{Protocol, Protocols};
 
 /// The Wifi and BLE radio of the ESP32 family of chips.
 pub struct EspWifiRadio<'d> {
     wifi_peripheral: esp_hal::peripherals::WIFI<'d>,
     bt_peripheral: esp_hal::peripherals::BT<'d>,
-    protocols: Option<Protocols>,
+    wifi_config: WifiConfig,
 }
 
 impl<'d> EspWifiRadio<'d> {
@@ -30,13 +33,13 @@ impl<'d> EspWifiRadio<'d> {
         Self {
             wifi_peripheral,
             bt_peripheral,
-            protocols: None,
+            wifi_config: WifiConfig::new(),
         }
     }
 
-    /// Override the 2.4 GHz 802.11 protocol mask used for station scanning and association.
-    pub const fn with_protocols(mut self, protocols: Protocols) -> Self {
-        self.protocols = Some(protocols);
+    /// Supply the ESP Wi-Fi configuration for scanning, 802.11 protocols, and station association.
+    pub const fn with_wifi_config(mut self, wifi_config: WifiConfig) -> Self {
+        self.wifi_config = wifi_config;
         self
     }
 }
@@ -67,10 +70,7 @@ where
         // with `AuthenticationExpired`, so restore the previous level.
         unwrap!(controller.set_max_tx_power(80));
 
-        let mut wifi = EspWifiController::new(controller);
-        if let Some(protocols) = self.radio.protocols {
-            wifi = wifi.with_protocols(protocols);
-        }
+        let wifi = EspWifiController::new(controller).with_wifi_config(self.radio.wifi_config);
 
         self.runner
             .run(esp_radio::wifi::Interface::station(), wifi, task)
@@ -111,10 +111,7 @@ where
             self.runner.ble_context(),
         );
 
-        let mut wifi = EspWifiController::new(controller);
-        if let Some(protocols) = self.radio.protocols {
-            wifi = wifi.with_protocols(protocols);
-        }
+        let wifi = EspWifiController::new(controller).with_wifi_config(self.radio.wifi_config);
 
         self.runner
             .run_coex(esp_radio::wifi::Interface::station(), wifi, gatt, task)
