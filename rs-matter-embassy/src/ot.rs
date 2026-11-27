@@ -39,11 +39,13 @@ use crate::matter::persist::VENDOR_KEYS_START;
 use crate::matter::transport::network::mdns::{DottedName, MdnsRemoteService, MdnsTxt};
 use crate::matter::transport::network::{MatterRemoteService, MAX_RX_PACKET_SIZE};
 use crate::matter::transport::MdnsResponder;
+use crate::matter::utils::cell::RefCell;
 use crate::matter::utils::futures::{select, select3, Coalesce};
 use crate::matter::utils::init::zeroed;
 use crate::matter::utils::init::{init, Init};
 use crate::matter::utils::storage::{String, Vec};
 use crate::matter::utils::sync::blocking::raw::MatterRawMutex;
+use crate::matter::utils::sync::blocking::Mutex;
 use crate::matter::utils::timers::{Duration, Instant, Timer};
 
 /// Re-export the `openthread` crate
@@ -84,6 +86,9 @@ const MDNS_BROWSE_HOST_SZ: usize = 64;
 const MDNS_BROWSE_TXT_SZ: usize = 128;
 const MDNS_BROWSE_BUF_SZ: usize = MDNS_BROWSE_LABEL_SZ + MDNS_BROWSE_HOST_SZ + MDNS_BROWSE_TXT_SZ;
 
+/// The most Thread networks a scan reports: the strongest ones.
+const MAX_THREAD_SCAN_RESULTS: usize = 5;
+
 /// A struct that holds all the resources required by the OpenThread stack,
 /// as used by Matter.
 pub struct OtMatterResources {
@@ -97,6 +102,8 @@ pub struct OtMatterResources {
     pub settings_buf: [u8; OT_SETTINGS_BUF_SZ],
     /// A small buffer for mDNS operations
     pub mdns_buf: [u8; OT_MDNS_BUF_SZ],
+    /// The buffer for the results of a Thread network scan
+    pub scan_results: OtScanResults,
 }
 
 impl OtMatterResources {
@@ -108,6 +115,7 @@ impl OtMatterResources {
             srp: OtSrpResources::new(),
             settings_buf: [0; OT_SETTINGS_BUF_SZ],
             mdns_buf: [0; OT_MDNS_BUF_SZ],
+            scan_results: OtScanResults::new(),
         }
     }
 
@@ -119,6 +127,7 @@ impl OtMatterResources {
             srp: OtSrpResources::new(),
             settings_buf <- zeroed(),
             mdns_buf <- zeroed(),
+            scan_results <- OtScanResults::init(),
         })
     }
 }
@@ -288,13 +297,98 @@ impl NetChangeNotif for OtNetif<'_> {
     }
 }
 
+/// The buffer the Thread network scan of [`OtNetCtl`] collects its results in:
+/// the strongest answer of each network, for the strongest networks.
+///
+/// Kept with the resources rather than in the scan's future, which the
+/// commissioning invoke path would otherwise carry.
+pub struct OtScanResults {
+    results: Mutex<RefCell<Vec<ThreadScanResult, MAX_THREAD_SCAN_RESULTS>>>,
+}
+
+impl OtScanResults {
+    /// Create a new `OtScanResults` instance
+    pub const fn new() -> Self {
+        Self {
+            results: Mutex::new(RefCell::new(Vec::new())),
+        }
+    }
+
+    /// Return an in-place initializer for `OtScanResults`
+    pub fn init() -> impl Init<Self> {
+        init!(Self {
+            results <- Mutex::init(RefCell::init(Vec::init())),
+        })
+    }
+}
+
+impl Default for OtScanResults {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A Thread network found by a scan, kept until the scan is complete.
+#[derive(Clone)]
+struct ThreadScanResult {
+    pan_id: u16,
+    ext_pan_id: u64,
+    network_name: String<16>,
+    channel: u8,
+    version: u8,
+    ext_addr: [u8; 8],
+    rssi: i8,
+    lqi: u8,
+}
+
+impl ThreadScanResult {
+    /// Add `result` to `results` unless a stronger answer of its network is
+    /// in, or `results` is full of stronger networks.
+    fn keep_strongest<const N: usize>(results: &mut Vec<Self, N>, result: Self) {
+        if let Some(known) = results
+            .iter_mut()
+            .find(|known| known.pan_id == result.pan_id && known.ext_pan_id == result.ext_pan_id)
+        {
+            if result.rssi > known.rssi {
+                *known = result;
+            }
+        } else if let Err(result) = results.push(result) {
+            if let Some(weakest) = results.iter_mut().min_by_key(|known| known.rssi) {
+                if result.rssi > weakest.rssi {
+                    *weakest = result;
+                }
+            }
+        }
+    }
+}
+
+impl From<&openthread::ScanResult<'_>> for ThreadScanResult {
+    fn from(result: &openthread::ScanResult<'_>) -> Self {
+        let mut network_name = String::new();
+        // A Thread network name has at most 16 bytes
+        let _ = network_name.push_str(result.network_name);
+
+        Self {
+            pan_id: result.pan_id,
+            ext_pan_id: result.extended_pan_id,
+            network_name,
+            channel: result.channel,
+            version: result.version,
+            ext_addr: result.ext_address.to_be_bytes(),
+            rssi: result.rssi,
+            lqi: result.lqi,
+        }
+    }
+}
+
 /// A `NetCtl`, `NetChangeNotif`, `WirelessDiag` and `ThreadDiag` traits implementation for `openthread`
-pub struct OtNetCtl<'a>(OpenThread<'a>);
+pub struct OtNetCtl<'a>(OpenThread<'a>, &'a OtScanResults);
 
 impl<'a> OtNetCtl<'a> {
-    /// Create a new instance of the `OtNetCtl` type.
-    pub fn new(ot: OpenThread<'a>) -> Self {
-        Self(ot)
+    /// Create a new instance of the `OtNetCtl` type, collecting the results
+    /// of its network scans in `scan_results`.
+    pub fn new(ot: OpenThread<'a>, scan_results: &'a OtScanResults) -> Self {
+        Self(ot, scan_results)
     }
 }
 
@@ -307,14 +401,17 @@ impl NetCtl for OtNetCtl<'_> {
     where
         F: FnMut(&NetworkScanInfo) -> Result<(), Error>,
     {
-        const SCAN_DURATION_MILLIS: u16 = 500;
-
         info!("Thread scan request");
 
-        //let _ = self.0.enable_thread(true);
+        // An MLE Discovery scan, as a beacon scan finds no network names. Every
+        // router of a network answers it, so only the strongest answer of each
+        // network is kept, and only the strongest networks when they do not fit
+        let results = &self.1.results;
+
+        results.lock(|results| results.borrow_mut().clear());
 
         self.0
-            .scan(Channels::all(), SCAN_DURATION_MILLIS, |scan_result| {
+            .discover(Channels::all(), |scan_result| {
                 let Some(scan_result) = scan_result else {
                     debug!("Thread scan reported as complete");
                     return;
@@ -324,27 +421,46 @@ impl NetCtl for OtNetCtl<'_> {
                     .map(|id| id == scan_result.extended_pan_id.to_be_bytes())
                     .unwrap_or(true)
                 {
-                    let info = NetworkScanInfo::Thread {
-                        pan_id: scan_result.pan_id,
-                        ext_pan_id: scan_result.extended_pan_id,
-                        network_name: scan_result.network_name,
-                        channel: scan_result.channel as _,
-                        version: scan_result.version,
-                        ext_addr: &scan_result.ext_address.to_be_bytes(),
-                        rssi: scan_result.rssi,
-                        lqi: scan_result.lqi,
-                    };
-
-                    info!(
-                        "Found Thread network: {:?}",
-                        Bytes(&scan_result.extended_pan_id.to_be_bytes())
-                    );
-
-                    let _ = f(&info);
+                    results.lock(|results| {
+                        ThreadScanResult::keep_strongest(
+                            &mut results.borrow_mut(),
+                            scan_result.into(),
+                        )
+                    });
                 }
             })
             .await
             .map_err(to_net_matter_err)?;
+
+        // Strongest first
+        let count = results.lock(|results| {
+            let mut results = results.borrow_mut();
+            results.sort_unstable_by_key(|result| core::cmp::Reverse(result.rssi));
+            results.len()
+        });
+
+        // Each result is copied out, so that `f` runs without the lock held
+        for index in 0..count {
+            let Some(result) = results.lock(|results| results.borrow().get(index).cloned()) else {
+                break;
+            };
+
+            info!(
+                "Found Thread network: {:?}",
+                Bytes(&result.ext_pan_id.to_be_bytes())
+            );
+
+            f(&NetworkScanInfo::Thread {
+                pan_id: result.pan_id,
+                ext_pan_id: result.ext_pan_id,
+                network_name: result.network_name.as_str(),
+                channel: result.channel as _,
+                version: result.version,
+                ext_addr: &result.ext_addr,
+                rssi: result.rssi,
+                lqi: result.lqi,
+            })?;
+        }
 
         info!("Thread scan complete");
 
