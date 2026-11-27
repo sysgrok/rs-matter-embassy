@@ -306,7 +306,7 @@ where
         )
         .map_err(to_matter_err)?;
 
-        let net_ctl = OtNetCtl::new(ot.clone());
+        let net_ctl = OtNetCtl::new(ot.clone(), &resources.scan_results);
         let net_stack = OtNetStack::new(ot.clone());
         let netif = OtNetif::new(ot.clone());
         let mut mdns = OtMdns::new(ot.clone(), &mut resources.mdns_buf);
@@ -371,7 +371,7 @@ where
         )
         .map_err(to_matter_err)?;
 
-        let net_ctl = OtNetCtl::new(ot.clone());
+        let net_ctl = OtNetCtl::new(ot.clone(), &resources.scan_results);
         let net_stack = OtNetStack::new(ot.clone());
         let netif = OtNetif::new(ot.clone());
         let mut mdns = OtMdns::new(ot.clone(), &mut resources.mdns_buf);
