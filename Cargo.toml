@@ -7,17 +7,8 @@ members = [
 exclude = ["examples"]
 
 [patch.crates-io]
-rs-matter = { git = "https://github.com/project-chip/rs-matter" }
-mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
-openthread = { git = "https://github.com/esp-rs/openthread" }
-openthread-sys = { git = "https://github.com/esp-rs/openthread" }
-openthread-driver = { git = "https://github.com/esp-rs/openthread" }
-openthread-driver-esp = { git = "https://github.com/esp-rs/openthread" }
-openthread-driver-nrf = { git = "https://github.com/esp-rs/openthread" }
 #nimble-rs = { git = "https://github.com/sysgrok/nimble-rs" }
 #nimble-rs-sys = { git = "https://github.com/sysgrok/nimble-rs" }
-nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
-nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154" }
 
 esp-hal = { git = "https://github.com/esp-rs/esp-hal" }
 esp-radio = { git = "https://github.com/esp-rs/esp-hal" }

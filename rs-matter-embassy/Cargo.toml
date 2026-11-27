@@ -277,7 +277,7 @@ enumset = { version = "1", default-features = false }
 embassy-sync = "0.8"
 embedded-io = "0.7"
 scopeguard = { version = "1", default-features = false }
-rs-matter = { version = "0.4", default-features = false }
+rs-matter = { version = "0.5", default-features = false }
 rand_core010 = { package = "rand_core", version = "0.10" }
 rand_chacha = { version = "0.10", default-features = false }
 static_cell = "2"
@@ -303,7 +303,7 @@ nimble-rs = { version = "0.2", optional = true, default-features = false, featur
 
 bt-hci = "0.10"
 
-openthread = { version = "0.4", optional = true, default-features = false, features = ["matter"] }
+openthread = { version = "0.5", optional = true, default-features = false, features = ["matter"] }
 # The IEEE 802.15.4 radios of the ESP32 and nRF chips, for `openthread`
 openthread-driver-esp = { version = "0.1", optional = true }
 openthread-driver-nrf = { version = "0.1", optional = true }
@@ -327,7 +327,7 @@ embassy-net-driver-channel = { version = "0.4", optional = true }
 embassy-nrf = { version = "0.11", optional = true, features = ["time"], default-features = false }
 nrf-sdc = { version = "0.4", default-features = false, optional = true, features = ["peripheral"] }
 nrf-mpsl = { version = "0.4", default-features = false, optional = true, features = ["critical-section-impl"] }
-nrf-802154 = { version = "0.1", default-features = false, optional = true }
+nrf-802154 = { version = "0.2", default-features = false, optional = true }
 
 [dev-dependencies]
 # A time driver for the host tests of `embassy-net`

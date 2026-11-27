@@ -38,17 +38,8 @@ incremental = false
 overflow-checks = false
 
 [patch.crates-io]
-rs-matter = { git = "https://github.com/project-chip/rs-matter" }
-mbedtls-rs-sys = { git = "https://github.com/esp-rs/mbedtls-rs" }
-openthread = { git = "https://github.com/esp-rs/openthread" }
-openthread-sys = { git = "https://github.com/esp-rs/openthread" }
-openthread-driver = { git = "https://github.com/esp-rs/openthread" }
-openthread-driver-esp = { git = "https://github.com/esp-rs/openthread" }
-openthread-driver-nrf = { git = "https://github.com/esp-rs/openthread" }
 #nimble-rs = { git = "https://github.com/sysgrok/nimble-rs" }
 #nimble-rs-sys = { git = "https://github.com/sysgrok/nimble-rs" }
-nrf-802154 = { git = "https://github.com/sysgrok/nrf-802154" }
-nrf-802154-sys = { git = "https://github.com/sysgrok/nrf-802154" }
 
 # embassy-net on `main` runs on `xarxa`. Everything that hands it a driver has to come from
 # `main` as well, and so do the embassy crates they share types with, or that may be linked only
@@ -105,11 +96,11 @@ defmt = "1"
 embedded-alloc = "0.7"
 rs-matter-embassy = { path = "../../rs-matter-embassy", version = "0.1", default-features = false, features = ["openthread", "defmt", "mbedtls", "openthread-heap-int-8192"] }
 # Only for its `csl-receiver` feature (see `csl`).
-openthread = { version = "0.4", default-features = false }
+openthread = { version = "0.5", default-features = false }
 # `light_eth` sets up MPSL and the IEEE 802.15.4 radio itself. The chip is selected by
 # `rs-matter-embassy`.
 nrf-mpsl = { version = "0.4", default-features = false }
-nrf-802154 = { version = "0.1", default-features = false }
+nrf-802154 = { version = "0.2", default-features = false }
 openthread-driver-nrf = { version = "0.1" }
 tinyrlibc = { version = "0.5", default-features = false, features = ["alloc", "strstr", "strcmp", "strncmp", "isupper", "memchr", "utoa", "strtoul"] }
 

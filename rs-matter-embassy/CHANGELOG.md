@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [?.??.?] - ????-??-??
+* Breaking: on `rs-matter` 0.5, `openthread` 0.5 and `nrf-802154` 0.2
 * Fix: the Thread network scan finds the network names, as it uses an MLE Discovery scan (`OpenThread::discover`) rather than a beacon scan; it keeps the strongest answer of each network and reports the strongest networks first
   * Breaking: `OtNetCtl::new` takes the buffer for the scan results, `OtMatterResources::scan_results` (new: `OtScanResults`)
 * Breaking: on `embassy-net` from GIT, which runs on `xarxa` instead of `smoltcp`
